@@ -7,10 +7,9 @@ name: flawfinder
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
   pull_request:
-    # The branches below must be a subset of the branches above
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
   schedule:
     - cron: '26 9 * * 6'
 
@@ -18,6 +17,7 @@ jobs:
   flawfinder:
     name: Flawfinder
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       actions: read
       contents: read
