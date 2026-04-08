@@ -161,6 +161,7 @@ jobs:
       - name: Generate Sonar Generic Coverage XML
         run: |
           gcovr --sonarqube coverage.xml \
+                --sonarqube-metric line \
                 --gcov-executable gcov-13 \
                 --root . \
                 --object-directory build \
