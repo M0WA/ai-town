@@ -125,11 +125,13 @@ threshold check and by `Population::updateMusicIntensity()` for music intensity 
 `isFirstRevenueTicked() const` — read by `Population::doGameOverTick()` to gate forced-loan
 checks before first revenue tick fires.
 
-Internal tick methods (called only from `CitySimulation::doBudgetTick()`):
+Tick methods called directly from `CitySimulation::doBudgetTick()`:
 `computeEconomySnapshot(const Zoning&, const Traffic&, const Population&, bool inGracePeriod)`,
 `doEconomyTick(Zoning&, const Population&, bool inGracePeriod,
                IAudioSystem*, IClock&,
-               std::queue<SimulationNotification>&)`,
+               std::queue<SimulationNotification>&)`.
+
+Tick methods called internally from `Economy::doEconomyTick()`:
 `checkAndIssueForcedLoan(bool inGracePeriod, IClock&, IAudioSystem*,
                          std::queue<SimulationNotification>&)`,
 `processLoanRepayments()`.
@@ -162,6 +164,13 @@ Private helpers (stay private to `Economy`):
       `Economy::doEconomyTick()` called from `CitySimulation::doBudgetTick()`;
   (b) `sfx_loan_issued` (approximately line 312) from `CitySimulation::tick()` to
       `Economy::checkAndIssueForcedLoan()` called from `Economy::doEconomyTick()`.
+- [ ] Update `architecture/game-design/economy-model.md` — in the "Phase 10 Audio
+  Callbacks for Economy Events" section, change the call-site references on
+  approximately lines 84–86, 99, 103, 119, and 123 that say `CitySimulation::tick()`
+  or "CitySimulation internal methods" to reference `Economy::doEconomyTick()` (for
+  `sfx_budget_warn`, called directly from `CitySimulation::doBudgetTick()`) and
+  `Economy::checkAndIssueForcedLoan()` (for `sfx_loan_issued`, called internally
+  from `Economy::doEconomyTick()`, not directly from `doBudgetTick()`).
 
 ---
 
@@ -316,11 +325,15 @@ as `Zoning::placeZone(…)`, `Zoning::placeRoad(…)` etc., with
   `src/simulation/CitySimulation.h`" to "defined in `src/simulation/Zoning.h`"
   to reflect the struct migration in this phase.
 - [ ] Update `architecture/game-design/service-coverage.md` — change the code-snippet
-  comments that say the service-degradation and power/water-out audio calls happen
-  "inside `CitySimulation::tick()`" (approximately lines 183–296) to reference
-  `Zoning::doServiceDegradationTick()` called from `CitySimulation::doBudgetTick()`
-  instead, matching the approach used for the `dynamic-soundscape.md` and
-  `audio-system.md` spec updates in Deliverable 6.
+  comments in approximately lines 183–281 (covering `sfx_service_degrade`,
+  `sfx_power_out`, and `sfx_water_out`) that say the audio calls happen
+  "inside `CitySimulation::tick()`" to reference `Zoning::doServiceDegradationTick()`
+  called from `CitySimulation::doBudgetTick()` instead.
+- [ ] Update `architecture/game-design/service-coverage.md` — change the code-snippet
+  comments in approximately lines 282–296 (covering `sfx_fire_alert` and
+  `sfx_police_alert`) that say the audio calls happen "inside `CitySimulation::tick()`"
+  to reference `Zoning::doDesirabilityTick()` called from `CitySimulation::doBudgetTick()`
+  instead, consistent with the wav-sfx-production-brief.md update in this deliverable.
 - [ ] Update `architecture/audio-architecture/production-briefs/wav-sfx-production-brief.md`
   — change the trigger fields for:
   (a) `sfx_fire_alert` (approximately line 158) from `CitySimulation::tick()` to
@@ -393,6 +406,11 @@ Private helpers:
 - [ ] Update `architecture/game-design/zoning-system.md` — change the references on
   approximately lines 314, 316, and 329 that refer to `CitySimulation::doDensityUnlockTick()`
   to `Population::doDensityUnlockTick()` to reflect the method migration in this phase.
+- [ ] Update `architecture/game-design/game-over-flow.md` — change the auto-slow
+  implementation references on approximately lines 10–11 and 13 that say
+  `CitySimulation::setSpeed(SpeedMultiplier::x1)` and `CitySimulation::tick()` to
+  `Population::doGameOverTick()` calling `SimTiming::setSpeed(SpeedMultiplier::x1)`,
+  both called from `CitySimulation::doBudgetTick()`.
 
 ---
 
@@ -690,7 +708,11 @@ IS required in source files.
   `AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` test contract
   description to state that `Population::updateMusicIntensity()` (called from
   `CitySimulation::doBudgetTick()`) dispatches `IAudioSystem::setMusicIntensity()`,
-  replacing the description that says the call lives in `CitySimulation::update()`.
+  replacing the description that says the call lives in `CitySimulation::update()`;
+  (e) change the `IRenderer::getListenerPosition()` comment on approximately lines 668
+  and 802 from "Used by `CitySimulation::tick()` to perform the 80 m pre-acquisition
+  distance cull" to "Used by `Traffic::doTrafficSignalTick()` (called from
+  `CitySimulation::tick()`) to perform the 80 m pre-acquisition distance cull".
 - [ ] Update `architecture/game-design/economy-model.md` — change the references on
   approximately lines 134 and 150 that describe `CitySimulation::update()` as the
   call site for `audioSystem->setMusicIntensity()` to reference
