@@ -97,7 +97,7 @@ public:
   5. `UIScaler_GetViewportRect_ReturnsCorrectOffsets`: construct with (1920, 1080, 1280, 720, 0, 90); `getViewportRect()` returns {x:0, y:90, w:1280, h:720}.
 - **`NotificationManager` testability**: **CRITICAL — Constructor parameter types are fixed.** The correct constructor signature (Phase 10 and later) is: `NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock, IAudioSystem* audio)`. The `ICitySimulation*` parameter type (NOT `ISimulationPauser*`) is mandatory: `NotificationManager` calls `m_sim->setPaused(true)` on CRITICAL toast auto-pause; `setPaused()` is inherited from `ISimulationPauser`. `UIManager` already holds `m_sim` as `ICitySimulation*`, so no downcast is needed. `NotificationManager` does NOT call `getConsecutiveDeficitMonths()`; `UIManager::update()` is the exclusive polling bridge for deficit-month-based toast dispatch. If a Phase 1/2 stub mistakenly used `ISimulationPauser*`, Phase 3 MUST correct it to `ICitySimulation*`. The `IAudioSystem*` parameter (fourth, added in Phase 10) allows `postCritical()` and `postNormal()` to fire `UI_TOAST` SFX when a toast becomes visible. Before Phase 10, pass `nullptr`; every audio call site is guarded by `if (m_audio)`. **Phase 10 test update**: all existing test fixtures that construct `NotificationManager` directly must be updated to pass a fourth `IAudioSystem*` argument — either `nullptr` (tests not exercising toast audio) or `NiceMock<MockAudioSystem>` (tests verifying SFX behaviour). `MockAudioSystem` is in `tests/simulation/MockAudioSystem.h`.
 
-  **Interface inheritance contract** (required for type safety): `ICitySimulation` extends `ISimulationPauser` (defined in `src/interfaces/ICitySimulation.h` line 339: `class ICitySimulation : public ISimulationPauser {`). This allows `NotificationManager` to accept `ICitySimulation*` and safely call inherited `setPaused(bool)` without an explicit cast. Tests that construct `NotificationManager` with a mock must use `NiceMock<MockCitySimulation>` (which implements both `ICitySimulation` and `ISimulationPauser` via inheritance), NOT `MockSimulationPauser` alone (which only implements `ISimulationPauser` and cannot be passed as `ICitySimulation*`).
+  **Interface inheritance contract** (required for type safety): `ICitySimulation` extends `ISimulationPauser`, `IEconomyQuery`, `IZoningActions`, and `ISimulationState` (defined in `src/interfaces/ICitySimulation.h`). This allows `NotificationManager` to accept `ICitySimulation*` and safely call inherited `setPaused(bool)` without an explicit cast. Tests that construct `NotificationManager` with a mock must use `NiceMock<MockCitySimulation>` (which implements both `ICitySimulation` and `ISimulationPauser` via inheritance), NOT `MockSimulationPauser` alone (which only implements `ISimulationPauser` and cannot be passed as `ICitySimulation*`).
 
   **Source locations**: `ISimulationPauser.h` lives in `src/interfaces/` (NOT `src/simulation/` — placing it in `src/simulation/` creates a latent circular dependency when `src/ui/` headers include it, violating the `src/ui/` → `src/simulation/` prohibition). `src/interfaces/` is a dependency-free common header directory that both `src/simulation/` and `src/ui/` may safely include. `MockCitySimulation` lives in `tests/ui/MockCitySimulation.h` (used by UI tests that need to verify pause/resume calls and simulation queries without pulling in the concrete `CitySimulation`).
 
@@ -114,9 +114,9 @@ public:
 
   Eight required test cases:
 
-  - `UIManagerDeficit_Month1_ToastDispatched_NoStinger` *(Phase 8 deliverable)*: set up `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(1))`; place both EXPECT_CALLs **before** calling `ui_.update(dt)` — EXPECT_CALL must precede the action under test: (a) **positive assertion** `EXPECT_CALL(backend_, addStaticText(HasSubstr("2 months"), _, _, _, _)).Times(AtLeast(1))` — prevents test passing trivially if dispatch chain is never entered; (b) **negative assertion** `EXPECT_CALL(audio_, triggerStinger(_)).Times(0)` — stinger must NOT fire on month-1 (condition `== 2 AND m_lastDeficitMonths < 2` not met — currentMonths is 1, not 2); then call `ui_.update(dt)`. **ON_CALL stubs are required**: `pollPendingNotification()` is no longer the dispatch trigger for deficit toasts — toast dispatch was changed to direct polling of `getConsecutiveDeficitMonths()`; the `BudgetDeficitWarn` notification no longer drives the deficit-toast branch in `UIManager::update()`. The `pollPendingNotification()` stub returns `std::monostate{}` to prevent surprise notification processing on unrelated notification types. The critical path is entered via `getConsecutiveDeficitMonths()` returning 1; without the `getConsecutiveDeficitMonths()` stub, NiceMock returns 0 and both assertions pass trivially for the wrong reason — a silent false-pass.
+  - `UIManagerDeficit_Month1_ToastDispatched_NoStinger` *(Phase 8 deliverable)*: set up `ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false))` and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(1))`; place both EXPECT_CALLs **before** calling `ui_.update(dt)` — EXPECT_CALL must precede the action under test: (a) **positive assertion** `EXPECT_CALL(backend_, addStaticText(HasSubstr("2 months"), _, _, _, _)).Times(AtLeast(1))` — prevents test passing trivially if dispatch chain is never entered; (b) **negative assertion** `EXPECT_CALL(audio_, triggerStinger(_)).Times(0)` — stinger must NOT fire on month-1 (condition `== 2 AND m_lastDeficitMonths < 2` not met — currentMonths is 1, not 2); then call `ui_.update(dt)`. **ON_CALL stubs are required**: `pollPendingNotification()` is no longer the dispatch trigger for deficit toasts — toast dispatch was changed to direct polling of `getConsecutiveDeficitMonths()`; the `BudgetDeficitWarn` notification no longer drives the deficit-toast branch in `UIManager::update()`. The `pollPendingNotification()` stub returns `false` (no pending notification) to prevent surprise notification processing on unrelated notification types. The critical path is entered via `getConsecutiveDeficitMonths()` returning 1; without the `getConsecutiveDeficitMonths()` stub, NiceMock returns 0 and both assertions pass trivially for the wrong reason — a silent false-pass.
 
-  - `UIManagerDeficit_Month2_ToastDispatched_StingerFires` *(Phase 8 deliverable)*: set up `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(2))`; place `EXPECT_CALL(audio_, triggerStinger(StingerType::CRISIS)).Times(1)` **before** calling `ui_.update(dt)` — EXPECT_CALL must precede the action under test (GMock anti-pattern: setting expectations after the call will cause them to be verified before the call fires, potentially failing or passing for wrong reasons); then call `ui_.update(dt)`. **Production branch condition is `== 2` AND `m_lastDeficitMonths < 2`**: implementers must use `currentMonths == 2 AND m_lastDeficitMonths < 2` in the UIManager branch predicate — using `>= 2` would cause re-fires at month 3+ violating the 'at most once per deficit streak' rule in dynamic-soundscape.md. **ON_CALL stubs are required**: `pollPendingNotification()` is no longer the dispatch trigger for deficit toasts — toast dispatch was changed to direct polling of `getConsecutiveDeficitMonths()`; the stub returns `std::monostate{}` to prevent surprise notification processing on unrelated notification types. The critical path is entered via `getConsecutiveDeficitMonths()` returning 2; without the `getConsecutiveDeficitMonths()` stub, NiceMock returns 0, the `== 2` condition is never true, and the `Times(1)` expectation fails at teardown — another silent false-pass pattern that stubs prevent.
+  - `UIManagerDeficit_Month2_ToastDispatched_StingerFires` *(Phase 8 deliverable)*: set up `ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false))` and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(2))`; place `EXPECT_CALL(audio_, triggerStinger(StingerType::CRISIS)).Times(1)` **before** calling `ui_.update(dt)` — EXPECT_CALL must precede the action under test (GMock anti-pattern: setting expectations after the call will cause them to be verified before the call fires, potentially failing or passing for wrong reasons); then call `ui_.update(dt)`. **Production branch condition is `== 2` AND `m_lastDeficitMonths < 2`**: implementers must use `currentMonths == 2 AND m_lastDeficitMonths < 2` in the UIManager branch predicate — using `>= 2` would cause re-fires at month 3+ violating the 'at most once per deficit streak' rule in dynamic-soundscape.md. **ON_CALL stubs are required**: `pollPendingNotification()` is no longer the dispatch trigger for deficit toasts — toast dispatch was changed to direct polling of `getConsecutiveDeficitMonths()`; the stub returns `false` (no pending notification) to prevent surprise notification processing on unrelated notification types. The critical path is entered via `getConsecutiveDeficitMonths()` returning 2; without the `getConsecutiveDeficitMonths()` stub, NiceMock returns 0, the `== 2` condition is never true, and the `Times(1)` expectation fails at teardown — another silent false-pass pattern that stubs prevent.
 
   - `UIManagerDeficit_RapidFireCooldown_SecondStingerDropped` *(Phase 8 deliverable)*: uses a 3-update sequence to isolate the cooldown as the sole suppressor. Place `EXPECT_CALL(audio_, triggerStinger(StingerType::CRISIS)).Times(1)` **before** all updates so GMock can verify the total call count across all three update cycles. Stub `getConsecutiveDeficitMonths()` using a **stateful lambda** — **`ON_CALL` does NOT support `.InSequence()` and will not compile; `InSequence` is an `EXPECT_CALL`-only modifier and MUST NOT be used with `ON_CALL`**. The correct pattern:
 
@@ -132,15 +132,15 @@ public:
 
     The vector size must cover all `getConsecutiveDeficitMonths()` calls per tick × number of ticks; the illustrative `{2, 2, 0, 0, 2, 2}` covers 2 calls/tick × 3 ticks — adjust to match the actual call count in the `update()` implementation. The test flow: (1) first `ui_.update(dt)` — lambda returns 2 → edge-detect fires (2==2 AND m_lastDeficitMonths==0<2); stinger triggers; m_lastDeficitMonths set to 2; (2) advance `ManualClock` by `1.0` second; (3) second `ui_.update(dt)` — lambda returns 0 → m_lastDeficitMonths resets to 0; no stinger (count ≠ 2); (4) advance `ManualClock` by `2.0` more seconds (total 3 seconds elapsed since first stinger, less than the 5-second cooldown); (5) third `ui_.update(dt)` — lambda returns 2 → edge-detect passes (2==2 AND m_lastDeficitMonths==0<2) BUT cooldown 3 s < 5 s → stinger is suppressed by the cooldown; verify `Times(1)` at teardown — the cooldown is the sole suppressor in the third update. This test requires `ManualClock` advancement and verifies that the `IAudioSystem::triggerStinger()` 5-second minimum-between-same-type-triggers rule (per `architecture/audio-architecture/dynamic-soundscape.md`) is enforced at the `UIManager::update()` call site, not just inside `AudioSystem`. **Why the third stinger is dropped**: suppressed by the stinger cooldown (the edge-detect passes on the 0→2 re-entry, but the 5s cooldown is not yet expired).
 
-  - `UIManagerDeficit_PerStreakSingleFire_NoReFireAfterCooldown_SameStreak` *(Phase 8 deliverable)*: stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(2))`; place `EXPECT_CALL(audio_, triggerStinger(StingerType::CRISIS)).Times(1)` before the first update call; call `ui_.update(dt)` (stinger fires); advance `ManualClock` by 6.0 seconds (greater than the 5-second cooldown); call `ui_.update(dt)` a second time; verify the stinger does NOT fire again despite the cooldown having expired — distinguishes per-streak single-fire behavior from cooldown-only suppression. **ON_CALL stub note**: `pollPendingNotification()` is no longer the dispatch trigger for deficit toasts (dispatch was changed to direct polling of `getConsecutiveDeficitMonths()`); the stub returns `std::monostate{}` to prevent surprise notification processing on unrelated notification types.
+  - `UIManagerDeficit_PerStreakSingleFire_NoReFireAfterCooldown_SameStreak` *(Phase 8 deliverable)*: stub `ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false))` and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(2))`; place `EXPECT_CALL(audio_, triggerStinger(StingerType::CRISIS)).Times(1)` before the first update call; call `ui_.update(dt)` (stinger fires); advance `ManualClock` by 6.0 seconds (greater than the 5-second cooldown); call `ui_.update(dt)` a second time; verify the stinger does NOT fire again despite the cooldown having expired — distinguishes per-streak single-fire behavior from cooldown-only suppression. **ON_CALL stub note**: `pollPendingNotification()` is no longer the dispatch trigger for deficit toasts (dispatch was changed to direct polling of `getConsecutiveDeficitMonths()`); the stub returns `false` (no pending notification) to prevent surprise notification processing on unrelated notification types.
 
-  - `UIManagerDeficit_CounterZero_NoToastNoStinger` *(Phase 8 deliverable)*: stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` (no notification) and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0))`; place `EXPECT_CALL(backend_, addStaticText(_,_,_,_,_)).Times(0)` and `EXPECT_CALL(audio_, triggerStinger(_)).Times(0)` BEFORE `ui_.update(dt)`; call `ui_.update(dt)`; verify the test passes — baseline quiescent state with no events and zero streak produces no toast and no stinger.
+  - `UIManagerDeficit_CounterZero_NoToastNoStinger` *(Phase 8 deliverable)*: stub `ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false))` (no notification) and `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0))`; place `EXPECT_CALL(backend_, addStaticText(_,_,_,_,_)).Times(0)` and `EXPECT_CALL(audio_, triggerStinger(_)).Times(0)` BEFORE `ui_.update(dt)`; call `ui_.update(dt)`; verify the test passes — baseline quiescent state with no events and zero streak produces no toast and no stinger.
 
-  - `UIManagerDeficit_StreakBreak_RecoveryToastDispatched` *(Phase 8 deliverable)*: set `m_lastDeficitMonths` to 1 by first calling `ui_.update(dt)` with `getConsecutiveDeficitMonths()` returning 1 (advancing internal state), then stub `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0))` (streak drops from 1 to 0); place `EXPECT_CALL(backend_, addStaticText(HasSubstr("Recovering"), _, _, _, _)).Times(AtLeast(1))` BEFORE the second `ui_.update(dt)` call — verifies that when `getConsecutiveDeficitMonths()` drops from 1 to 0 (`m_lastDeficitMonths > 0 AND currentMonths == 0`), `UIManager::update()` dispatches a "Finances Recovering" Normal-queue toast to `NotificationManager`. The `HasSubstr("Recovering")` matcher must match the exact toast message string defined in `UIManager`; implementers MUST use a message containing "Recovering" in the recovery toast dispatch branch. Stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` on both update calls to prevent unrelated notification processing.
+  - `UIManagerDeficit_StreakBreak_RecoveryToastDispatched` *(Phase 8 deliverable)*: set `m_lastDeficitMonths` to 1 by first calling `ui_.update(dt)` with `getConsecutiveDeficitMonths()` returning 1 (advancing internal state), then stub `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(0))` (streak drops from 1 to 0); place `EXPECT_CALL(backend_, addStaticText(HasSubstr("Recovering"), _, _, _, _)).Times(AtLeast(1))` BEFORE the second `ui_.update(dt)` call — verifies that when `getConsecutiveDeficitMonths()` drops from 1 to 0 (`m_lastDeficitMonths > 0 AND currentMonths == 0`), `UIManager::update()` dispatches a "Finances Recovering" Normal-queue toast to `NotificationManager`. The `HasSubstr("Recovering")` matcher must match the exact toast message string defined in `UIManager`; implementers MUST use a message containing "Recovering" in the recovery toast dispatch branch. Stub `ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false))` on both update calls to prevent unrelated notification processing.
 
-  - `UIManagerDeficit_Month1StreakBreak_ReenablesFutureStreak` *(Phase 8 deliverable)*: verify that after a streak break (consecutive deficit months drops to 0), a subsequent month-1 deficit re-fires the CRITICAL toast (streak tracking resets). Three-phase sequence: (1) stub `getConsecutiveDeficitMonths()` returning 1, call `ui_.update(dt)` (month-1 CRITICAL toast fires, `m_lastDeficitMonths` set to 1); (2) stub `getConsecutiveDeficitMonths()` returning 0, call `ui_.update(dt)` (streak break, recovery toast, `m_lastDeficitMonths` reset to 0); (3) stub `getConsecutiveDeficitMonths()` returning 1, place `EXPECT_CALL(backend_, addStaticText(HasSubstr("2 months"), _, _, _, _)).Times(AtLeast(1))` BEFORE the third `ui_.update(dt)` call — verifies that `UIManager` treats the re-entry into month-1 deficit as a fresh streak start and posts the month-1 CRITICAL toast again. Without this reset, a buggy implementation that never clears `m_lastDeficitMonths` on streak break would silently suppress future month-1 toasts. Stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` on all three update calls.
+  - `UIManagerDeficit_Month1StreakBreak_ReenablesFutureStreak` *(Phase 8 deliverable)*: verify that after a streak break (consecutive deficit months drops to 0), a subsequent month-1 deficit re-fires the CRITICAL toast (streak tracking resets). Three-phase sequence: (1) stub `getConsecutiveDeficitMonths()` returning 1, call `ui_.update(dt)` (month-1 CRITICAL toast fires, `m_lastDeficitMonths` set to 1); (2) stub `getConsecutiveDeficitMonths()` returning 0, call `ui_.update(dt)` (streak break, recovery toast, `m_lastDeficitMonths` reset to 0); (3) stub `getConsecutiveDeficitMonths()` returning 1, place `EXPECT_CALL(backend_, addStaticText(HasSubstr("2 months"), _, _, _, _)).Times(AtLeast(1))` BEFORE the third `ui_.update(dt)` call — verifies that `UIManager` treats the re-entry into month-1 deficit as a fresh streak start and posts the month-1 CRITICAL toast again. Without this reset, a buggy implementation that never clears `m_lastDeficitMonths` on streak break would silently suppress future month-1 toasts. Stub `ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false))` on all three update calls.
 
-  - `UIManagerDeficit_Month3_SandboxMode_NoGameOverModal` *(Phase 8 deliverable)*: stub `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(3))` and stub `ON_CALL(sim_, getGameMode()).WillByDefault(Return(GameMode::Sandbox))`; place `EXPECT_CALL(backend_, showGameOverModal()).Times(0)` (or equivalent modal-trigger assertion on `MockUIBackend`) BEFORE `ui_.update(dt)`; call `ui_.update(dt)`; verify the test passes — when `GameMode::Sandbox`, a month-3 deficit streak does NOT call `transitionToGameOver()` (or its equivalent UI trigger), confirming the Sandbox guard at the UIManager game-over branch. Stub `ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(std::monostate{}))` to prevent unrelated notification processing. The `Times(0)` assertion is the primary enforcement: without it, a missing Sandbox guard would silently fire the game-over modal and the test would still pass because `NiceMock` ignores unexpected calls by default.
+  - `UIManagerDeficit_Month3_SandboxMode_NoGameOverModal` *(Phase 8 deliverable)*: stub `ON_CALL(sim_, getConsecutiveDeficitMonths()).WillByDefault(Return(3))` and stub `ON_CALL(sim_, getGameMode()).WillByDefault(Return(GameMode::Sandbox))`; place `EXPECT_CALL(backend_, showGameOverModal()).Times(0)` (or equivalent modal-trigger assertion on `MockUIBackend`) BEFORE `ui_.update(dt)`; call `ui_.update(dt)`; verify the test passes — when `GameMode::Sandbox`, a month-3 deficit streak does NOT call `transitionToGameOver()` (or its equivalent UI trigger), confirming the Sandbox guard at the UIManager game-over branch. Stub `ON_CALL(sim_, pollPendingNotification(_)).WillByDefault(Return(false))` to prevent unrelated notification processing. The `Times(0)` assertion is the primary enforcement: without it, a missing Sandbox guard would silently fire the game-over modal and the test would still pass because `NiceMock` ignores unexpected calls by default.
 
 - **`CameraController` testability**: `CameraController`'s pan/zoom/rotate input processing must be unit-testable by injecting synthetic `InputEvent` structs (defined in `src/platform/input_event.h`). The controller must accept a `CameraState` struct (position, target, pitch, yaw) and expose `getCameraState()` — tests drive events in, read state out, verify pitch clamping at [−70°, −20°] and edge-scroll behavior without a live scene node. `CameraController` must also expose `bool isEdgeScrollEnabled() const` as a public accessor returning the current value of `m_edgeScrollEnabled`; this is required by test case 6 (`CameraController_EdgeScroll_EnabledByDefaultInFullscreen`) to assert constructor initial state without input injection. **Source location**: `CameraController.h/.cpp` live in `src/ui/` (it is an input/UI concern, not a rendering concern); test file is `tests/ui/camera_controller_test.cpp`. This placement ensures `CameraController` is covered by the `src/ui/` 95% coverage gate.
 - **`CameraController` input abstraction**: `CameraController` must accept an `InputEvent` struct (defined in `src/platform/input_event.h`) rather than Irrlicht's `SEvent`, to avoid pulling Irrlicht headers into test translation units:
@@ -450,6 +450,32 @@ public:
   **CRITICAL — production constructor coverage**: The fixed-seed regression tests (`TerrainGenerator_OutputAlwaysMeetsConstraint`, `TerrainGenerator_OutputHasContiguousFlatArea`, `TerrainGenerator_PrimaryRegressionSeed_MeetsBothConstraints`) MUST use the single-argument production constructor `TerrainGenerator(seed)` — NOT the two-argument injectable form. Using the two-argument form in fixed-seed tests would leave the production constructor path (which constructs the internal `mt19937_64` RNG) with zero test coverage. The property test `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` uses the two-argument form with `MockTerrainRNG` (to count reseeds), but this does not cover the production constructor's RNG initialization code. The three fixed-seed `TEST_F` tests cover the production constructor path. **This division is mandatory**: property test → two-argument form with mock; fixed-seed regression tests → single-argument production form.
 - **`ICitySimulation`** — interface enabling `UIManager` to call simulation control methods without depending on the concrete `CitySimulation` class. **Source location**: `ICitySimulation.h` lives in `src/interfaces/` (alongside `ISimulationRNG.h`, `IClock.h`, and `ISimulationPauser.h` — the shared dependency-free header directory that both `src/simulation/` and `src/ui/` may include). `UIManager` must accept `ICitySimulation*` (not a concrete `CitySimulation*`) to enable headless testing. `MockCitySimulation` lives in `tests/ui/MockCitySimulation.h`.
 
+  **Sub-interface decomposition (Phase 11q1)**: The full 44-method `ICitySimulation`
+  interface is decomposed into three focused sub-interfaces plus 7 own methods:
+  12 in `IEconomyQuery` + 9 in `IZoningActions` + 15 in `ISimulationState` +
+  7 own + 1 inherited from `ISimulationPauser` = 44 total. All sub-interface headers live
+  in `src/interfaces/`. `MockCitySimulation` inherits them all through
+  `ICitySimulation`, so no `MOCK_METHOD` changes are needed.
+
+  **`IEconomyQuery`** (`src/interfaces/IEconomyQuery.h`) -- 12 methods covering
+  economy state and tax controls: `getTreasuryBalance`, `getCurrentMonthlyRevenue`,
+  `getOutstandingDebt`, `estimateMonthlyUpkeep`, `setTaxRate`, `getTaxRate`,
+  `getTaxRevenue`, `getWagesCost`, `getRoadMaintenanceCost`,
+  `getServiceUpkeepCost`, `getUtilityFeeRevenue`, `getOutstandingBondUses`.
+
+  **`IZoningActions`** (`src/interfaces/IZoningActions.h`) -- 9 methods covering
+  placement mutations, tile queries, and undo: `placeZone`, `placeRoad`,
+  `demolishTile`, `undoLastAction`, `placeServiceBuilding`, `queryTile`,
+  `isWithinRoadRange`, `hasUndoPendingAction`, `getUndoExpiryTimeSeconds`.
+
+  **`ISimulationState`** (`src/interfaces/ISimulationState.h`) -- 15 methods
+  covering per-frame state for rendering, audio, and population/progression
+  queries: `getAgentPositions`, `getIntersectionSignalStates`,
+  `getRoadSegmentSpeeds`, `getServiceCoverage`, `getMapTilesX`, `getMapTilesZ`,
+  `getSimulationTime`, `getTimeOfDay`, `getNextUnlockThreshold`,
+  `getZoneDemandFactor`, `getTrafficDemandFactor`, `getTotalPopulation`,
+  `getCityRating`, `getConsecutiveDeficitMonths`, `getDensityUnlockState`.
+
   ```cpp
   // src/interfaces/ICitySimulation.h
   // SpeedMultiplier is the canonical enum defined in src/interfaces/simulation_types.h.
@@ -460,98 +486,41 @@ public:
   // those names do not exist and will cause a compile error.
   #include "simulation_types.h"
   #include "ISimulationPauser.h"
+  #include "IEconomyQuery.h"
+  #include "IZoningActions.h"
+  #include "ISimulationState.h"
 
-  // BudgetDeficitWarn and SimNotification are defined in src/interfaces/simulation_types.h (already included above):
+  // BudgetDeficitWarn and SimulationNotification are defined in src/interfaces/simulation_types.h
+  // (already included above):
   //   struct BudgetDeficitWarn {};
-  //   using SimNotification = std::variant<std::monostate, BudgetDeficitWarn>;
+  //   using SimulationNotification = std::variant<std::monostate, BudgetDeficitWarn, ...>;
 
-  // ICitySimulation extends ISimulationPauser so that CitySimulation implements both interfaces
-  // through a single concrete class. UIManager passes m_sim to NotificationManager as ICitySimulation*
-  // — NotificationManager needs getConsecutiveDeficitMonths() (on ICitySimulation) as well as
-  // setPaused(bool) (inherited from ISimulationPauser). setPaused(bool) is
-  // inherited from ISimulationPauser and implemented by CitySimulation.
-  class ICitySimulation : public ISimulationPauser {
+  // ICitySimulation extends ISimulationPauser and three focused sub-interfaces.
+  // The full 44-method set is reachable via inheritance; ICitySimulation declares
+  // only 7 own methods. All callers that hold ICitySimulation* are untouched.
+  // Total method breakdown: 12 (IEconomyQuery) + 9 (IZoningActions) +
+  //   15 (ISimulationState) + 7 (own) + 1 (ISimulationPauser) = 44.
+  class ICitySimulation
+      : public ISimulationPauser   // setPaused(bool) inherited
+      , public IEconomyQuery       // 12 economy state + tax control methods
+      , public IZoningActions      // 9 placement mutation, tile query, undo methods
+      , public ISimulationState {  // 15 per-frame state, population, progression methods
   public:
       virtual ~ICitySimulation() = default;
-      // setPaused(bool paused) is inherited from ISimulationPauser — do not redeclare here.
-      virtual void setSpeed(SpeedMultiplier speed) = 0;
-      // State-query methods used by UIManager panels:
-      virtual bool isPaused() const = 0;
-      virtual SpeedMultiplier getSpeedMultiplier() const = 0;
-
-      // Economy/treasury queries — called by HUD resource bar and Budget Detail Panel:
-      virtual float getTreasuryBalance() const = 0;          // Called by HUD resource bar to display treasury balance
-      virtual float getCurrentMonthlyRevenue() const = 0;    // Called by Budget Detail Panel for net monthly balance line
-      virtual float getOutstandingDebt() const = 0;          // Called by HUD persistent debt indicator
-      virtual float estimateMonthlyUpkeep() const = 0;       // Called by grace period tooltip and Budget Detail Panel upkeep lines
-      virtual float getNextUnlockThreshold(Difficulty d) const = 0; // Called by Density Unlock Preview Tooltip to compute proximity to next tier.
-      // Returns the difficulty-adjusted dollar threshold for the next pending density tier unlock,
-      // or SimulationConstants::kNoUnlockThreshold (-1.0f) when all six tiers are already unlocked.
-      // Contract: never returns 0.0f or NaN. Callers MUST guard with (result < 0.0f) before displaying.
-      // Cross-reference: architecture/game-design/economy-model.md (getNextUnlockThreshold return semantics).
-
-      // City rating — called by HUD to display star rating:
-      // Phase 3 upgrade complete: returns CityRatingTier (Village/Town/City/Metropolis/Megalopolis).
-      // CityRatingTier is defined in src/interfaces/simulation_types.h.
-      // See architecture/game-design/game-progression-modes.md for tier definitions.
-      virtual CityRatingTier getCityRating() const = 0;
-
-      // Demand pressure — called by HUD demand pressure bar per budget tick.
-      // Returns the city-wide effective demand for the given zone type as a float in [0.0, 1.0].
-      // This is the AGGREGATE, POST-FLOOR value used for UI display — a weighted average of
-      // effective_demand_factor across all tiles of that zone type after applying bootstrap decay,
-      // the demand floor (R ≥ 0.20, C ≥ 0.10, I ≥ 0.10 post-tick-6), and the traffic smoothstep
-      // combination rule. This value is what the HUD demand pressure bars display directly.
-      // It is NOT the raw traffic demand factor (see getTrafficDemandFactor below).
-      // Per-tile demand is available separately via QueryResult::demand_pressure_pct (Inspector Panel).
-      // Cross-reference: architecture/game-design/zoning-system.md (effective_demand_factor combination rule).
-      virtual float getDemandPressurePct(ZoneType zone) const = 0;
-
-      // Population — called by HUD population display and density-unlock checks:
-      virtual int getTotalPopulation() const = 0;  // Called by HUD population counter and density-unlock preview
-
-      // Undo state — called by HUD undo button to determine enabled/disabled state and countdown:
-      virtual bool hasUndoPendingAction() const = 0;  // Called by HUD undo button to gray out when no action is pending
-      virtual double getUndoExpiryTimeSeconds() const = 0;  // Returns IClock::nowSeconds() value when the pending undo action expires; 0.0 if no action pending
-
-      // Game-over flow — deficit streak accessor. Returns the number of consecutive budget ticks
-      // in which the deficit was ≥ −50%. Returns 0 during the grace period.
-      // NotificationManager reads this to determine which progressive warning toast to fire:
-      //   0 = no warning, 1 = "2 months to bankruptcy", 2 = "1 month to bankruptcy", 3+ = game-over trigger.
-      // Cross-reference: architecture/game-design/game-over-flow.md.
-      virtual int getConsecutiveDeficitMonths() const = 0;
-
-      // Traffic demand factor accessor — returns the INTERNAL traffic simulation multiplier for
-      // the given ZoneType, derived exclusively from the rolling travel-time window smoothstep.
-      // R/C zones use a 5-tick window; I zones use a 3-tick window. Returns a value in [0.0, 1.0]
-      // where 1.0 = no travel-time penalty and 0.0 = maximum congestion penalty.
-      // DISTINCT from getDemandPressurePct: this is the raw traffic-only component BEFORE combining
-      // with bootstrap decay, capacity-ratio signals, or demand floors. It is used internally by
-      // the traffic simulation to modulate zone growth, and is exposed here solely for:
-      //   (a) Phase 11 save/load round-trip tests that verify the rolling-window state persists, and
-      //   (b) the traffic rolling-average serialization requirement in implementation/phase-11.md.
-      // The HUD demand bars display getDemandPressurePct (the post-combination aggregate), NOT this value.
-      // Cross-reference: implementation/phase-11.md (Traffic demand factor serialization).
-      virtual float getTrafficDemandFactor(ZoneType zone) const = 0;
-
-      // Density-unlock state accessor — returns a snapshot of all density-unlock counters and flags.
-      // Required for Phase 11 save round-trip test to verify counter persistence across save/load.
-      // Cross-reference: implementation/phase-11.md (getDensityUnlockState deliverable).
-      // DensityUnlockState is defined in src/interfaces/simulation_types.h alongside ZoneType and SpeedMultiplier.
-      //   struct DensityUnlockState {
-      //       int  consecutive_months_above_threshold[6];  // 0–2 range; one counter per density tier
-      //       bool unlock_flags[6];                        // true if the corresponding tier is unlocked
-      //   };
-      virtual DensityUnlockState getDensityUnlockState() const = 0;
-
-      // Pending-notification poll — called by UIManager::update() once per frame to drain the
-      // simulation's outbound event queue. Returns the next pending SimNotification, or
-      // std::monostate if no notification is queued.
+      // Speed / pause control
+      virtual void            setSpeed(SpeedMultiplier speed) = 0;
+      virtual bool            isPaused()             const = 0;
+      virtual SpeedMultiplier getSpeedMultiplier()   const = 0;
+      // Lifecycle
+      virtual void   reset(int64_t startingFunds)               = 0;
+      virtual bool   applyLoadedJson(const std::string& json)   = 0;
+      // Event queue — returns true and fills `out` if a notification is pending;
+      // returns false if the queue is empty.
       //
       // BudgetDeficitWarn semantics: enqueued by CitySimulation once per budget tick when
-      // budget_surplus_pct ≤ −0.25 (the forced-loan warning threshold at −25% deficit; see
+      // budget_surplus_pct <= -0.25 (the forced-loan warning threshold at -25% deficit; see
       // architecture/game-design/economy-model.md). It is NOT enqueued for minor deficits
-      // where budget_surplus_pct > −0.25 (deficits less severe than 25%). This ensures the
+      // where budget_surplus_pct > -0.25 (deficits less severe than 25%). This ensures the
       // event is only fired as part of the bankruptcy-warning system, not for everyday
       // budget imbalances.
       //
@@ -559,23 +528,9 @@ public:
       // (NOT triggered by BudgetDeficitWarn receipt). UIManager tracks m_lastDeficitMonths; the CRISIS
       // stinger fires when currentMonths == 2 AND m_lastDeficitMonths < 2. BudgetDeficitWarn receipt
       // determines which warning toast to dispatch only.
-      //
-      // Type aliases defined in src/interfaces/simulation_types.h (ICitySimulation.h already includes it):
-      //   struct BudgetDeficitWarn {};  // tag type — no payload; use getConsecutiveDeficitMonths()
-      //                                  // for context
-      //   using SimNotification = std::variant<std::monostate, BudgetDeficitWarn>;
-      //   // std::monostate = no notification queued; BudgetDeficitWarn = deficit event pending.
-      //   // Additional notification types will extend SimNotification in later phases.
-      virtual SimNotification pollPendingNotification() = 0;
-
-      // Outstanding municipal bond uses — returns the number of emergency bond issues remaining
-      // for the current game session. Decremented by 1 each time the player accepts a forced loan.
-      // Difficulty tiers: Easy = 3, Normal = 2, Hard = 1. Returns 0 when all uses are exhausted.
-      // ModalDialog grays the Emergency Municipal Bond option and calls
-      //   setElementEnabled(bondButtonHandle, false)
-      // when this returns 0.
-      // Cross-reference: architecture/game-design/economy-model.md (Emergency Municipal Bond section).
-      virtual int getOutstandingBondUses() const = 0;
+      virtual bool   pollPendingNotification(SimulationNotification& out) = 0;
+      // Simulation timing
+      virtual int    consumeBudgetTicks() = 0;
   };
   ```
 
@@ -586,72 +541,59 @@ public:
 
   class MockCitySimulation : public ICitySimulation {
   public:
+      // ISimulationPauser (1 method):
       MOCK_METHOD(void, setPaused, (bool paused), (override));
+
+      // ICitySimulation own methods (7):
       MOCK_METHOD(void, setSpeed, (SpeedMultiplier speed), (override));
       MOCK_METHOD(bool, isPaused, (), (const, override));
       MOCK_METHOD(SpeedMultiplier, getSpeedMultiplier, (), (const, override));
+      MOCK_METHOD(void, reset, (int64_t startingFunds), (override));
+      MOCK_METHOD(bool, applyLoadedJson, (const std::string& json), (override));
+      MOCK_METHOD(bool, pollPendingNotification, (SimulationNotification& out), (override));
+      MOCK_METHOD(int, consumeBudgetTicks, (), (override));
 
-      // Economy/treasury queries:
-      MOCK_METHOD(float, getTreasuryBalance, (), (const, override));          // Called by HUD resource bar to display treasury balance
-      MOCK_METHOD(float, getCurrentMonthlyRevenue, (), (const, override));    // Called by Budget Detail Panel for net monthly balance line
-      MOCK_METHOD(float, getOutstandingDebt, (), (const, override));          // Called by HUD persistent debt indicator
-      MOCK_METHOD(float, estimateMonthlyUpkeep, (), (const, override));       // Called by grace period tooltip and Budget Detail Panel upkeep lines
-      MOCK_METHOD(float, getNextUnlockThreshold, (Difficulty d), (const, override)); // Called by Density Unlock Preview Tooltip.
-      // Returns kNoUnlockThreshold (-1.0f) when all tiers unlocked; positive dollar value otherwise.
-      // Tests that exercise the "all tiers unlocked" branch must return SimulationConstants::kNoUnlockThreshold.
-
-      // City rating — CityRatingTier (Phase 3 upgrade complete):
-      MOCK_METHOD(CityRatingTier, getCityRating, (), (const, override));
-
-      // Demand pressure — UI display aggregate. Returns the post-floor, post-bootstrap, post-combination
-      // effective_demand_factor for the given zone type. Used by HUD demand pressure bars.
-      // NOT the same as getTrafficDemandFactor (see below for distinction).
-      MOCK_METHOD(float, getDemandPressurePct, (ZoneType zone), (const, override));
-
-      // Population:
-      MOCK_METHOD(int, getTotalPopulation, (), (const, override));  // Called by HUD population counter and density-unlock preview
-
-      // Undo state:
-      MOCK_METHOD(bool, hasUndoPendingAction, (), (const, override));  // Called by HUD undo button to gray out when no action is pending
-      MOCK_METHOD(double, getUndoExpiryTimeSeconds, (), (const, override));  // Returns IClock::nowSeconds() value when the pending undo action expires; 0.0 if no action pending
-
-      // Game-over flow — deficit streak accessor. Returns 0 during grace period.
-      // Cross-reference: architecture/game-design/game-over-flow.md.
-      MOCK_METHOD(int, getConsecutiveDeficitMonths, (), (const, override));
-
-      // Traffic demand factor accessor. Returns the INTERNAL traffic-only multiplier in [0.0, 1.0]
-      // from the rolling travel-time window BEFORE bootstrap/floor combination. R/C = 5-tick window;
-      // I = 3-tick window. Exposed for Phase 11 save/load round-trip serialization only.
-      // HUD bars read getDemandPressurePct (the post-combination aggregate), not this value.
-      // Cross-reference: implementation/phase-11.md (Traffic demand factor serialization).
-      MOCK_METHOD(float, getTrafficDemandFactor, (ZoneType), (const, override));
-
-      // Density-unlock state accessor. Returns consecutive-month counters and unlock flags for all 6
-      // density tiers. Cross-reference: implementation/phase-11.md (getDensityUnlockState deliverable).
-      MOCK_METHOD(DensityUnlockState, getDensityUnlockState, (), (const, override));
-
-      // Notification polling — drains simulation event queue. Returns next SimNotification or
-      // std::monostate when queue is empty.
-      // Test usage: ON_CALL(sim_, pollPendingNotification()).WillByDefault(Return(BudgetDeficitWarn{}));
-      // Note: BudgetDeficitWarn{} is implicitly convertible to SimNotification because
-      // SimNotification = std::variant<std::monostate, BudgetDeficitWarn>.
-      MOCK_METHOD(SimNotification, pollPendingNotification, (), (override));
-
-      // Outstanding bond uses — remaining bond-issue count per difficulty (Easy=3, Normal=2, Hard=1).
-      // Returns 0 when exhausted; ModalDialog grays the Emergency Municipal Bond option.
+      // IEconomyQuery (12 methods):
+      MOCK_METHOD(float, getTreasuryBalance, (), (const, override));
+      MOCK_METHOD(float, getCurrentMonthlyRevenue, (), (const, override));
+      MOCK_METHOD(float, getOutstandingDebt, (), (const, override));
+      MOCK_METHOD(float, estimateMonthlyUpkeep, (), (const, override));
+      MOCK_METHOD(void, setTaxRate, (ZoneType zone, float rate), (override));
+      MOCK_METHOD(float, getTaxRate, (ZoneType zone), (const, override));
+      MOCK_METHOD(float, getTaxRevenue, (ZoneType zone), (const, override));
+      MOCK_METHOD(float, getWagesCost, (), (const, override));
+      MOCK_METHOD(float, getRoadMaintenanceCost, (), (const, override));
+      MOCK_METHOD(float, getServiceUpkeepCost, (), (const, override));
+      MOCK_METHOD(float, getUtilityFeeRevenue, (), (const, override));
       MOCK_METHOD(int, getOutstandingBondUses, (), (const, override));
 
-      // Phase 11d visual wiring query methods — added as Day-One Commit prerequisite:
+      // IZoningActions (9 methods):
+      MOCK_METHOD(void, placeZone, (int x, int z, ZoneType t, DensityTier tier, int earthworksCost), (override));
+      MOCK_METHOD(void, placeRoad, (int x, int z, int earthworksCost), (override));
+      MOCK_METHOD(void, demolishTile, (int x, int z), (override));
+      MOCK_METHOD(void, undoLastAction, (), (override));
+      MOCK_METHOD(void, placeServiceBuilding, (int x, int z, ServiceBuildingType type, int earthworksCost), (override));
+      MOCK_METHOD(QueryResult, queryTile, (int x, int z), (const, override));
+      MOCK_METHOD(bool, isWithinRoadRange, (int x, int z, DensityTier tier), (const, override));
+      MOCK_METHOD(bool, hasUndoPendingAction, (), (const, override));
+      MOCK_METHOD(double, getUndoExpiryTimeSeconds, (), (const, override));
+
+      // ISimulationState (15 methods):
       MOCK_METHOD((std::vector<AgentState>), getAgentPositions, (), (const, override));
       MOCK_METHOD((std::vector<IntersectionSignalState>), getIntersectionSignalStates, (), (const, override));
       MOCK_METHOD((std::vector<RoadSegmentSpeed>), getRoadSegmentSpeeds, (), (const, override));
       MOCK_METHOD((std::vector<ServiceCoverageTile>), getServiceCoverage, (), (const, override));
-
-      // Phase 11p minimap query methods — required by MM-33, MM-40, MM-21, MM-22:
-      MOCK_METHOD(QueryResult, queryTile, (int x, int z), (const, override));  // Returns zone type, road flag, etc. for the given tile coordinates
-      MOCK_METHOD(int, getMapTilesX, (), (const, override));                // Map width in tiles
-      MOCK_METHOD(int, getMapTilesZ, (), (const, override));                // Map depth in tiles
-      MOCK_METHOD(int, consumeBudgetTicks, (), (override));                 // Returns number of budget ticks elapsed since last call; 0 if none
+      MOCK_METHOD(int, getMapTilesX, (), (const, override));
+      MOCK_METHOD(int, getMapTilesZ, (), (const, override));
+      MOCK_METHOD(SimulationTime, getSimulationTime, (), (const, override));
+      MOCK_METHOD(TimeOfDay, getTimeOfDay, (), (const, override));
+      MOCK_METHOD(float, getNextUnlockThreshold, (Difficulty d), (const, override));
+      MOCK_METHOD(float, getZoneDemandFactor, (ZoneType zone), (const, override));
+      MOCK_METHOD(float, getTrafficDemandFactor, (ZoneType zone), (const, override));
+      MOCK_METHOD(int, getTotalPopulation, (), (const, override));
+      MOCK_METHOD(CityRatingTier, getCityRating, (), (const, override));
+      MOCK_METHOD(int, getConsecutiveDeficitMonths, (), (const, override));
+      MOCK_METHOD(DensityUnlockState, getDensityUnlockState, (), (const, override));
   };
   ```
 
