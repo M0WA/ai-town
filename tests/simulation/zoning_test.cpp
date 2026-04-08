@@ -55,7 +55,7 @@ class ZoningTestNice : public NiceSimulationTestBase {
 // ---------------------------------------------------------------------------
 TEST_F(ZoningTestNice, IndustrialDemand_ZeroCapacity_DefaultsTo1) {
     // No zones placed — I_production_capacity = 0.
-    // getDemandPressurePct(Industrial) returns effective demand in [0,1].
+    // getZoneDemandFactor(Industrial) returns effective demand in [0,1].
     // At construction before any ticks, during bootstrap period (tick 0),
     // I_demand defaults to 1.0 when no I zone exists.
     //
@@ -66,7 +66,7 @@ TEST_F(ZoningTestNice, IndustrialDemand_ZeroCapacity_DefaultsTo1) {
     // Run a few ticks to confirm the default persists.
     runTicks(1);
 
-    float iDemand = sim_->getDemandPressurePct(ZoneType::Industrial);
+    float iDemand = sim_->getZoneDemandFactor(ZoneType::Industrial);
     EXPECT_FLOAT_EQ(iDemand, 1.0f)
         << "Industrial demand must default to 1.0 when no Industrial zones exist "
            "(I_production_capacity = 0).";
@@ -222,7 +222,7 @@ TEST_F(ZoningTestNice, DensityUnlock_MedR_And_MedC_SameThreshold_BothUnlockToget
 //
 // Set up: enough C/I zones for a non-zero capacity ratio but small enough
 // that the formula demand < 0.20. With a road present (valid path), the floor
-// kicks in and getDemandPressurePct(Residential) >= 0.20.
+// kicks in and getZoneDemandFactor(Residential) >= 0.20.
 // ---------------------------------------------------------------------------
 TEST_F(ZoningTestNice, DemandFloor_Residential_Applied_WhenFormulaDemandBelow20Pct) {
     // Place a road + small C/I zones to give R some capacity ratio demand.
@@ -240,7 +240,7 @@ TEST_F(ZoningTestNice, DemandFloor_Residential_Applied_WhenFormulaDemandBelow20P
     clock_.advance(121.0);
     runTicks(SimulationConstants::demand_bootstrapping_ticks + 1);
 
-    float rDemand = sim_->getDemandPressurePct(ZoneType::Residential);
+    float rDemand = sim_->getZoneDemandFactor(ZoneType::Residential);
 
     // Post-bootstrap with road network: R demand floor must be active.
     EXPECT_GE(rDemand, SimulationConstants::demand_floor_residential)
@@ -266,7 +266,7 @@ TEST_F(ZoningTestNice, DemandFloor_Commercial_Applied) {
     clock_.advance(121.0);
     runTicks(SimulationConstants::demand_bootstrapping_ticks + 1);
 
-    float cDemand = sim_->getDemandPressurePct(ZoneType::Commercial);
+    float cDemand = sim_->getZoneDemandFactor(ZoneType::Commercial);
     EXPECT_GE(cDemand, SimulationConstants::demand_floor_commercial)
         << "Commercial effective demand must be >= demand_floor_commercial (0.10) "
            "when a road network exists, post-bootstrap.";
@@ -290,7 +290,7 @@ TEST_F(ZoningTestNice, DemandFloor_Industrial_Applied) {
     clock_.advance(121.0);
     runTicks(SimulationConstants::demand_bootstrapping_ticks + 1);
 
-    float iDemand = sim_->getDemandPressurePct(ZoneType::Industrial);
+    float iDemand = sim_->getZoneDemandFactor(ZoneType::Industrial);
     EXPECT_GE(iDemand, SimulationConstants::demand_floor_industrial)
         << "Industrial effective demand must be >= demand_floor_industrial (0.10) "
            "when a road network exists, post-bootstrap.";
@@ -575,7 +575,7 @@ TEST_F(ZoningTestNice, DensityUpgrade_AudioCallback_FiresOnUpgrade) {
 //   3. Verifies getTrafficDemandFactor(zone) stays within [0.0, 1.0] for all zones.
 //   4. Verifies no demand value jumps by more than a reasonable delta per tick
 //      (oscillation invariant: delta per tick < 1.0 for all zone types).
-//   5. Verifies getDemandPressurePct stays in [0.0, 1.0] for all zones.
+//   5. Verifies getZoneDemandFactor stays in [0.0, 1.0] for all zones.
 //
 // Uses ZoningTestNice (NiceMock) per project conventions for integration tests.
 // ---------------------------------------------------------------------------
@@ -614,9 +614,9 @@ TEST_F(ZoningTestNice, DemandBootstrap_AtX3Speed_NoBoundaryViolationAndNoOscilla
         EXPECT_LE(iFactor, 1.0f) << "I traffic demand must be <= 1 at tick " << tick;
 
         // All effective demand pressures must be in [0.0, 1.0].
-        float rPct = sim_->getDemandPressurePct(ZoneType::Residential);
-        float cPct = sim_->getDemandPressurePct(ZoneType::Commercial);
-        float iPct = sim_->getDemandPressurePct(ZoneType::Industrial);
+        float rPct = sim_->getZoneDemandFactor(ZoneType::Residential);
+        float cPct = sim_->getZoneDemandFactor(ZoneType::Commercial);
+        float iPct = sim_->getZoneDemandFactor(ZoneType::Industrial);
 
         EXPECT_GE(rPct, 0.0f) << "R demand pressure must be >= 0 at tick " << tick;
         EXPECT_LE(rPct, 1.0f) << "R demand pressure must be <= 1 at tick " << tick;
@@ -649,10 +649,10 @@ TEST_F(ZoningTestNice, DemandBootstrap_AtX3Speed_NoBoundaryViolationAndNoOscilla
     // On a blank map with no zones: I_demand = 1.0 (no I zone → default max).
     // R and C demand = 0.0 (no C/I or R zones → capacity ratio = 0).
     // Post-bootstrap (tick 6+), demand floors apply: R >= 0.20, C >= 0.10, I >= 0.10.
-    // But demand floor only applies to growth, not to getDemandPressurePct directly
-    // (it applies to occupancy_increase). getDemandPressurePct is the effective demand.
+    // But demand floor only applies to growth, not to getZoneDemandFactor directly
+    // (it applies to occupancy_increase). getZoneDemandFactor is the effective demand.
     // With no zones: I_demand = 1.0; R = 0; C = 0.
-    float iPostBootstrap = sim_->getDemandPressurePct(ZoneType::Industrial);
+    float iPostBootstrap = sim_->getZoneDemandFactor(ZoneType::Industrial);
     EXPECT_FLOAT_EQ(iPostBootstrap, 1.0f)
         << "Industrial demand must be 1.0 on blank map (no I zones → default = 1.0)";
 
@@ -663,10 +663,10 @@ TEST_F(ZoningTestNice, DemandBootstrap_AtX3Speed_NoBoundaryViolationAndNoOscilla
 // TEST 15: DemandPressurePct_MaxDemand_Returns1f
 //
 // With a well-balanced R/C/I zone layout + road, and sufficient ticks for
-// demand to converge, getDemandPressurePct(Industrial) approaches 1.0 because
+// demand to converge, getZoneDemandFactor(Industrial) approaches 1.0 because
 // I_demand defaults to 1.0 when no I zone exists.
 //
-// More broadly: verify getDemandPressurePct returns values in [0.0, 1.0].
+// More broadly: verify getZoneDemandFactor returns values in [0.0, 1.0].
 // With a balanced city (even R/C/I ratios, road present, past bootstrap),
 // demand should be non-trivially positive for all zone types.
 // ---------------------------------------------------------------------------
@@ -684,9 +684,9 @@ TEST_F(ZoningTestNice, DemandPressurePct_MaxDemand_Returns1f) {
     clock_.advance(121.0);
     runTicks(3);
 
-    float iDemand = sim_->getDemandPressurePct(ZoneType::Industrial);
-    float rDemand = sim_->getDemandPressurePct(ZoneType::Residential);
-    float cDemand = sim_->getDemandPressurePct(ZoneType::Commercial);
+    float iDemand = sim_->getZoneDemandFactor(ZoneType::Industrial);
+    float rDemand = sim_->getZoneDemandFactor(ZoneType::Residential);
+    float cDemand = sim_->getZoneDemandFactor(ZoneType::Commercial);
 
     // All demand values must be in [0, 1].
     EXPECT_GE(iDemand, 0.0f);
@@ -698,7 +698,7 @@ TEST_F(ZoningTestNice, DemandPressurePct_MaxDemand_Returns1f) {
 
     // Industrial demand with no I zones must be 1.0 (the canonical max-demand case).
     EXPECT_FLOAT_EQ(iDemand, 1.0f)
-        << "getDemandPressurePct(Industrial) must return 1.0 when no Industrial "
+        << "getZoneDemandFactor(Industrial) must return 1.0 when no Industrial "
            "zones exist (I_production_capacity = 0 → default demand = 1.0).";
 }
 

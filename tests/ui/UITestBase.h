@@ -71,7 +71,7 @@ protected:
         ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::Village));
         ON_CALL(sim_, getTotalPopulation()).WillByDefault(Return(0));
         ON_CALL(sim_, getSimulationTime()).WillByDefault(Return(SimulationTime{1, 1}));
-        ON_CALL(sim_, getDemandPressurePct(_)).WillByDefault(Return(0.0f));
+        ON_CALL(sim_, getZoneDemandFactor(_)).WillByDefault(Return(0.0f));
         ON_CALL(sim_, getUndoExpiryTimeSeconds()).WillByDefault(Return(0.0));
 
         ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);

@@ -5,13 +5,13 @@
 #include "IAudioSystem.h"
 #include "ISimulationRNG.h"
 #include "ITerrainQuery.h"
-#include "simulation_constants.h"
+#include "Economy.h"
+#include "Traffic.h"
+#include "Zoning.h"
+#include "Population.h"
+#include "SimTiming.h"
 
-#include <array>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
 #include <queue>
 #include <optional>
 
@@ -25,6 +25,8 @@
 // Default starting speed is x3 (kDefaultSimSpeed), NOT x1. Verified by:
 //   StartingFunds_Easy_1M, StartingFunds_Normal_500K, StartingFunds_Hard_200K
 //   (all pause the sim before querying, confirming x3 at construction).
+//
+// NOSONAR cpp:S1448 — thin coordinator; 44 overrides are delegation boilerplate
 //
 // Source: src/simulation/CitySimulation.h
 // Implementation: src/simulation/CitySimulation.cpp
@@ -52,63 +54,45 @@ public:
     SpeedMultiplier getSpeedMultiplier() const override;
 
     // ---- Main simulation step ----
-    // Called once per frame from main.cpp with real elapsed seconds (never pre-multiplied).
-    // Accumulates sim seconds and fires budget ticks when >= SECONDS_PER_BUDGET_TICK.
     void tick(float realDeltaSeconds);
 
     // ---- New-game reset (Phase 11m) ----
-    // Clears all city state and resets treasury to startingFunds.
-    // Does NOT call clearCity() on the renderer — main.cpp calls it separately.
-    // Does NOT reset tax rates (carries over to new game per spec).
     void reset(int64_t startingFunds) override;
 
     bool applyLoadedJson(const std::string& json) override;
 
-    // ---- Economy / treasury ----
-    float getTreasuryBalance()       const override;
-    float getCurrentMonthlyRevenue() const override;
-    float getOutstandingDebt()       const override;
-    float estimateMonthlyUpkeep()    const override;
-    float getNextUnlockThreshold(Difficulty d) const override;
+    // ---- Economy / treasury (IEconomyQuery) ----
+    float getTreasuryBalance()       const override { return m_economy.getTreasuryBalance(); }
+    float getCurrentMonthlyRevenue() const override { return m_economy.getCurrentMonthlyRevenue(); }
+    float getOutstandingDebt()       const override { return m_economy.getOutstandingDebt(); }
+    float estimateMonthlyUpkeep()    const override { return m_economy.estimateMonthlyUpkeep(m_zoning, m_clock->nowSeconds(), m_timing.getConstructionTimeSeconds()); }
+    void  setTaxRate(ZoneType zone, float rate) override { m_economy.setTaxRate(zone, rate); }
+    float getTaxRate(ZoneType zone)  const override { return m_economy.getTaxRate(zone); }
+    float getTaxRevenue(ZoneType zone) const override { return m_economy.getTaxRevenue(zone); }
+    float getWagesCost()             const override { return m_economy.getWagesCost(); }
+    float getRoadMaintenanceCost()   const override { return m_economy.getRoadMaintenanceCost(); }
+    float getServiceUpkeepCost()     const override { return m_economy.getServiceUpkeepCost(); }
+    float getUtilityFeeRevenue()     const override { return m_economy.getUtilityFeeRevenue(); }
+    int   getOutstandingBondUses()   const override { return m_economy.getOutstandingBondUses(); }
 
-    // ---- City rating ----
-    CityRatingTier getCityRating() const override;
+    // ---- ISimulationState ----
+    float getNextUnlockThreshold(Difficulty d) const override { return m_population.getNextUnlockThreshold(d); }
+    CityRatingTier getCityRating()           const override { return m_population.getCityRating(); }
+    float getZoneDemandFactor(ZoneType zone) const override { return m_traffic.getZoneDemandFactor(zone); }
+    float getTrafficDemandFactor(ZoneType zone) const override { return m_traffic.getTrafficDemandFactor(zone); }
+    int   getTotalPopulation()               const override { return m_population.getTotalPopulation(); }
+    int   getConsecutiveDeficitMonths()      const override { return m_population.getConsecutiveDeficitMonths(); }
+    DensityUnlockState getDensityUnlockState() const override { return m_population.getDensityUnlockState(); }
+    SimulationTime getSimulationTime()       const override { return m_timing.getSimulationTime(); }
+    TimeOfDay getTimeOfDay()                 const override { return m_timing.getTimeOfDay(); }
+    int getMapTilesX() const override { return m_mapWidth; }
+    int getMapTilesZ() const override { return m_mapHeight; }
+    std::vector<AgentState>              getAgentPositions()           const override { return m_traffic.getAgentPositions(); }
+    std::vector<IntersectionSignalState> getIntersectionSignalStates() const override { return m_traffic.getIntersectionSignalStates(); }
+    std::vector<RoadSegmentSpeed>        getRoadSegmentSpeeds()       const override { return m_traffic.getRoadSegmentSpeeds(m_zoning); }
+    std::vector<ServiceCoverageTile>     getServiceCoverage()         const override { return m_zoning.getServiceCoverage(); }
 
-    // ---- Demand ----
-    float getDemandPressurePct(ZoneType zone) const override;
-    float getTrafficDemandFactor(ZoneType zone) const override;
-
-    // ---- Population ----
-    int getTotalPopulation() const override;
-
-    // ---- Undo state ----
-    bool   hasUndoPendingAction()    const override;
-    double getUndoExpiryTimeSeconds() const override;
-
-    // ---- Game-over ----
-    int getConsecutiveDeficitMonths() const override;
-
-    // ---- Density-unlock ----
-    DensityUnlockState getDensityUnlockState() const override;
-
-    // ---- Simulation time ----
-    SimulationTime getSimulationTime() const override;
-
-    // ---- Notification queue ----
-    bool pollPendingNotification(SimulationNotification& out) override;
-
-    // ---- Tax rates ----
-    void  setTaxRate(ZoneType zone, float rate) override;
-    float getTaxRate(ZoneType zone) const override;
-
-    // ---- Budget line items ----
-    float getTaxRevenue(ZoneType zone)   const override;
-    float getWagesCost()                 const override;
-    float getRoadMaintenanceCost()       const override;
-    float getServiceUpkeepCost()         const override;
-    float getUtilityFeeRevenue()         const override;
-
-    // ---- Zone / road actions ----
+    // ---- IZoningActions ----
     void placeZone(int tileX, int tileZ, ZoneType type, DensityTier tier,
                    int earthworksCostOverride = 0) override;
     void placeRoad(int tileX, int tileZ, int earthworksCostOverride = 0) override;
@@ -117,197 +101,56 @@ public:
     void placeServiceBuilding(int tileX, int tileZ,
                               ServiceBuildingType type,
                               int earthworksCostOverride = 0) override;
-
-    // ---- Per-tile query ----
     QueryResult queryTile(int tileX, int tileZ) const override;
+    bool isWithinRoadRange(int x, int z, DensityTier tier) const override { return m_zoning.isWithinRoadRange(x, z, tier); }
+    bool   hasUndoPendingAction()    const override;
+    double getUndoExpiryTimeSeconds() const override;
 
-    // ---- Road proximity check (Phase 11m bug fix) ----
-    bool isWithinRoadRange(int x, int z, DensityTier tier) const override;
+    // ---- Notification queue ----
+    bool pollPendingNotification(SimulationNotification& out) override;
 
-    // ---- Bond use count ----
-    int getOutstandingBondUses() const override;
-
-    // ---- Time of day ----
-    TimeOfDay getTimeOfDay() const override;
-
-    // ---- Phase 11d — Per-frame simulation state queries (stubs; full impl in Phase 11d) ----
-    std::vector<AgentState>              getAgentPositions()          const override;
-    std::vector<IntersectionSignalState> getIntersectionSignalStates() const override;
-    std::vector<RoadSegmentSpeed>        getRoadSegmentSpeeds()        const override;
-    std::vector<ServiceCoverageTile>     getServiceCoverage()          const override;
-
-    // ---- Serialization (Phase 11) ----
-    // serializeToJson() — produce a full city-state JSON string (schema_version: 1).
-    // consumeBudgetTicks — returns and clears the count of budget ticks fired since last call.
+    // ---- consumeBudgetTicks ----
     int consumeBudgetTicks() override;
 
-    // Called by SaveSystem::autoSave() and SaveSystem::saveToSlot().
-    // Not virtual — save/load seam; never called through ICitySimulation interface.
+    // ---- Serialization (Phase 11) ----
     std::string serializeToJson() const;
-
-    // deserializeFromJson() — restore city state from a JSON string previously produced by
-    // serializeToJson(). Returns true on success; false on any parse error, schema mismatch,
-    // or out-of-range field.  On failure, errorOut receives a human-readable description.
-    // Callers (SaveSystem::loadFromSlot, etc.) MUST check the return value.
     bool deserializeFromJson(const std::string& json, std::string& errorOut);
 
     // ---- Test / save seam (not in ICitySimulation) ----
-    // getBuildingVariantCounter() — returns the round-robin variant counter for the given
-    // (zone, tier) pair.  Index: zone*3 + tier.  Used by Phase 11 serialization tests.
-    // Tests and SaveSystem downcast ICitySimulation* to CitySimulation* to reach this.
-    // Not virtual — test/save seam; never called from production paths through the interface.
     int getBuildingVariantCounter(int zone, int tier) const;
-
-    // ---- Test / internal API (not in ICitySimulation) ----
-    // addServiceBuilding: inject a service building directly for unit tests.
-    // serviceTypeInt: 0=FireStation, 1=PoliceStation, 2=WaterTower, 3=PowerPlant
-    // Tests downcast ICitySimulation* to CitySimulation* to reach this method.
-    // Not virtual — test-only seam; never called from production paths.
     void addServiceBuilding(int x, int z, int serviceTypeInt);
-
-    // setModalOpen: allow tests to simulate a blocking modal dialog being active
-    // so undoLastAction() no-ops as specified in architecture/game-design/undo-system.md.
-    // Tests downcast ICitySimulation* to CitySimulation* to reach this method.
     void setModalOpen(bool open);
-
-    // setMapDimensions — supply the map tile width and depth.
-    // Called from main.cpp after TerrainSystem::generate() completes.
-    // Used by the border-ring terrain flattening loop in placeZone() (Phase 11m).
-    // Body is in CitySimulation.cpp (C-17 / SIM-12).
     void setMapDimensions(int mapWidth, int mapHeight);
 
-    // getMapTilesX / getMapTilesZ — ICitySimulation interface implementation.
-    int getMapTilesX() const override { return m_mapWidth; }
-    int getMapTilesZ() const override { return m_mapHeight; }
-
 #ifdef AITOWN_TESTING_ENABLED
-    // testForceUnlockDensityTier — test-friend method for Phase 10 unit tests.
-    //
-    // Directly sets the density unlock flag for the given (ZoneType, DensityTier) pair,
-    // bypassing the 3-consecutive-month revenue-streak counter. This allows tests to
-    // drive doDensityUnlockTick() into the upgrade-wave state without running multiple
-    // budget ticks above the revenue threshold.
-    //
-    // Index mapping (matches doDensityUnlockTick tier numbering):
-    //   Residential/Medium = 0, Commercial/Medium = 1, Industrial/Medium = 2,
-    //   Residential/High   = 3, Commercial/High   = 4, Industrial/High   = 5.
-    //
-    // DensityTier::Low has no unlock gate (always available) and is ignored.
-    //
-    // This method is compiled ONLY when AITOWN_TESTING_ENABLED=1 is defined.
-    // It MUST NOT appear in production builds (aitown target never defines this macro).
-    // (ref: implementation/phase-10.md — §testForceUnlockDensityTier decision 2026-03-04)
     void testForceUnlockDensityTier(ZoneType zone, DensityTier tier);
-#endif  // AITOWN_TESTING_ENABLED
+#endif
 
 private:
     // ------------------------------------------------------------------
     // Private nested types
     // ------------------------------------------------------------------
-    // C-15 / SIM-16: ServiceBuildingType (from simulation_types.h) is used directly in
-    // private data — the private ServiceType enum has been removed to eliminate the
-    // redundant type and the public↔private mapping conversion in placeServiceBuilding().
 
     // ScenarioState — placeholder for V1 scenario mode scaffolding.
-    // Serialized as the "scenario_state" object in the save JSON so that
-    // future scenario saves can round-trip without a schema bump.
-    // In V1 Sandbox mode these fields are always at their default (zero) values.
     struct ScenarioState {
         float       win_condition_progress{0.0f};
         int         elapsed_ticks{0};
         std::string scenario_id;
     };
 
-    struct TileData {
-        ZoneType    zone{ZoneType::Residential};
-        DensityTier density{DensityTier::Low};
-        bool        isZoned{false};
-        bool        isRoad{false};
-        float       population{0.0f};    // actual pop (float for smooth growth)
-        float       desirability{static_cast<float>(SimulationConstants::desirability_base_value)};
-        bool        firstDesirabilityTick{true};  // grace: skip service penalty on first tick
-
-        // Phase 11h: multi-tile footprint tracking.
-        // For non-origin footprint tiles: stores origin tile coords.
-        // For origin tiles or 1×1 buildings: -1,-1.
-        int  footprintOriginX{-1};
-        int  footprintOriginZ{-1};
-        bool isAbandoned{false};  // true when building abandoned due to road proximity > 3 tiles
-        bool underConstruction{false};  // true from placeZone() until demand >= construction_delay_demand_threshold
-        int  buildingVariantNum{0};     // variant (1–4) assigned at placeZone(); used when mesh spawns in doPopulationTick()
-
-        // Phase 10 per-tile audio transition flags.
-        // Each flag fires its corresponding SFX exactly once per coverage-loss event
-        // (not once per tick while uncovered) and resets silently when coverage is restored.
-        //
-        // wasPowered: true when this tile was power-covered on the previous tick.
-        //   CitySimulation::tick() fires SFX_POWER_OUT when wasPowered==true and the
-        //   current BFS pass finds the tile unpowered; then sets wasPowered=false.
-        //   Restored to true (no SFX) when power coverage returns.
-        //   Initialized true so that the very first brownout on a powered tile is audible.
-        bool wasPowered{true};
-
-        // wasWaterCovered: true when this tile was water-covered on the previous tick.
-        //   CitySimulation::tick() fires SFX_WATER_OUT when wasWaterCovered==true and
-        //   the current water-coverage pass finds the tile uncovered; then sets
-        //   wasWaterCovered=false. Restored to true (no SFX) when coverage returns.
-        //   Initialized true so that the first water-loss event on a covered tile is audible.
-        bool wasWaterCovered{true};
-
-        // alertFired: true while this tile is in an active service-alert episode
-        //   (desirability <= SimulationConstants::service_alert_desirability_threshold).
-        //   CitySimulation::tick() fires SFX_FIRE_ALERT or SFX_POLICE_ALERT (Fire takes
-        //   priority when both stations cover the tile) when alertFired==false and
-        //   desirability drops to or below the threshold; then sets alertFired=true.
-        //   Reset to false when desirability recovers above the threshold, allowing
-        //   the alert to re-fire in a future crisis episode.
-        //   Must be serialised in the save file (Phase 11) to prevent spurious re-fire on load.
-        bool alertFired{false};
-    };
-
-    struct LoanEntry {
-        int64_t principal{0};           // original principal
-        int64_t remainingPrincipal{0};  // decrements each repayment tick
-        int     ticksRemaining{0};      // countdown to payoff
-        bool    isBond{false};          // true if Emergency Municipal Bond
-    };
-
-    struct ServiceBuilding {
-        int                 x{0}, z{0};
-        ServiceBuildingType type{ServiceBuildingType::FireStation};
-        bool                degraded{false};    // true if in reduced-coverage state
-    };
-
+    // UndoAction — single-level undo record.
     struct UndoAction {
         enum class Type { PlaceZone, PlaceRoad, Demolish };
         Type     actionType{Type::PlaceZone};
         int      tileX{0}, tileZ{0};
-        TileData previousState{};       // tile state before action
-        int64_t  costPaid{0};           // treasury deduction to reverse on undo
-    };
-
-    // TrafficSignal — Phase 10 data structure for sfx_intersection_tick wiring.
-    // Maintained by placeRoad() (add signal at any road tile adjacent to 2+ roads)
-    // and demolishTile() (remove signal when road tile is demolished).
-    //
-    // A signal "fires" every phaseSeconds real-time seconds. Each fire represents
-    // one green→red or red→green phase change and triggers sfx_intersection_tick
-    // (pre-culled at > traffic_signal_cull_distance_meters from listener).
-    //
-    // phaseTimer: elapsed real-time seconds since last phase change.
-    //             Initialised to a random offset in [0, phaseSeconds) to prevent
-    //             all signals firing simultaneously on first frame.
-    struct TrafficSignal {
-        int   tileX{0};
-        int   tileZ{0};
-        float phaseTimer{0.0f};   // elapsed seconds since last phase change
-        float phaseSeconds{SimulationConstants::traffic_signal_phase_seconds};
+        TileData previousState{};
+        int64_t  costPaid{0};
     };
 
     // ------------------------------------------------------------------
     // Injected dependencies
     // ------------------------------------------------------------------
-    IRenderer*      m_renderer;   // not used in Phase 6; forward ref for Phase 9
+    IRenderer*      m_renderer;
     IAudioSystem*   m_audio;
     ISimulationRNG* m_rng;
     IClock*         m_clock;
@@ -315,166 +158,10 @@ private:
     Difficulty      m_difficulty;
 
     // ------------------------------------------------------------------
-    // Map dimensions (Phase 11m: border-ring terrain flattening bounds check)
-    // Set by setMapDimensions() after terrain generation.
+    // Map dimensions
     // ------------------------------------------------------------------
     int m_mapWidth{0};
     int m_mapHeight{0};
-
-    // ------------------------------------------------------------------
-    // Time tracking
-    // ------------------------------------------------------------------
-    float           m_accumulatedSimSeconds{0.0f};   // sub-tick accumulator
-    double          m_constructionTimeSeconds{0.0};  // clock at construction (grace period base)
-    double          m_lastPlacementSoundTime{-1.0};  // cooldown: placement SFX fire at most once per 100ms
-    int             m_totalTicks{0};                 // budget ticks fired so far
-    int             m_pendingBudgetTicks{0};         // ticks fired since last consumeBudgetTicks()
-    int             m_month{1};                      // 1–12
-    int             m_year{1};
-    SpeedMultiplier m_speed{kDefaultSimSpeed};       // starts at x3
-
-    // In-game hour tracking (for getTimeOfDay)
-    float     m_hoursAccumulator{0.0f};    // in-game hours accumulated since last TimeOfDay update
-    TimeOfDay m_timeOfDay{TimeOfDay::DAY};
-
-    // ------------------------------------------------------------------
-    // Economy / treasury
-    // ------------------------------------------------------------------
-    int64_t             m_treasury{0};
-    std::array<float, 3> m_taxRates{0.05f, 0.05f, 0.05f};  // indexed by (int)ZoneType; C-24
-    std::vector<LoanEntry> m_loans;
-    int                 m_outstandingBondUses{0};
-    int                 m_loanCooldownTicks{0};    // ticks until next forced loan allowed
-    bool                m_firstRevenueTicked{false}; // gate: first non-zero revenue tick seen
-    float               m_budgetSurplusPct{0.0f};   // from last tick
-
-    // Last-tick budget line items (returned by budget-panel accessors)
-    std::array<float, 3> m_lastMonthTaxRevenue{};  // C-24
-    float m_lastMonthWagesCost{0.0f};
-    float m_lastMonthRoadMaintenanceCost{0.0f};
-    float m_lastMonthServiceUpkeepCost{0.0f};
-    float m_lastMonthUtilityFeeRevenue{0.0f};
-    float m_currentMonthlyRevenue{0.0f};
-
-    // Budget-deficit warning dedup (resets when deficit clears -25%)
-    bool m_budgetWarnFired{false};
-
-    // ------------------------------------------------------------------
-    // Map state
-    // ------------------------------------------------------------------
-    std::unordered_map<int64_t, TileData> m_tiles;
-    std::vector<ServiceBuilding>           m_serviceBuildings;
-    int                                    m_roadTileCount{0};
-
-    // C-14: per-tick power coverage cache.
-    // Built once per budget tick by buildPowerCoverageCache() at the top of doDesirabilityTick().
-    // Contains the set of tileKey(x,z) values that are BFS-reachable from at least one power plant.
-    // Per-tile code in doDesirabilityTick() and computeUtilityFeeRevenue() queries this set
-    // in O(1) rather than running a full BFS for every tile.
-    // The cache is rebuilt at the start of each doDesirabilityTick(); it is stale between ticks
-    // (acceptable: coverage state only changes on budget tick boundaries).
-    std::unordered_set<int64_t> m_powerCoverageCache;
-
-    // Phase 10: traffic signals — one entry per intersection road tile.
-    // Populated by placeRoad() (when the new road tile is adjacent to 2+ existing roads)
-    // and pruned by demolishTile() (remove entry when a road tile is demolished).
-    // Each signal's phaseTimer is advanced by doTrafficSignalTick(realDeltaSeconds).
-    std::vector<TrafficSignal>  m_trafficSignals;
-
-    // TrafficVehicle — Phase 11d Deliverable 3a path-following vehicle agent.
-    // Each vehicle traverses a sequence of road tiles. srcX/srcZ is the tile it
-    // departed from; dstX/dstZ is the tile it is heading towards. progress is
-    // 0..1 (0 = at src centre, 1 = at dst centre). When progress reaches 1 the
-    // vehicle picks the next road tile and resets progress. headingDeg is
-    // recomputed at each tile transition.
-    struct TrafficVehicle {
-        uint32_t  id{0};            // stable per-vehicle ID (never reused)
-        int       srcX{0}, srcZ{0}; // current source tile
-        int       dstX{0}, dstZ{0}; // current destination tile
-        float     progress{0.0f};   // 0..1 from src to dst
-        float     headingDeg{0.0f};
-        ZoneType  zone{ZoneType::Residential};
-        // World-space current position (interpolated each tick)
-        float     worldX{0.0f};
-        float     worldZ{0.0f};
-        // Phase 11m: audio source pool indices; -1 = not acquired.
-        int idleIdx{-1};   // source-pool index for idle engine sound; -1 = not acquired
-        int moveIdx{-1};   // source-pool index for moving engine sound; -1 = not acquired
-    };
-
-    // Phase 11d: path-following traffic vehicles.
-    // Spawned / despawned by placeRoad() / demolishTile().
-    // Positions advanced each tick by doTrafficVehicleTick().
-    std::vector<TrafficVehicle> m_trafficVehicles;
-    uint32_t                    m_nextVehicleId{1}; // monotonic; never reused
-
-    // ------------------------------------------------------------------
-    // Traffic — rolling windows (circular buffers, initialized to null_path default)
-    // ------------------------------------------------------------------
-    float m_trafficWindowR[SimulationConstants::traffic_rolling_window_r_c]{};
-    float m_trafficWindowC[SimulationConstants::traffic_rolling_window_r_c]{};
-    float m_trafficWindowI[SimulationConstants::traffic_rolling_window_i]{};
-    int   m_trafficWindowIdxRC{0};   // circular write index for R/C
-    int   m_trafficWindowIdxI{0};    // circular write index for I
-    // Cached smoothstep results (updated each tick by computeTrafficDemand)
-    float m_trafficDemandFactorR{SimulationConstants::null_path_demand_default};
-    float m_trafficDemandFactorC{SimulationConstants::null_path_demand_default};
-    float m_trafficDemandFactorI{SimulationConstants::null_path_demand_default};
-
-    // Cached road speed fraction (updated each tick by computeTrafficDemand; used in congestion penalty)
-    float m_roadSpeedFraction{1.0f};
-
-    // Cached effective demand (post-floor, post-bootstrap, city-wide aggregate)
-    std::array<float, 3> m_demandPressurePct{0.0f, 0.0f, 0.0f};  // indexed by (int)ZoneType; C-24
-
-    // ------------------------------------------------------------------
-    // Population & city rating
-    // ------------------------------------------------------------------
-    int            m_totalPopulation{0};
-    int            m_prevPopulation{0};    // Phase 10: snapshot from end of previous tick
-                                           // Used to detect net-positive pop delta for GROWTH tier.
-                                           // Updated at the END of doPopulationTick() each budget tick.
-    CityRatingTier m_cityRating{CityRatingTier::Village};
-    bool           m_milestoneFired[5]{};  // 1K/10K/50K/100K/500K (index 0–4)
-
-    // ------------------------------------------------------------------
-    // Game-over tracking
-    // ------------------------------------------------------------------
-    int  m_consecutiveDeficitMonths{0};
-    bool m_month1AutoSlowed{false};  // resets when streak breaks
-
-    // ------------------------------------------------------------------
-    // Adaptive music intensity (Phase 10)
-    // ------------------------------------------------------------------
-    // Tracks the MusicIntensity tier that was last sent to IAudioSystem so
-    // that setMusicIntensity() is only called when the tier actually changes
-    // (edge-detect policy — avoids hammering the audio system every tick).
-    // Initialised to CALM: construction sends no setMusicIntensity call because
-    // the audio system already defaults to CALM on transitionToGameplay().
-    MusicIntensity m_lastSentMusicIntensity{MusicIntensity::CALM};
-
-    // ------------------------------------------------------------------
-    // Density unlock
-    // ------------------------------------------------------------------
-    DensityUnlockState m_densityUnlockState{};
-
-    // ------------------------------------------------------------------
-    // Building variant counters (Phase 11) — round-robin asset cycling.
-    // Index: zone * 3 + tier  (zone: 0=Res, 1=Com, 2=Ind; tier: 0=Low, 1=Med, 2=High).
-    // Incremented in placeZone() each time a building is placed for that (zone, tier) pair.
-    // Used by zoneAssetBaseName() (updated in Phase 11) to pick _01/_02/_03 variants.
-    // Persisted in save files so variant continuity is maintained across save/load.
-    // ------------------------------------------------------------------
-    std::array<int, 9> m_buildingVariantCounters{};
-
-    // Phase 11h: density upgrade retry counter per tile.
-    // Key: tileKey(tileX, tileZ). Reset to 0 on successful upgrade or manual demolish.
-    std::unordered_map<int64_t, int> m_upgradeRetryCount;
-
-    // ------------------------------------------------------------------
-    // Scenario state (V1 stub — always zero in Sandbox mode).
-    // ------------------------------------------------------------------
-    ScenarioState m_scenarioState{};
 
     // ------------------------------------------------------------------
     // Notification queue (FIFO, polled by UIManager)
@@ -485,145 +172,36 @@ private:
     // Undo (single-level, tick-based expiry)
     // ------------------------------------------------------------------
     std::optional<UndoAction> m_pendingUndo;
-    double                    m_undoExpiryWallSeconds{0.0}; // absolute clock time; for display
-    int                       m_undoExpiryTickTarget{-1};   // budget tick at which undo expires
+    double                    m_undoExpiryWallSeconds{0.0};
+    int                       m_undoExpiryTickTarget{-1};
     bool                      m_modalOpen{false};
+
+    // ------------------------------------------------------------------
+    // Audio debounce
+    // ------------------------------------------------------------------
+    double m_lastPlacementSoundTime{-1.0};
+
+    // ------------------------------------------------------------------
+    // Scenario state (V1 stub)
+    // ------------------------------------------------------------------
+    ScenarioState m_scenarioState{};
+
+    // ------------------------------------------------------------------
+    // Sub-system members
+    // ------------------------------------------------------------------
+    Economy    m_economy;
+    Traffic    m_traffic;
+    Zoning     m_zoning;
+    Population m_population;
+    SimTiming  m_timing;
 
     // ------------------------------------------------------------------
     // Private helpers
     // ------------------------------------------------------------------
-
-    // Speed value as real multiplier (Paused=0, x1=1, x3=3, x10=10)
     static float speedValue(SpeedMultiplier s);
-
-    // Tile map
-    static int64_t tileKey(int x, int z);
-    TileData*       findTile(int x, int z);
-    const TileData* findTile(int x, int z) const;
-
-    // Budget tick sub-steps (called in order from doBudgetTick)
-    void doBudgetTick();
-    void computeTrafficDemand();          // update rolling windows and traffic demand factors
-    void computeEffectiveDemand();        // combine traffic + capacity-ratio + bootstrap + floor
-    void doServiceDegradationTick();      // stochastic degradation / recovery of service buildings
-    void doDesirabilityTick();            // thin orchestrator: buildPowerCoverageCache → applyDesirabilityScores
-    void doPopulationTick();              // grow/decay tile populations; fire milestone notifications
-    void doDensityUnlockTick();           // 3-month threshold check + density upgrade wave
-    void doEconomyTick();                 // revenue, expenses, loan repayment, deficit checks
-    void doGameOverTick();                // deficit streak, auto-slow, game-over counter
-    void checkCityRatingTransition();     // tier change notification
-
-    // C-29 / SIM-29: doDesirabilityTick() sub-steps.
-    // buildServiceCoverageMap: scan all service buildings once and set the four
-    //   service-type presence flags via output parameters (service-coverage BFS phase).
-    //   Called at the start of doDesirabilityTick(), before applyDesirabilityScores().
-    void buildServiceCoverageMap(bool& outHasFireStation, bool& outHasPolice,
-                                 bool& outHasWater,       bool& outHasPower);
-
-    // applyDesirabilityScores: per-tile adjacency + service-coverage desirability update.
-    //   hasFireStation / hasPolice / hasWater / hasPower: pre-scanned service-type flags
-    //   populated by buildServiceCoverageMap().
-    void applyDesirabilityScores(bool hasFireStation, bool hasPolice,
-                                 bool hasWater,       bool hasPower);
-
-    // Phase 10: advance traffic signal timers and fire sfx_intersection_tick.
-    // Called once per tick() with real delta seconds (NOT sim-speed-scaled).
-    void doTrafficSignalTick(float realDeltaSeconds);
-
-    // Phase 11d: advance vehicle positions along road tiles.
-    // Speed: kVehicleTilePerSecond tiles per second (real-time, not sim-scaled).
-    void doTrafficVehicleTick(float realDeltaSeconds);
-
-    // Pick a random adjacent road tile for a vehicle to move to next.
-    // Returns true and sets outX/outZ if a valid neighbour exists (excluding the
-    // tile the vehicle just came from, unless it is the only option).
-    bool pickNextRoadTile(int curX, int curZ, int prevX, int prevZ,
-                          int& outX, int& outZ);
-
-    // Difficulty-dependent initial value helpers (C-1 / SIM-1).
-    // Called from both the constructor and reset() to eliminate duplicated switch blocks.
     static int64_t startingFundsForDifficulty(Difficulty d);
     static int     bondMaxUsesForDifficulty(Difficulty d);
 
-    // Traffic window zero-initialisation (C-2 / SIM-2).
-    // Called from both the constructor and reset().
-    void resetTrafficWindows();
-
-    // computeEconomySnapshot — C-6: compute all revenue/expense subtotals for one budget
-    // tick and write m_budgetSurplusPct (used by doServiceDegradationTick() and others).
-    // Also caches the subtotals in the m_lastMonth* members so doEconomyTick() can reuse
-    // them without calling all helpers a second time. Returns the net (revenue - expenses).
-    int64_t computeEconomySnapshot();
-
-    // doDensityUnlockTick helpers (C-27) — extracted from the monolithic function.
-    // getDensityUnlockThreshold: return the treasury threshold for tier index 0-5.
-    static float getDensityUnlockThreshold(int tierIndex);
-    // scanUnlockCandidates: collect origin tiles eligible for upgrade to (targetZone, currentRequired).
-    //   Returns candidates sorted by key (map iteration order). Internal struct defined in .cpp.
-    struct UpgradeCandidate { int64_t key; int tx; int tz; };
-    std::vector<UpgradeCandidate> scanUnlockCandidates(ZoneType targetZone, DensityTier currentRequired) const;
-    // applyDensityUpgrade: attempt to upgrade the tile at (tx, tz) to targetDensity.
-    //   Returns true if the upgrade was applied, false if blocked or retry-deferred.
-    //   sfxCallsThisTick: in-out counter capped at sfx_zone_upgrade_per_tick_cap.
-    bool applyDensityUpgrade(int tx, int tz, int64_t candKey,
-                             ZoneType targetZone, DensityTier targetDensity,
-                             DensityTier currentRequired, int& sfxCallsThisTick);
-
-    // Economy helpers
-    int64_t computeTaxRevenue(ZoneType zone) const;
-    int64_t computeWagesCost(int64_t totalCIRevenue) const;
-    int64_t computeServiceUpkeepCost() const;
-    int64_t computeRoadMaintenanceCost() const;
-    int64_t computeUtilityFeeRevenue() const;
-    void    processLoanRepayments(int64_t& treasury);
-    void    checkAndIssueForcedLoan();
-    float   getDensityUnlockScale() const;
-    float   computeBudgetSurplusPct(int64_t revenue, int64_t expenses) const;
-
-    // Population helpers
-    static int   maxPopulationForTile(ZoneType zone, DensityTier density);
-
-    // C-30 / SIM-30: doPopulationTick() sub-steps.
-    // computeZoneGrowthDelta: compute the capped population delta for a single tile.
-    //   demand: effectiveDemandForTile result; maxPop: maxPopulationForTile result.
-    static float computeZoneGrowthDelta(float currentPop, float demand, int maxPop);
-    // accumulateHouseDemand: sum residential tile populations into m_totalPopulation
-    //   and fire population milestone notifications.
-    void accumulateHouseDemand();
-
-    // Phase 10: map (ZoneType, DensityTier) to the _01 asset base name for
-    // IRenderer::placeBuildingMesh().  Round-robin variant cycling is Phase 11.
-    // Returns empty string on unknown inputs (renderer no-ops on empty baseName).
-    static std::string zoneAssetBaseName(ZoneType zone, DensityTier density);
-    float        effectiveDemandForTile(const TileData& tile) const;
-
-    // Service coverage helpers (tile-unit coordinates)
-    // tile_size_m = 10.0f (implicit: coverage radii in constants are in metres)
-    static constexpr float kTileSizeMeters = 10.0f;
-    float computeServiceCoverageRadius(ServiceBuildingType type, bool degraded) const;
-    bool  isBuildableTile(int x, int z) const;
-    float computeRadialCoverage(int tileX, int tileZ, ServiceBuildingType type) const;
-    float computePowerCoverage(int tileX, int tileZ) const;
-
-    // buildPowerCoverageCache() — C-14: run the BFS from all power plants once per budget tick.
-    // Populates m_powerCoverageCache with tileKey values for all BFS-reachable tiles.
-    // Replaces per-tile computePowerCoverage() calls in doDesirabilityTick() and
-    // computeUtilityFeeRevenue() with O(1) set lookups.
-    // Must be called once at the top of doDesirabilityTick() before the per-tile loop.
-    void buildPowerCoverageCache();
-
-    // Traffic helpers
-    static float smoothstep(float t);                         // [0,1] S-curve
-    static float travelTimeDemand(float avgTravelTimeSec,
-                                  float fullTime, float zeroTime);
-
-    // Undo helpers
+    void doBudgetTick();
     void recordUndoAction(const UndoAction& action);
-
-    // Phase 11h: footprint helpers.
-    static int footprintSize(DensityTier tier);     // returns 1, 2, or 3
-    static int serviceFootprintSize();              // returns 2
-    static int nearestRoadDistance(const std::unordered_map<int64_t, TileData>& tiles,
-                                    int tileX, int tileZ, int footprintN);
-    void doProximityTick();  // checks road proximity for all zone buildings
 };

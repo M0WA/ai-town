@@ -83,10 +83,10 @@ m_population.updateMusicIntensity(m_economy, m_audio);
 
 #### 0. Preparation
 
-- [ ] Read `CitySimulation.h` in full to confirm field-to-sub-system assignment
+- [x] Read `CitySimulation.h` in full to confirm field-to-sub-system assignment
   matches the current source (phase authored from 2026-04-07 snapshot; verify no
   new fields were added since).
-- [ ] Check `CMakeLists.txt` for the `aitown_sim` (or equivalent) target to confirm
+- [x] Check `CMakeLists.txt` for the `aitown_sim` (or equivalent) target to confirm
   the correct target name for `target_sources()` additions.
 
 ---
@@ -147,24 +147,24 @@ Private helpers (stay private to `Economy`):
 
 `LoanEntry` definition moves into `Economy.h` (remove from `CitySimulation.h`).
 
-- [ ] Create `src/simulation/Economy.h` with the struct definition, all field
+- [x] Create `src/simulation/Economy.h` with the struct definition, all field
   declarations (with their existing in-class initialisers), and all method
   declarations.
-- [ ] Create `src/simulation/Economy.cpp` — move implementation bodies from
+- [x] Create `src/simulation/Economy.cpp` — move implementation bodies from
   `CitySimulation.cpp` verbatim; update references to `m_*` fields that now
   live in this struct (they drop the `m_` prefix or keep it — choose consistently).
-- [ ] Add `Economy.cpp` to the simulation CMake target.
-- [ ] Update `architecture/game-design/economy-model.md` — change the sentence on
+- [x] Add `Economy.cpp` to the simulation CMake target.
+- [x] Update `architecture/game-design/economy-model.md` — change the sentence on
   approximately line 27 that describes `outstanding_bond_uses` as "tracked as a field
   in `CitySimulation` state" to "tracked as a field in the `Economy` sub-system
   (`src/simulation/Economy.h`)".
-- [ ] Update `architecture/audio-architecture/production-briefs/wav-sfx-production-brief.md`
+- [x] Update `architecture/audio-architecture/production-briefs/wav-sfx-production-brief.md`
   — change the trigger fields for:
   (a) `sfx_budget_warn` (approximately line 287) from `CitySimulation::tick()` to
       `Economy::doEconomyTick()` called from `CitySimulation::doBudgetTick()`;
   (b) `sfx_loan_issued` (approximately line 312) from `CitySimulation::tick()` to
       `Economy::checkAndIssueForcedLoan()` called from `Economy::doEconomyTick()`.
-- [ ] Update `architecture/game-design/economy-model.md` — in the "Phase 10 Audio
+- [x] Update `architecture/game-design/economy-model.md` — in the "Phase 10 Audio
   Callbacks for Economy Events" section, change the call-site references on
   approximately lines 84–86, 99, 103, 119, and 123 that say `CitySimulation::tick()`
   or "CitySimulation internal methods" to reference `Economy::doEconomyTick()` (for
@@ -216,13 +216,13 @@ Called by `CitySimulation::placeRoad()` and `demolishTile()` to add/remove signa
 and vehicles — these become `addSignalForTile()` / `removeSignalForTile()` /
 `spawnVehiclesForRoad()` / `removeVehiclesForRoad()` methods on `Traffic`.
 
-- [ ] Create `src/simulation/Traffic.h` and `Traffic.cpp`.
-- [ ] Add to CMake target.
-- [ ] Update `architecture/audio-architecture/production-briefs/vehicle-sfx-production-brief.md`
+- [x] Create `src/simulation/Traffic.h` and `Traffic.cpp`.
+- [x] Add to CMake target.
+- [x] Update `architecture/audio-architecture/production-briefs/vehicle-sfx-production-brief.md`
   — change the vehicle-distance-cull trigger reference on approximately line 229 from
   `CitySimulation::tick()` to `Traffic::doTrafficSignalTick()` called from
   `CitySimulation::tick()` to reflect the method migration in this phase.
-- [ ] Update `architecture/game-design/traffic-system.md` — change the `sfx_intersection_tick`
+- [x] Update `architecture/game-design/traffic-system.md` — change the `sfx_intersection_tick`
   call-site and distance-cull specification on approximately lines 167–199 that reference
   `CitySimulation::tick()` as the implementation location:
   (a) change the call-site annotation on lines 171 and 175 from "In `CitySimulation::tick()`"
@@ -230,7 +230,7 @@ and vehicles — these become `addSignalForTile()` / `removeSignalForTile()` /
   (b) change the distance-cull paragraph on lines 194–199 that says "in `CitySimulation`,
       NOT in `AudioSystem`" and "in `CitySimulation::tick()`" to reference
       `Traffic::doTrafficSignalTick()` called from `CitySimulation::tick()` instead.
-- [ ] Update `architecture/audio-architecture/audio-system.md` — change the comment on
+- [x] Update `architecture/audio-architecture/audio-system.md` — change the comment on
   approximately lines 193–194 that says "Vehicle engine source pairs are released by
   `CitySimulation::reset()` iterating `m_agents`" to reference `Traffic::reset(IAudioSystem*)`
   iterating `m_trafficVehicles`, called from `CitySimulation::reset()`, to reflect the
@@ -290,9 +290,9 @@ Private helpers:
 as `Zoning::placeZone(…)`, `Zoning::placeRoad(…)` etc., with
 `CitySimulation` calling them and handling the `IRenderer` side-effects.
 
-- [ ] Create `src/simulation/Zoning.h` and `Zoning.cpp`.
-- [ ] Add to CMake target.
-- [ ] Update `architecture/asset-standards/3d-model-standards.md` — Variant Selection
+- [x] Create `src/simulation/Zoning.h` and `Zoning.cpp`.
+- [x] Add to CMake target.
+- [x] Update `architecture/asset-standards/3d-model-standards.md` — Variant Selection
   Policy section: (a) change the "Counter storage location" bullet from `CitySimulation`
   to `Zoning` sub-system (`src/simulation/Zoning.h/cpp`); (b) in the
   `buildingAssetBaseName()` code block, update the annotation from "implement as a
@@ -313,28 +313,28 @@ as `Zoning::placeZone(…)`, `Zoning::placeRoad(…)` etc., with
       zone tile, it selects a visual building variant") to "When a zone tile is placed,
       the `Zoning` sub-system selects a visual building variant using
       `zoneAssetBaseName()`".
-- [ ] Update `architecture/game-design/save-system.md` — change any reference from
+- [x] Update `architecture/game-design/save-system.md` — change any reference from
   `CitySimulation::m_buildingVariantCounters` to `Zoning::m_buildingVariantCounters`
   to reflect the field migration in this phase.
-- [ ] Update `architecture/game-design/zoning-system.md` — change the sentence on
+- [x] Update `architecture/game-design/zoning-system.md` — change the sentence on
   line 215 that describes `upgradeRetryCount` and `upgradeBlocked` as tracked "on
   `CitySimulation`" to reference the `Zoning` sub-system
   (`src/simulation/Zoning.h/cpp`) instead.
-- [ ] Update `architecture/game-design/service-coverage.md` — change the reference
+- [x] Update `architecture/game-design/service-coverage.md` — change the reference
   on approximately line 339 that says `TileData` is "defined in
   `src/simulation/CitySimulation.h`" to "defined in `src/simulation/Zoning.h`"
   to reflect the struct migration in this phase.
-- [ ] Update `architecture/game-design/service-coverage.md` — change the code-snippet
+- [x] Update `architecture/game-design/service-coverage.md` — change the code-snippet
   comments in approximately lines 183–281 (covering `sfx_service_degrade`,
   `sfx_power_out`, and `sfx_water_out`) that say the audio calls happen
   "inside `CitySimulation::tick()`" to reference `Zoning::doServiceDegradationTick()`
   called from `CitySimulation::doBudgetTick()` instead.
-- [ ] Update `architecture/game-design/service-coverage.md` — change the code-snippet
+- [x] Update `architecture/game-design/service-coverage.md` — change the code-snippet
   comments in approximately lines 282–296 (covering `sfx_fire_alert` and
   `sfx_police_alert`) that say the audio calls happen "inside `CitySimulation::tick()`"
   to reference `Zoning::doDesirabilityTick()` called from `CitySimulation::doBudgetTick()`
   instead, consistent with the wav-sfx-production-brief.md update in this deliverable.
-- [ ] Update `architecture/audio-architecture/production-briefs/wav-sfx-production-brief.md`
+- [x] Update `architecture/audio-architecture/production-briefs/wav-sfx-production-brief.md`
   — change the trigger fields for:
   (a) `sfx_fire_alert` (approximately line 158) from `CitySimulation::tick()` to
       `Zoning::doDesirabilityTick()` called from `CitySimulation::doBudgetTick()`;
@@ -346,7 +346,7 @@ as `Zoning::placeZone(…)`, `Zoning::placeRoad(…)` etc., with
       `Zoning::doServiceDegradationTick()` called from `CitySimulation::doBudgetTick()`;
   (e) `sfx_service_degrade` (approximately line 262) from `CitySimulation::tick()` to
       `Zoning::doServiceDegradationTick()` called from `CitySimulation::doBudgetTick()`.
-- [ ] Update `architecture/graphics-architecture/scene-graph-ownership.md` — change the
+- [x] Update `architecture/graphics-architecture/scene-graph-ownership.md` — change the
   footprint-collision responsibility annotation on approximately line 492 from
   "the exclusive responsibility of `CitySimulation::placeZone()`" to
   "the exclusive responsibility of `Zoning::placeZone()` (called from
@@ -397,16 +397,16 @@ Private helpers:
 `applyDensityUpgrade(Zoning&, int, int, int64_t, ZoneType, DensityTier,
                      DensityTier, int&, IRenderer*, IAudioSystem*)`.
 
-- [ ] Create `src/simulation/Population.h` and `Population.cpp`.
-- [ ] Add to CMake target.
-- [ ] Update `architecture/audio-architecture/production-briefs/wav-sfx-production-brief.md`
+- [x] Create `src/simulation/Population.h` and `Population.cpp`.
+- [x] Add to CMake target.
+- [x] Update `architecture/audio-architecture/production-briefs/wav-sfx-production-brief.md`
   — change the trigger field on approximately line 330 for `sfx_zone_upgrade` from
   `CitySimulation::doDensityUnlockTick()` to `Population::doDensityUnlockTick()` to
   reflect the method migration in this phase.
-- [ ] Update `architecture/game-design/zoning-system.md` — change the references on
+- [x] Update `architecture/game-design/zoning-system.md` — change the references on
   approximately lines 314, 316, and 329 that refer to `CitySimulation::doDensityUnlockTick()`
   to `Population::doDensityUnlockTick()` to reflect the method migration in this phase.
-- [ ] Update `architecture/game-design/game-over-flow.md` — change the auto-slow
+- [x] Update `architecture/game-design/game-over-flow.md` — change the auto-slow
   implementation references on approximately lines 10–11 and 13 that say
   `CitySimulation::setSpeed(SpeedMultiplier::x1)` and `CitySimulation::tick()` to
   `Population::doGameOverTick()` calling `SimTiming::setSpeed(SpeedMultiplier::x1)`,
@@ -447,13 +447,13 @@ Public interface:
 `CitySimulation` delegates `setSpeed`, `isPaused`, `getSpeedMultiplier`,
 `getSimulationTime`, `getTimeOfDay` to `m_timing`.
 
-- [ ] Create `src/simulation/SimTiming.h` with the struct definition, all 9 field
+- [x] Create `src/simulation/SimTiming.h` with the struct definition, all 9 field
   declarations (with their existing in-class initialisers), and all method
   declarations listed above.
-- [ ] Create `src/simulation/SimTiming.cpp` — move implementation bodies from
+- [x] Create `src/simulation/SimTiming.cpp` — move implementation bodies from
   `CitySimulation.cpp` verbatim; update references to fields that now live in
   this struct.
-- [ ] Add `SimTiming.cpp` to the simulation CMake target.
+- [x] Add `SimTiming.cpp` to the simulation CMake target.
 
 ---
 
@@ -494,28 +494,28 @@ int CitySimulation::getTotalPopulation() const {
 `doBudgetTick()` becomes the cross-system orchestrator (sketch shown in the
 Cross-System Dependencies section above).
 
-- [ ] Update `CitySimulation.h` — remove all migrated fields, remove private method
+- [x] Update `CitySimulation.h` — remove all migrated fields, remove private method
   declarations that moved to sub-systems, add five sub-system member declarations
   (`m_economy`, `m_traffic`, `m_zoning`, `m_population`, `m_timing`),
   add `#include` for each sub-system header.
-- [ ] Add `// NOSONAR cpp:S1448` to the class declaration opening line in
+- [x] Add `// NOSONAR cpp:S1448` to the class declaration opening line in
   `CitySimulation.h` with inline comment: "// NOSONAR cpp:S1448 — thin coordinator;
   44 overrides are delegation boilerplate". This suppresses the remaining S1448
   warning that cannot be eliminated without a different architecture.
-- [ ] Update `CitySimulation.cpp` — replace all migrated method bodies with
+- [x] Update `CitySimulation.cpp` — replace all migrated method bodies with
   one-line delegations. Update `doBudgetTick()`, `tick()`, `reset()`,
   `placeZone()`, `placeRoad()`, `demolishTile()`, `placeServiceBuilding()`,
   `serializeToJson()`, `deserializeFromJson()` to call sub-system methods in the
   correct order.
-- [ ] Update serialization: `serializeToJson()` calls
+- [x] Update serialization: `serializeToJson()` calls
   `m_economy.serializeTo(j)`, `m_traffic.serializeTo(j)`,
   `m_zoning.serializeTo(j)`, `m_population.serializeTo(j)`,
   `m_timing.serializeTo(j)`. Each sub-system owns its own JSON section.
   `deserializeFromJson()` mirrors this.
-- [ ] Run `make test` — this builds with coverage instrumentation, runs all three test
+- [x] Run `make test` — this builds with coverage instrumentation, runs all three test
   tiers (unit, integration, OpenGL), generates `coverage_filtered.info` via lcov, and
   enforces the ≥ 95% total coverage gate. Fix any regressions before continuing.
-- [ ] Run the per-file 85% coverage awk check from `architecture/testing/coverage.md`
+- [x] Run the per-file 85% coverage awk check from `architecture/testing/coverage.md`
   against `coverage_filtered.info` for each new sub-system file
   (`Economy.cpp`, `Traffic.cpp`, `Zoning.cpp`, `Population.cpp`, `SimTiming.cpp`).
   If any file is below 85%, add targeted unit tests in the relevant
@@ -667,10 +667,10 @@ IS required in source files.
 
 **Deliverable checkboxes:**
 
-- [ ] Create `src/interfaces/IEconomyQuery.h` with the 12-method interface above.
-- [ ] Create `src/interfaces/IZoningActions.h` with the 9-method interface above.
-- [ ] Create `src/interfaces/ISimulationState.h` with the 15-method interface above.
-- [ ] In `src/interfaces/ISimulationState.h`, add the semantic-distinction comment
+- [x] Create `src/interfaces/IEconomyQuery.h` with the 12-method interface above.
+- [x] Create `src/interfaces/IZoningActions.h` with the 9-method interface above.
+- [x] Create `src/interfaces/ISimulationState.h` with the 15-method interface above.
+- [x] In `src/interfaces/ISimulationState.h`, add the semantic-distinction comment
   block alongside `getZoneDemandFactor` explaining its inverse relationship with
   `QueryResult::demandPressurePct` (this comment currently lives in
   `ICitySimulation.h`; migrate it to `ISimulationState.h` where the method is now
@@ -679,15 +679,15 @@ IS required in source files.
   `src/interfaces/simulation_types.h` cross-reference comments (lines ~175-180) to
   reference `ISimulationState::getZoneDemandFactor` instead of
   `ICitySimulation::getDemandPressurePct`.
-- [ ] Update `src/interfaces/ICitySimulation.h` — change base class list to
+- [x] Update `src/interfaces/ICitySimulation.h` — change base class list to
   extend all three new interfaces, remove the 36 moved method declarations, add
   the three new `#include`s, retain the 7 own method declarations and the long
   explanatory comments that accompany them (semantic distinction notes, etc.).
-- [ ] Verify the current symbol name in `src/interfaces/ICitySimulation.h` — the source
+- [x] Verify the current symbol name in `src/interfaces/ICitySimulation.h` — the source
   may use `getDemandPressurePct` (pre-11o) or `getDemandPressureFraction` (if 11o D-16
   was applied). In either case rename it to `getZoneDemandFactor` (the canonical target
   per testability-architecture.md). Adjust the grep/rename commands accordingly.
-- [ ] Rename `getDemandPressurePct` to `getZoneDemandFactor` across the codebase
+- [x] Rename `getDemandPressurePct` to `getZoneDemandFactor` across the codebase
   as part of this phase (the spec already uses the new name): update
   `src/interfaces/ICitySimulation.h`, `src/simulation/CitySimulation.h`,
   `src/simulation/CitySimulation.cpp`, `src/simulation/Traffic.h`,
@@ -698,8 +698,8 @@ IS required in source files.
   `getDemandPressurePct` (locate with `grep -r getDemandPressurePct tests/`).
   Update `MockCitySimulation`'s `MOCK_METHOD` entry for this method to use the
   new name.
-- [ ] Verify `MockCitySimulation` still compiles after the rename above.
-- [ ] Update `architecture/testing/testability-architecture.md` — (a) verify
+- [x] Verify `MockCitySimulation` still compiles after the rename above.
+- [x] Update `architecture/testing/testability-architecture.md` — (a) verify
   `IEconomyQuery`, `IZoningActions`, `ISimulationState` sub-interface
   descriptions are present and accurate; (b) update the `ICitySimulation` class definition to show the
   new base class list and 7-method own declaration; (c) note that
@@ -713,16 +713,16 @@ IS required in source files.
   and 802 from "Used by `CitySimulation::tick()` to perform the 80 m pre-acquisition
   distance cull" to "Used by `Traffic::doTrafficSignalTick()` (called from
   `CitySimulation::tick()`) to perform the 80 m pre-acquisition distance cull".
-- [ ] Update `architecture/game-design/economy-model.md` — change the references on
+- [x] Update `architecture/game-design/economy-model.md` — change the references on
   approximately lines 134 and 150 that describe `CitySimulation::update()` as the
   call site for `audioSystem->setMusicIntensity()` to reference
   `Population::updateMusicIntensity()` called from `CitySimulation::doBudgetTick()`
   instead (reflecting the sub-system extraction in this phase).
-- [ ] Update `architecture/audio-architecture/audio-system.md` — change the references
+- [x] Update `architecture/audio-architecture/audio-system.md` — change the references
   on approximately lines 57 and 222 that describe `CitySimulation::update()` as the
   call site for `setMusicIntensity()` to reference `Population::updateMusicIntensity()`
   called from `CitySimulation::doBudgetTick()` instead.
-- [ ] Update `architecture/audio-architecture/dynamic-soundscape.md`:
+- [x] Update `architecture/audio-architecture/dynamic-soundscape.md`:
   (a) change all stale `CitySimulation` callback references in the Stinger vs SFX
       decision matrix on approximately line 147:
       — the SFX_BUDGET_WARN row "(CitySimulation via audio callback)" → reference
@@ -734,34 +734,34 @@ IS required in source files.
       "`CitySimulation::update()` wiring" to reference `Population::updateMusicIntensity()`
       called from `CitySimulation::doBudgetTick()`; the no-op guard sentence
       (`AudioSystem::setMusicIntensity()` deduplicates) is unchanged.
-- [ ] Run `make build` and fix any compiler errors.
-- [ ] Verify `ICitySimulation.h` now declares exactly 7 own methods.
+- [x] Run `make build` and fix any compiler errors.
+- [x] Verify `ICitySimulation.h` now declares exactly 7 own methods.
 
 ---
 
 ### Exit Criteria
 
-- [ ] `npx markdownlint-cli 'implementation/phase-11q1.md'` — no errors.
-- [ ] All deliverable checkboxes above are checked.
-- [ ] `make build` passes with zero new warnings.
-- [ ] All three ctest suites pass with zero regressions.
-- [ ] `CitySimulation.h` has ≤ 20 fields (20 actual) (verify by counting).
+- [x] `npx markdownlint-cli 'implementation/phase-11q1.md'` — no errors.
+- [x] All deliverable checkboxes above are checked.
+- [x] `make build` passes with zero new warnings.
+- [x] All three ctest suites pass with zero regressions.
+- [x] `CitySimulation.h` has ≤ 20 fields (20 actual) (verify by counting).
   `CitySimulation` intentionally retains all 44 virtual override delegations plus
   private helpers — it will exceed 35 methods. Add `// NOSONAR cpp:S1448` to the
   class opening line in `CitySimulation.h` with the comment "thin coordinator —
   delegation overhead is expected".
-- [ ] Each of `Economy.h`, `Traffic.h`, `Zoning.h`, `Population.h`, `SimTiming.h`
+- [x] Each of `Economy.h`, `Traffic.h`, `Zoning.h`, `Population.h`, `SimTiming.h`
   has ≤ 35 methods and ≤ 20 fields.
-- [ ] `ICitySimulation.h` declares exactly 7 own methods.
-- [ ] `IEconomyQuery.h` declares 12 methods, `IZoningActions.h` 9,
+- [x] `ICitySimulation.h` declares exactly 7 own methods.
+- [x] `IEconomyQuery.h` declares 12 methods, `IZoningActions.h` 9,
   `ISimulationState.h` 15.
-- [ ] SonarCloud re-scan shows `cpp:S1820` resolved on `src/simulation/CitySimulation.h`
+- [x] SonarCloud re-scan shows `cpp:S1820` resolved on `src/simulation/CitySimulation.h`
   (field count drops from 65 to 20); `cpp:S1448` suppressed on
   `src/simulation/CitySimulation.h` via `// NOSONAR cpp:S1448` (delegation overhead
   is inherent to the coordinator pattern); `cpp:S1448` resolved on
   `src/interfaces/ICitySimulation.h` (own methods drop from 44 to 7, well under 35).
-- [ ] Code coverage gate (≥ 95%) maintained — no production logic deleted, only
+- [x] Code coverage gate (≥ 95%) maintained — no production logic deleted, only
   moved.
-- [ ] Each new sub-system `.cpp` file (`Economy.cpp`, `Traffic.cpp`, `Zoning.cpp`,
+- [x] Each new sub-system `.cpp` file (`Economy.cpp`, `Traffic.cpp`, `Zoning.cpp`,
   `Population.cpp`, `SimTiming.cpp`) individually meets the per-file 85% line-coverage
   floor required by the Phase 11 CI gate.

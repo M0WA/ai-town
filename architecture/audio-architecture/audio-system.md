@@ -54,8 +54,9 @@ enum class TimeOfDay { DAY, DUSK, NIGHT, DAWN };
 enum class SoundPriority { LOW = 0, NORMAL = 1, HIGH = 2, CRITICAL = 3 };
 
 // Defined in audio_types.h — reproduced here for interface completeness.
-// Music intensity tier driven by live simulation state.  Set by CitySimulation::update()
-// via IAudioSystem::setMusicIntensity().  AudioSystem maps each tier to the corresponding
+// Music intensity tier driven by live simulation state.  Set by Population::updateMusicIntensity()
+// (called from CitySimulation::doBudgetTick()) via IAudioSystem::setMusicIntensity().
+// AudioSystem maps each tier to the corresponding
 // gameplay stem pair (CALM→calm_01/02, GROWTH→growth_01/02, CRISIS→crisis_01/02).
 // Threshold conditions are authoritative in architecture/game-design/economy-model.md:
 //   CALM:   budget_surplus_pct >= 0%  (default state)
@@ -190,8 +191,8 @@ public:
     // to main.cpp's polling loop via consumeNewGameRequest(), which runs after the
     // transitionToMainMenu() call returns. Audio teardown (music/ambient stop) therefore
     // happens slightly before city state teardown; this is intentional.
-    // Vehicle engine source pairs are released by CitySimulation::reset() iterating
-    // m_agents (not by this method) — see phase-11m.md §D6 reset() spec.
+    // Vehicle engine source pairs are released by Traffic::reset(IAudioSystem*) iterating
+    // m_trafficVehicles (called from CitySimulation::reset(), not by this method) — see phase-11m.md §D6 reset() spec.
     // Added in Phase 11m.
     virtual void transitionToMainMenu() = 0;
 
@@ -219,8 +220,9 @@ public:
 
     // --- Phase 10 Adaptive Music API ---
     // Set the music intensity tier driven by live simulation state.
-    // Called by CitySimulation::update() whenever the city's fiscal or population state
-    // changes tier.  AudioSystem crossfades the active gameplay stem pair on the next
+    // Called by Population::updateMusicIntensity() (from CitySimulation::doBudgetTick())
+    // whenever the city's fiscal or population state changes tier.
+    // AudioSystem crossfades the active gameplay stem pair on the next
     // beat boundary to the stem pair matching the new tier
     // (CALM→calm_01/02, GROWTH→growth_01/02, CRISIS→crisis_01/02).
     // Time-of-day forced-Calm override (DUSK/NIGHT/DAWN) takes precedence internally;

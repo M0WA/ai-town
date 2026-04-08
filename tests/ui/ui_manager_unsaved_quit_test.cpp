@@ -73,7 +73,7 @@ protected:
         EXPECT_CALL(sim_, getCityRating()).WillRepeatedly(Return(CityRatingTier::Village));
         EXPECT_CALL(sim_, getTotalPopulation()).WillRepeatedly(Return(0));
         EXPECT_CALL(sim_, getSimulationTime()).WillRepeatedly(Return(SimulationTime{1, 1}));
-        EXPECT_CALL(sim_, getDemandPressurePct(_)).WillRepeatedly(Return(0.0f));
+        EXPECT_CALL(sim_, getZoneDemandFactor(_)).WillRepeatedly(Return(0.0f));
         EXPECT_CALL(sim_, hasUndoPendingAction()).WillRepeatedly(Return(false));
         EXPECT_CALL(sim_, getUndoExpiryTimeSeconds()).WillRepeatedly(Return(0.0));
         EXPECT_CALL(sim_, consumeBudgetTicks()).WillRepeatedly(Return(0));

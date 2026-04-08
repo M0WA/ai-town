@@ -665,8 +665,9 @@ public:
 
     // Phase 10 addition — listener position query for pre-acquisition distance culls.
     // Returns the current camera/listener position in world space as a vec3.
-    // Used by CitySimulation::tick() to perform the 80 m pre-acquisition distance cull
-    // for sfx_intersection_tick before calling IAudioSystem::playPositionalSound().
+    // Used by Traffic::doTrafficSignalTick() (called from CitySimulation::tick()) to perform
+    // the 80 m pre-acquisition distance cull for sfx_intersection_tick before calling
+    // IAudioSystem::playPositionalSound().
     // IrrlichtRenderer::getListenerPosition() returns the position component of the last
     // CameraParams passed to setCamera(). MockRenderer::getListenerPosition() returns
     // vec3{0,0,0} by default (suitable for distance-cull tests that set a specific value
@@ -799,9 +800,10 @@ public:
 // getTileScreenBounds) ARE called from UIManager::onEvent() during tests. Each test
 // must declare EXPECT_CALL for each of these that the production code exercises.
 //
-// The Phase 11d method getListenerPosition() IS called from CitySimulation::tick() during
-// the sfx_intersection_tick 80 m pre-cull. Simulation tests that exercise tick() with
-// traffic signals must either set ON_CALL for getListenerPosition() or use NiceMock.
+// The Phase 11d method getListenerPosition() IS called from Traffic::doTrafficSignalTick()
+// (called from CitySimulation::tick()) during the sfx_intersection_tick 80 m pre-cull.
+// Simulation tests that exercise tick() with traffic signals must either set ON_CALL for
+// getListenerPosition() or use NiceMock.
 
 // Canonical IAudioSystem — 19 methods (Phase 10 added setMusicIntensity; Phase 11d added acquireVehicleEnginePair, releaseVehicleEnginePair, updateVehicleAudio; Phase 11m added transitionToMainMenu). Authoritative definition in audio-architecture/audio-system.md.
 // Uses only game-domain types (SoundId, SoundHandle, MusicTrackId, StingerType, SimSpeed,
@@ -1091,9 +1093,9 @@ the audio playback path, not a unit test with strict call-count expectations on 
 
 **CTest filter**: `-R NotificationSFX_EFXBypass_DirectFilterSetToNull`
 
-**`AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` test contract** — this test verifies that `CitySimulation::update()` calls `audioSystem->setMusicIntensity()` with the correct `MusicIntensity` tier when treasury/growth/deficit state changes, matching the thresholds defined in `architecture/game-design/economy-model.md` Music Intensity Tiers section.
+**`AdaptiveMusicIntensity_StateDriven_UpdatesAudioSystem` test contract** — this test verifies that `Population::updateMusicIntensity()` (called from `CitySimulation::doBudgetTick()`) dispatches `IAudioSystem::setMusicIntensity()` with the correct `MusicIntensity` tier when treasury/growth/deficit state changes, matching the thresholds defined in `architecture/game-design/economy-model.md` Music Intensity Tiers section.
 
-**Fixture**: `StrictMock<MockAudioSystem>` injected into a real `CitySimulation` instance at construction. No `UIManager` instance required — the music intensity decision lives entirely in `CitySimulation::update()`.
+**Fixture**: `StrictMock<MockAudioSystem>` injected into a real `CitySimulation` instance at construction. No `UIManager` instance required — the music intensity decision lives entirely in `Population::updateMusicIntensity()` (invoked from `CitySimulation::doBudgetTick()`).
 
 **Test assertions** (minimum three state transitions):
 

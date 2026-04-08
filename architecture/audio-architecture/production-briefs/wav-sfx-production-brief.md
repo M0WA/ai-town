@@ -155,7 +155,7 @@ pool pressure.
 | Positional | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`) |
 | Priority | CRITICAL |
 | EFX bypass | No (positional, benefits from occlusion) |
-| Trigger | `CitySimulation::tick()` on tile desirability ≤ 20 with `!tile.alertFired` |
+| Trigger | `Zoning::doDesirabilityTick()` (called from `CitySimulation::doBudgetTick()`) on tile desirability ≤ 20 with `!tile.alertFired` |
 
 **Character**: a fire alarm or emergency tone at mid-distance. Should convey fire
 emergency clearly. A repeating electronic alarm tone (two-tone yelp pattern or continuous
@@ -182,7 +182,7 @@ conventional characters — use these conventions.
 | Positional | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`) |
 | Priority | CRITICAL |
 | EFX bypass | No |
-| Trigger | `CitySimulation::tick()` on tile desirability ≤ 20 with `!tile.alertFired`, when the tile is within Police Station coverage radius but NOT within Fire Station coverage radius |
+| Trigger | `Zoning::doDesirabilityTick()` (called from `CitySimulation::doBudgetTick()`) on tile desirability ≤ 20 with `!tile.alertFired`, when the tile is within Police Station coverage radius but NOT within Fire Station coverage radius |
 
 **Character**: a police siren or emergency tone, distinct from the fire alarm. A single-
 tone or two-tone police siren pattern (wail or yelp) is appropriate. Duration 2–4 s.
@@ -220,7 +220,7 @@ They represent infrastructure state changes that affect the whole city, not a sp
 | Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
 | Priority | NORMAL |
 | EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `CitySimulation::tick()` on zone tile losing power coverage (`tile.wasPowered` transition) |
+| Trigger | `Zoning::doServiceDegradationTick()` (called from `CitySimulation::doBudgetTick()`) on zone tile losing power coverage (`tile.wasPowered` transition) |
 
 **Character**: the sound of power going out. A brief electrical snap or buzz followed by
 silence — the sudden absence of electrical hum. A short (< 0.5 s) electrical arc or
@@ -242,7 +242,7 @@ pressure drop. Make these clearly distinct.
 | Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
 | Priority | NORMAL |
 | EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `CitySimulation::tick()` on zone tile losing water coverage (`tile.wasWaterCovered` transition) |
+| Trigger | `Zoning::doServiceDegradationTick()` (called from `CitySimulation::doBudgetTick()`) on zone tile losing water coverage (`tile.wasWaterCovered` transition) |
 
 **Character**: the sound of water supply disruption. A brief rushing water sound
 followed by a cutoff — as if a pipe pressure has dropped. Alternatively, a gurgling
@@ -259,7 +259,7 @@ or draining sound. Duration 1–2 s.
 | Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
 | Priority | NORMAL |
 | EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `CitySimulation::tick()` on Fire Station, Police Station, or Water Tower RNG degradation success |
+| Trigger | `Zoning::doServiceDegradationTick()` (called from `CitySimulation::doBudgetTick()`) on Fire Station, Police Station, or Water Tower RNG degradation success |
 
 **Character**: a warning tone indicating a service building has entered reduced-coverage
 state. Should convey advisory warning — not an emergency (that is `sfx_fire_alert`/
@@ -284,7 +284,7 @@ These three SFX fire non-positionally in response to budget and economy events.
 | Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
 | Priority | NORMAL |
 | EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `CitySimulation::tick()` on first crossing of −25% budget surplus threshold in a deficit streak |
+| Trigger | `Economy::doEconomyTick()` (called from `CitySimulation::doBudgetTick()`) on first crossing of −25% budget surplus threshold in a deficit streak |
 
 **Character**: a budget deficit warning — the city's finances have crossed a significant
 negative threshold. Should convey financial concern without the full alarm of the crisis
@@ -309,7 +309,7 @@ is distinguishable when the `stinger_crisis` follows within 1–2 s.
 | Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
 | Priority | NORMAL |
 | EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `CitySimulation::tick()` on forced loan issuance |
+| Trigger | `Economy::checkAndIssueForcedLoan()` (called from `Economy::doEconomyTick()`) on forced loan issuance |
 
 **Character**: a brief acknowledgement that a loan has been issued — a financial
 transaction sound. Not celebratory (the loan is forced by the game, not a player choice),
@@ -327,7 +327,7 @@ onset. Should be distinct from `sfx_budget_warn` in character.
 | Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
 | Priority | NORMAL |
 | EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `CitySimulation::doDensityUnlockTick()` on tile density tier upgrade (cap: 3 calls per invocation) |
+| Trigger | `Population::doDensityUnlockTick()` on tile density tier upgrade (cap: 3 calls per invocation) |
 
 **Character**: a zone tile has been automatically upgraded to a higher density tier —
 a positive, rewarding sound. Should feel like growth and progress, not a crisis. A brief

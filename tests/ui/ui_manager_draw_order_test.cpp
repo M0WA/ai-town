@@ -162,7 +162,7 @@ protected:
         ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::Village));
         ON_CALL(sim_, getTotalPopulation()).WillByDefault(Return(100));
         ON_CALL(sim_, getSimulationTime()).WillByDefault(Return(SimulationTime{1, 1}));
-        ON_CALL(sim_, getDemandPressurePct(_)).WillByDefault(Return(0.5f));
+        ON_CALL(sim_, getZoneDemandFactor(_)).WillByDefault(Return(0.5f));
         ON_CALL(sim_, getUndoExpiryTimeSeconds()).WillByDefault(Return(0.0));
 
         ui_ = std::make_unique<UIManager>(&backend_, &audio_, &sim_, &clock_);
@@ -252,9 +252,9 @@ TEST_F(HUDDrawCoverageTest, Draw_UndoPending) {
 
 // HUD with various demand pressure percentages.
 TEST_F(HUDDrawCoverageTest, Draw_HighDemand) {
-    ON_CALL(sim_, getDemandPressurePct(ZoneType::Residential)).WillByDefault(Return(0.9f));
-    ON_CALL(sim_, getDemandPressurePct(ZoneType::Commercial)).WillByDefault(Return(0.1f));
-    ON_CALL(sim_, getDemandPressurePct(ZoneType::Industrial)).WillByDefault(Return(0.5f));
+    ON_CALL(sim_, getZoneDemandFactor(ZoneType::Residential)).WillByDefault(Return(0.9f));
+    ON_CALL(sim_, getZoneDemandFactor(ZoneType::Commercial)).WillByDefault(Return(0.1f));
+    ON_CALL(sim_, getZoneDemandFactor(ZoneType::Industrial)).WillByDefault(Return(0.5f));
     EXPECT_NO_FATAL_FAILURE(ui_->draw());
 }
 
