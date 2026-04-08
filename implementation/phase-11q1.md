@@ -1,6 +1,6 @@
 ## Phase 11q1: Split `CitySimulation` into Sub-Systems and Introduce Sub-Interfaces
 
-**Status: Planned**
+**Status: DONE**
 
 **Prerequisite**: none. Independent of phase-11q2/11q3.
 
