@@ -134,6 +134,7 @@ jobs:
             -Dsonar.tests=tests \
             -Dsonar.coverageReportPaths=coverage.xml \
             -Dsonar.exclusions="assets/**,build/**,tools/**" \
+            -Dsonar.coverage.exclusions="src/benchmark/**" \
             -Dsonar.cpd.exclusions="tests/**" \
             -Dsonar.scm.provider=git \
             -Dsonar.projectBaseDir=. \
