@@ -75,7 +75,7 @@ test:
 	fi
 	lcov --capture --directory $(BUILD_DIR) --base-directory . \
 	     --gcov-tool gcov-13 \
-	     --ignore-errors mismatch,inconsistent,version,empty \
+	     --ignore-errors mismatch,inconsistent,version,empty,path \
 	     --output-file $(COVERAGE_INFO)
 	lcov --remove $(COVERAGE_INFO) \
 	     --ignore-errors unused,inconsistent \
