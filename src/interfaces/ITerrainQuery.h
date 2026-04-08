@@ -46,6 +46,16 @@ public:
     // Out-of-bounds coordinates are silently ignored.
     virtual void setTileHeight(int tileX, int tileZ, float height) = 0;
 
+    // Returns the bilinear-interpolated Y-axis terrain height in world-space metres
+    // at arbitrary world coordinates (worldX, worldZ).
+    // Unlike getHeightAt() which returns the grid-centre sample for integer tile coords,
+    // this method interpolates between the four surrounding tile-centre heights to provide
+    // smooth sub-tile height queries. Used by IrrlichtRenderer to position vehicles on the
+    // road surface and compute terrain slope for pitch/roll rotation.
+    // Returns 0.0f for out-of-bounds coordinates or before generate() is called.
+    // (ref: implementation/phase-11q.md Fix 2b)
+    [[nodiscard]] virtual float getHeightAtWorld(float worldX, float worldZ) const = 0;
+
     // Flush all pending terrain chunk rebuilds synchronously.
     // Called after setTileHeight to ensure terrain geometry matches the new
     // heightmap data before the next render frame.

@@ -15,6 +15,7 @@
 #include "render_constants.h"             // Phase 10: RenderConstants::road_lod2_color
 #include "TerrainShaderCallback.h"        // Phase 10c: terrain splat-map shader callback
 #include "RenderSystem.h"                 // Phase 10c: isSRGBTextureSupported() query
+#include "vehicle_mesh_path.h"             // Phase 11q: vehicleMeshPath(zone, variantIdx)
 
 #include <algorithm>   // std::min, std::max
 #include <cstdio>      // fprintf
@@ -30,6 +31,7 @@
 using namespace irr;
 using namespace irr::video;
 using namespace irr::scene;
+using namespace RenderConstants;
 
 // Degrees-to-radians conversion constant — used in setFOV.
 static constexpr float kDegToRad = static_cast<float>(M_PI / 180.0);
@@ -1865,9 +1867,7 @@ void IrrlichtRenderer::ensureRoadMeshes()
 //   v2 = (+H, h11, +H)  front-right (tileX+1, tileZ+1)
 //   v3 = (-H, h01, +H)  front-left  (tileX,   tileZ+1)
 //
-// A small bias (kRoadBias = 0.10 m) is added to each vertex Y so the road sits
-// slightly above the terrain and the polygon offset material flag handles Z-fighting
-// at any camera distance.
+// road surface lifted +0.25 m above terrain (kRoadSurfaceYBias)
 //
 // Kerb geometry follows the same corner heights so kerbs hug the terrain edge.
 // -------------------------------------------------------------------------
@@ -1876,12 +1876,8 @@ irr::scene::SMesh* IrrlichtRenderer::buildTileRoadMesh(
 {
     if (!m_driver) return nullptr;
 
-    using namespace RenderConstants;
-
     // Road tile half-extent in X and Z (5 m).
     static constexpr float H  = kTileSize * 0.5f;
-    // Y bias: road surface sits 25 cm above terrain.
-    static constexpr float B  = 0.25f;
 
     // Effective material type (road shader or EMT_SOLID fallback).
     const E_MATERIAL_TYPE roadMat = (m_roadMaterialType >= 0)
@@ -1889,10 +1885,10 @@ irr::scene::SMesh* IrrlichtRenderer::buildTileRoadMesh(
         : EMT_SOLID;
 
     // Pre-compute biased corner heights.
-    const float y00 = h00 + B;   // back-left
-    const float y10 = h10 + B;   // back-right
-    const float y01 = h01 + B;   // front-left
-    const float y11 = h11 + B;   // front-right
+    const float y00 = h00 + kRoadSurfaceYBias;   // back-left
+    const float y10 = h10 + kRoadSurfaceYBias;   // back-right
+    const float y01 = h01 + kRoadSurfaceYBias;   // front-left
+    const float y11 = h11 + kRoadSurfaceYBias;   // front-right
 
     SMesh* mesh = new SMesh();
 
@@ -2980,23 +2976,7 @@ static std::string vehicleAtlasPath()
     return kPath;
 }
 
-// Helper: return the vehicle mesh filename (relative to assets root) for a given zone/handle.
-static std::string vehicleMeshPath(ZoneType zone, AgentHandle handle)
-{
-    // A-18: hoist repeated path prefix into a single local variable.
-    const std::string kVehicleDir = getAssetsDir() + "/3d/vehicles/";
-    switch (zone) {
-        case ZoneType::Residential: {
-            const char* variants[3] = {"car_sedan", "car_hatchback", "car_suv"};
-            return kVehicleDir + variants[handle % 3] + "_lod0.b3d";
-        }
-        case ZoneType::Commercial:
-            return kVehicleDir + "bus_standard_lod0.b3d";
-        case ZoneType::Industrial:
-            return kVehicleDir + "truck_cargo_lod0.b3d";
-    }
-    return kVehicleDir + "car_sedan_lod0.b3d";
-}
+// vehicleMeshPath() is now provided by vehicle_mesh_path.h (Phase 11q).
 
 void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tileZ, ZoneType zone)
 {
@@ -3008,7 +2988,7 @@ void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tile
     }
 
     // Load vehicle mesh from scene manager cache (no drop — smgr retains ownership).
-    std::string meshPath = vehicleMeshPath(zone, handle);
+    std::string meshPath = vehicleMeshPath(zone, static_cast<int>(handle) % 3);
     IAnimatedMesh* animMesh = m_smgr->getMesh(meshPath.c_str());
     if (!animMesh) {
         std::string meshMsg = "[IrrlichtRenderer] spawnVehicleAgent: mesh not found: ";
@@ -3022,10 +3002,34 @@ void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tile
     if (!node) return;
 
     // Position at tile centre (world coords = tile * kTileSize + half-tile offset).
-    float wx = static_cast<float>(tileX) * kTileSize + kTileSize * 0.5f;
-    float wz = static_cast<float>(tileZ) * kTileSize + kTileSize * 0.5f;
-    node->setPosition(core::vector3df(wx, 0.0f, wz));
-    node->setRotation(core::vector3df(0.0f, 0.0f, 0.0f));
+    const float wx = static_cast<float>(tileX) * kTileSize + kTileSize * 0.5f;
+    const float wz = static_cast<float>(tileZ) * kTileSize + kTileSize * 0.5f;
+    float spawnY = 0.0f;
+    if (m_terrain) {
+        spawnY = m_terrain->getHeightAtWorld(wx, wz) + kRoadSurfaceYBias;
+    }
+    node->setPosition(core::vector3df(wx, spawnY, wz));
+
+    // Apply initial terrain slope rotation (pitch/roll) at spawn position.
+    if (m_terrain) {
+        const float rawHeight = m_terrain->getHeightAtWorld(wx, wz);
+        const float kStep = kTileSize * 0.5f;
+        const float hRight = m_terrain->getHeightAtWorld(wx + kStep, wz);
+        const float hFront = m_terrain->getHeightAtWorld(wx, wz + kStep);
+        const float dhX = (hRight - rawHeight) / kStep;
+        const float dhZ = (hFront - rawHeight) / kStep;
+        // No heading at spawn — default yaw = 0.
+        const float nx = -(dhX);  // localRight == dhX when yaw=0
+        const float ny = 1.0f;
+        const float nz = -(dhZ);  // localForward == dhZ when yaw=0
+        const float len = std::sqrt(nx * nx + ny * ny + nz * nz);
+        const float pitchRad = std::atan2(nz / len, ny / len);
+        const float rollRad  = std::atan2( nx / len, ny / len);
+        constexpr float kRadToDeg = 180.0f / 3.14159265f;
+        node->setRotation(core::vector3df(pitchRad * kRadToDeg, 0.0f, rollRad * kRadToDeg));
+    } else {
+        node->setRotation(core::vector3df(0.0f, 0.0f, 0.0f));
+    }
 
     // Apply vehicle atlas texture via vehicleAtlasPath() (A-25).
     ITexture* vehicleTex = m_driver->getTexture(vehicleAtlasPath().c_str());
@@ -3063,16 +3067,16 @@ void IrrlichtRenderer::moveVehicleAgent(AgentHandle handle, float worldX, float 
     auto it = m_agentNodes.find(handle);
     if (it == m_agentNodes.end()) return;  // no-op if handle not found
 
-    // Sample terrain height at this world position so vehicles sit on the ground.
+    // Sample bilinear terrain height at world position + road surface bias.
     float y = 0.0f;
     int tileX = static_cast<int>(worldX / kTileSize);
     int tileZ = static_cast<int>(worldZ / kTileSize);
     if (m_terrain) {
-        y = m_terrain->getHeightAt(tileX, tileZ);
+        const float rawHeight = m_terrain->getHeightAtWorld(worldX, worldZ);
+        y = rawHeight + kRoadSurfaceYBias;
     }
 
     // Apply lane center offset based on heading, unless at an intersection tile.
-    using namespace RenderConstants;
     float laneX = worldX;
     float laneZ = worldZ;
     if (!isIntersectionTile(tileX, tileZ)) {
@@ -3102,7 +3106,34 @@ void IrrlichtRenderer::moveVehicleAgent(AgentHandle handle, float worldX, float 
 
     IMeshSceneNode* node = it->second;
     node->setPosition(core::vector3df(laneX, y, laneZ));
-    node->setRotation(core::vector3df(0.0f, headingDeg, 0.0f));
+
+    // Compute terrain slope rotation (pitch/roll) from three height samples.
+    if (m_terrain) {
+        const float rawHeight = m_terrain->getHeightAtWorld(worldX, worldZ);
+        const float kStep = kTileSize * 0.5f;
+        const float hRight = m_terrain->getHeightAtWorld(worldX + kStep, worldZ);
+        const float hFront = m_terrain->getHeightAtWorld(worldX, worldZ + kStep);
+        const float dhX = (hRight - rawHeight) / kStep;
+        const float dhZ = (hFront - rawHeight) / kStep;
+        const float authoritativeYaw = headingDeg;
+        const float yawRad = authoritativeYaw * (3.14159265f / 180.0f);
+        const float cosy = std::cos(yawRad);
+        const float siny = std::sin(yawRad);
+        const float localForward = dhX * siny + dhZ * cosy;
+        const float localRight   = dhX * cosy - dhZ * siny;
+        const float nx = -localRight;
+        const float ny = 1.0f;
+        const float nz = -localForward;
+        const float len = std::sqrt(nx * nx + ny * ny + nz * nz);
+        const float pitchRad = std::atan2(nz / len, ny / len);
+        const float rollRad  = std::atan2( nx / len, ny / len);
+        constexpr float kRadToDeg = 180.0f / 3.14159265f;
+        const float pitchDeg = pitchRad * kRadToDeg;
+        const float rollDeg  = rollRad  * kRadToDeg;
+        node->setRotation(core::vector3df(pitchDeg, authoritativeYaw, rollDeg));
+    } else {
+        node->setRotation(core::vector3df(0.0f, headingDeg, 0.0f));
+    }
 }
 
 void IrrlichtRenderer::despawnVehicleAgent(AgentHandle handle)

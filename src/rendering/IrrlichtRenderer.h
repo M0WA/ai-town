@@ -210,6 +210,14 @@ public:
     // Intended for use by cloud_plane_test.cpp in opengl_tests.
     [[deprecated("for tests only")]] irr::scene::IMeshSceneNode* cloudNodeForTest() const { return m_cloudNode; }
 
+    // agentNodeForTest() — test-only accessor for a traffic agent scene node.
+    // Returns nullptr if the handle is not registered.
+    // Intended for use by VehicleYBiasTest.cpp in opengl_tests (Phase 11q).
+    [[deprecated("for tests only")]] irr::scene::IMeshSceneNode* agentNodeForTest(AgentHandle handle) const {
+        auto it = m_agentNodes.find(handle);
+        return it != m_agentNodes.end() ? it->second : nullptr;
+    }
+
 private:
     irr::IrrlichtDevice*        m_device;
     UIManager*                  m_uiManager;
@@ -315,11 +323,8 @@ private:
     // Using 4096 accommodates any V1 map dimension (max 1024) with safe headroom.
     static constexpr int kMaxMapTiles = 4096;
 
-    // kTileSize: world-space side length of one tile in metres.
-    // Must match the tile dimensions defined in TerrainSystem / SimulationConstants.
-    // Used to convert (tileX, tileZ) → world position (tileX * kTileSize, 0, tileZ * kTileSize).
-    // Value: 10.0f metres per tile (matches physics tile grid in architecture specs).
-    static constexpr float kTileSize = 10.0f;
+    // kTileSize: now defined in RenderConstants (render_constants.h).
+    // Brought into scope via file-scope `using namespace RenderConstants;` in IrrlichtRenderer.cpp.
 
     // Tile key helper — produces a stable uint64_t key from (tileX, tileZ).
     static uint64_t tileKey(int tileX, int tileZ) noexcept {

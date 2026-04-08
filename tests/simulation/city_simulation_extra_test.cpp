@@ -1572,18 +1572,20 @@ TEST_F(NiceExtraCoverageTest, GetAgentPositions_AfterJunction_ReturnsNonEmpty) {
 }
 
 TEST_F(NiceExtraCoverageTest, GetAgentPositions_ZonedNeighbor_PropagatesZone) {
-    // Phase 11d: vehicles spawn every kVehicleSpawnInterval (3) road tiles placed.
-    // The vehicle spawns at the 3rd road tile and scans its neighbours at spawn time
-    // to determine zone type. Ensure a Commercial zone adjacent to the spawn tile is
-    // reflected in the vehicle's zone field.
+    // Phase 11q: vehicles derive zone from the DESTINATION tile at spawn time,
+    // not from any adjacent neighbour. If the destination tile is unzoned (road),
+    // the zone is assigned via RNG fallback: roll < 70 -> Residential.
+    // ManualRNG default int sequence = {0}, non-strict wrap -> nextInt(0,99) returns 0
+    // -> roll=0 < 70 -> ZoneType::Residential.
     //
-    // Layout: roads at (0,0) → (1,0) → (0,1) [spawn tile], Commercial zone at (1,1).
-    // (1,1) is an immediate neighbour of the spawn tile (0,1) → zone = Commercial.
+    // Layout: roads at (0,0) -> (1,0) -> (0,1) [spawn tile], Commercial zone at (1,1).
+    // Destination is (0,0) [first adjacent road found]. (0,0) is a road, not zoned.
     cs()->placeRoad(0, 0);
     cs()->placeRoad(1, 0);
-    // Place Commercial zone adjacent to the future spawn tile (0,1) before the spawn.
+    // Place Commercial zone adjacent to the future spawn tile (0,1) -- but the
+    // destination tile is (0,0) which is unzoned, so zone comes from RNG fallback.
     cs()->placeZone(1, 1, ZoneType::Commercial, DensityTier::Low);
-    // Third road triggers vehicle spawn at (0,1) with neighbour (1,1) = Commercial.
+    // Third road triggers vehicle spawn at (0,1) with dst=(0,0) -> unzoned -> RNG.
     cs()->placeRoad(0, 1);
 
     auto agents = cs()->getAgentPositions();
@@ -1595,9 +1597,9 @@ TEST_F(NiceExtraCoverageTest, GetAgentPositions_ZonedNeighbor_PropagatesZone) {
     for (const AgentState& a : agents) {
         if (a.tileX == 0 && a.tileZ == 1) {
             foundSpawnTile = true;
-            // The neighbor (1,1) is Commercial → zone must be Commercial.
-            EXPECT_EQ(a.zone, ZoneType::Commercial)
-                << "AgentState.zone must reflect adjacent Commercial zoned tile.";
+            // Destination (0,0) is unzoned; ManualRNG nextInt(0,99)=0 -> Residential.
+            EXPECT_EQ(a.zone, ZoneType::Residential)
+                << "AgentState.zone must be Residential (RNG fallback, roll=0 < 70).";
         }
     }
     EXPECT_TRUE(foundSpawnTile) << "Expected a vehicle agent spawned at tile (0,1).";
