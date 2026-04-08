@@ -1,6 +1,6 @@
 ## Phase 11q: Bug-Fix Batch — Buses/Trucks Never Appear & Vehicle Road Surface Alignment
 
-**Status: Planned**
+**Status: DONE**
 
 ### Goal
 
@@ -58,7 +58,7 @@ so it can be unit-tested without a live Irrlicht context. `variantIdx` selects a
 three Residential car variants deterministically (caller passes `static_cast<int>(handle) % 3`
 so each vehicle always uses the same model across re-spawns).
 
-- [ ] **`src/rendering/vehicle_mesh_path.h`** (new file) — Declare and define
+- [x] **`src/rendering/vehicle_mesh_path.h`** (new file) — Declare and define
   `vehicleMeshPath()` as an `inline` free function:
 
   ```cpp
@@ -98,11 +98,11 @@ so each vehicle always uses the same model across re-spawns).
   > `tools/vehicle_atlas_registry.json`. Any rename, addition, or removal in the
   > registry requires a corresponding update here to prevent silent mesh-path drift.
 
-- [ ] **`src/rendering/IrrlichtRenderer.cpp`** — In `spawnVehicleAgent()`, replace any
+- [x] **`src/rendering/IrrlichtRenderer.cpp`** — In `spawnVehicleAgent()`, replace any
   existing inline zone→mesh selection logic with a call to
   `vehicleMeshPath(zone, static_cast<int>(handle) % 3)` (include `vehicle_mesh_path.h`).
 
-- [ ] **`CMakeLists.txt`** — Three changes to the `simulation_tests` target:
+- [x] **`CMakeLists.txt`** — Three changes to the `simulation_tests` target:
   1. Add `tests/simulation/VehicleZoneTest.cpp` **inline in the
      `add_executable(simulation_tests ...)` call** (inline listing preferred per
      `framework.md` line 134) so the 4 new simulation tests compile and register
@@ -133,7 +133,7 @@ raw terrain height with no bias (`IrrlichtRenderer.cpp:3067–3072`), leaving ve
 
 **Code changes**
 
-- [ ] **`src/rendering/render_constants.h`** — Add two new entries **inside the existing
+- [x] **`src/rendering/render_constants.h`** — Add two new entries **inside the existing
   `namespace RenderConstants { }` block**:
 
   ```cpp
@@ -152,11 +152,11 @@ raw terrain height with no bias (`IrrlichtRenderer.cpp:3067–3072`), leaving ve
   (see below), all bare `kTileSize` and `kRoadSurfaceYBias` references resolve without
   per-function qualification.
 
-- [ ] **`src/rendering/IrrlichtRenderer.h`** — Remove the private class member
+- [x] **`src/rendering/IrrlichtRenderer.h`** — Remove the private class member
   `static constexpr float kTileSize = 10.0f;` (currently at line 322) to eliminate the
   duplicate. This is a single-source-of-truth consolidation with no functional change.
 
-- [ ] **`src/rendering/IrrlichtRenderer.cpp`** — Add `using namespace RenderConstants;`
+- [x] **`src/rendering/IrrlichtRenderer.cpp`** — Add `using namespace RenderConstants;`
   at **file scope** (after the `#include` block, before the first function definition).
   There are approximately 29 bare `kTileSize` references across ~15 functions in this
   file, and only ~2 already have a function-scope `using namespace RenderConstants;`
@@ -165,7 +165,7 @@ raw terrain height with no bias (`IrrlichtRenderer.cpp:3067–3072`), leaving ve
   redundant function-scope `using namespace RenderConstants;` directives that become
   unnecessary after the file-scope directive is added (optional cleanup).
 
-- [ ] **`src/rendering/IrrlichtRenderer.cpp:1884`** — Replace the function-local
+- [x] **`src/rendering/IrrlichtRenderer.cpp:1884`** — Replace the function-local
   `static constexpr float B = 0.25f;` declaration with a direct use of
   `kRoadSurfaceYBias` (include `render_constants.h` if not already included):
 
@@ -182,30 +182,30 @@ raw terrain height with no bias (`IrrlichtRenderer.cpp:3067–3072`), leaving ve
   Apply the same substitution to every occurrence of `B` within `buildTileRoadMesh()`
   (`y10`, `y01`, `y11`).
 
-- [ ] **`architecture/asset-standards/3d-model-standards.md`** — Update the
+- [x] **`architecture/asset-standards/3d-model-standards.md`** — Update the
   "World-Space Tile Positioning (`kTileSize`)" section to reflect the new canonical
   location of `kTileSize`: `namespace RenderConstants` in `src/rendering/render_constants.h`,
   consolidated from the former `IrrlichtRenderer.h` private class member. This keeps the
   spec consistent with the code change above.
 
-- [ ] **`architecture/game-design/terrain-interaction.md`** — Replace all stale `+0.10f`
+- [x] **`architecture/game-design/terrain-interaction.md`** — Replace all stale `+0.10f`
   road surface Y offset references with `+0.25f` (= `kRoadSurfaceYBias`). The spec
   currently documents the original `0.10 m` value which was superseded when
   `buildTileRoadMesh()` was updated to use `0.25 m`. Update the spec to reference the
   shared constant `kRoadSurfaceYBias` from `render_constants.h` for future consistency.
 
-- [ ] **`architecture/asset-standards/3d-model-standards.md`** — Add
+- [x] **`architecture/asset-standards/3d-model-standards.md`** — Add
   `kRoadSurfaceYBias = 0.25f` to the named constants inventory block alongside
   `kLaneCenterOffset` and `kCarriagewayHalfWidth`. Also add `kTileSize = 10.0f` if
   not already present in the inventory block. This keeps the constants inventory
   complete and consistent with `render_constants.h`.
 
-- [ ] **`architecture/graphics-architecture/procedural-terrain.md`** — Replace stale
+- [x] **`architecture/graphics-architecture/procedural-terrain.md`** — Replace stale
   `postY + 0.10f` references (at lines 180 and 635) with `postY + 0.25f`
   (= `kRoadSurfaceYBias`), consistent with the `terrain-interaction.md` update
   above and the actual value baked into `buildTileRoadMesh()`.
 
-- [ ] **`architecture/game-design/traffic-system.md`** — Add a "Vehicle Zone Assignment"
+- [x] **`architecture/game-design/traffic-system.md`** — Add a "Vehicle Zone Assignment"
   scope clarification section stating: (1) "trip" = one tile-hop in the current
   implementation (not a multi-tile route), (2) zone re-evaluation fires on each
   tile-hop completion (not just at spawn), and (3) zone-boundary mesh transitions
@@ -217,7 +217,7 @@ raw terrain height with no bias (`IrrlichtRenderer.cpp:3067–3072`), leaving ve
 
 #### 2. Fix 2d — Correct stale comment in `buildTileRoadMesh()`
 
-- [ ] **`src/rendering/IrrlichtRenderer.cpp:1868`** — Update the comment from
+- [x] **`src/rendering/IrrlichtRenderer.cpp:1868`** — Update the comment from
   `// road surface lifted +0.10 m above terrain` (or similar) to
   `// road surface lifted +0.25 m above terrain (kRoadSurfaceYBias)`.
 
@@ -239,7 +239,7 @@ distribution when the destination is unzoned.
 
 **Code changes**
 
-- [ ] **`src/simulation/CitySimulation.cpp:~2450–2480`** (inside `placeRoad()`, vehicle
+- [x] **`src/simulation/CitySimulation.cpp:~2450–2480`** (inside `placeRoad()`, vehicle
   spawn block) — Replace the 4-neighbour zone-inheritance loop with:
 
   ```cpp
@@ -273,7 +273,7 @@ indefinitely.
 
 **Code changes**
 
-- [ ] **`src/simulation/CitySimulation.cpp:1766–1808`** (inside `doTrafficVehicleTick()`,
+- [x] **`src/simulation/CitySimulation.cpp:1766–1808`** (inside `doTrafficVehicleTick()`,
   at the point where a completed trip assigns a new destination) — After the new
   `dstX`/`dstZ` are assigned, re-query the destination tile's zone:
 
@@ -330,7 +330,7 @@ distance-cull cycle.
 > is required. The zone-change detection branch (below) uses `activeAgents.find(handle)` to guard against operator[] default-insertion before checking `.zone`
 > against `a.zone` to detect when a respawn is needed.
 
-- [ ] **`src/main.cpp:339–440`** (agent sync loop) — Add a zone-change detection branch
+- [x] **`src/main.cpp:339–440`** (agent sync loop) — Add a zone-change detection branch
   alongside the existing distance-cull despawn/respawn logic
   (`main.cpp:389–394`). For each active agent whose `zone` differs between the cached
   value in `activeAgents[handle]` and the new `AgentState a.zone`:
@@ -392,7 +392,7 @@ can reach `~0.35 m`, causing residual hover/sink after Fix 2a on non-flat ground
 
 **Interface change**
 
-- [ ] **`src/interfaces/ITerrainQuery.h`** — Add a new pure-virtual method:
+- [x] **`src/interfaces/ITerrainQuery.h`** — Add a new pure-virtual method:
 
   ```cpp
   /// Bilinearly interpolate terrain height at an arbitrary world position.
@@ -402,13 +402,13 @@ can reach `~0.35 m`, causing residual hover/sink after Fix 2a on non-flat ground
   virtual float getHeightAtWorld(float worldX, float worldZ) const = 0;
   ```
 
-- [ ] **`src/terrain/TerrainSystem.h`** — Declare the override:
+- [x] **`src/terrain/TerrainSystem.h`** — Declare the override:
 
   ```cpp
   float getHeightAtWorld(float worldX, float worldZ) const override;
   ```
 
-- [ ] **`src/terrain/TerrainSystem.cpp:826–833`** — Add `#include "render_constants.h"` at
+- [x] **`src/terrain/TerrainSystem.cpp:826–833`** — Add `#include "render_constants.h"` at
   the top of the file. Use `using namespace RenderConstants;` at function scope inside
   `getHeightAtWorld()` (TerrainSystem only has one function that needs the constants, so
   function-scope is appropriate here unlike IrrlichtRenderer which uses file-scope).
@@ -452,7 +452,7 @@ can reach `~0.35 m`, causing residual hover/sink after Fix 2a on non-flat ground
   }
   ```
 
-- [ ] **`src/rendering/IrrlichtRenderer.cpp:3067–3072`** — In `moveVehicleAgent()`,
+- [x] **`src/rendering/IrrlichtRenderer.cpp:3067–3072`** — In `moveVehicleAgent()`,
   replace `getHeightAt(tileX, tileZ)` with `getHeightAtWorld()`. The file-scope
   `using namespace RenderConstants;` directive (added in Deliverable 1) makes bare
   `kTileSize` and `kRoadSurfaceYBias` names valid without further qualification:
@@ -464,7 +464,7 @@ can reach `~0.35 m`, causing residual hover/sink after Fix 2a on non-flat ground
   y = m_terrain->getHeightAtWorld(worldX, worldZ) + kRoadSurfaceYBias;
   ```
 
-- [ ] **`src/interfaces/ITerrainQuery.h` + `ManualTerrainQuery` (atomic commit)** — Add a
+- [x] **`src/interfaces/ITerrainQuery.h` + `ManualTerrainQuery` (atomic commit)** — Add a
   `getHeightAtWorld()` override to **every** class that implements `ITerrainQuery`.
   Required updates (non-exhaustive — check all `ITerrainQuery` implementors):
 
@@ -547,7 +547,7 @@ origin.
 
 **Code change**
 
-- [ ] **`src/rendering/IrrlichtRenderer.cpp:3025–3027`** — Replace `Y = 0.0f` with the
+- [x] **`src/rendering/IrrlichtRenderer.cpp:3025–3027`** — Replace `Y = 0.0f` with the
   same bilinear terrain query plus road bias used by `moveVehicleAgent()`. The `tileX`
   and `tileZ` values arrive as the 2nd and 3rd parameters of `spawnVehicleAgent()`; they
   are used here to compute `worldX`/`worldZ` for the bilinear terrain query. The
@@ -589,7 +589,7 @@ should roll. Apply pitch and roll via `node->setRotation()`, using `headingDeg` 
 
 **Code changes**
 
-- [ ] **`src/rendering/IrrlichtRenderer.cpp`** — In `moveVehicleAgent()`, replace the
+- [x] **`src/rendering/IrrlichtRenderer.cpp`** — In `moveVehicleAgent()`, replace the
   existing `y` assignment and add slope rotation (using the `worldX` and `worldZ` float
   parameters passed into the function):
 
@@ -655,7 +655,7 @@ should roll. Apply pitch and roll via `node->setRotation()`, using `headingDeg` 
   > produces roll (not pitch) for a vehicle facing +X (yaw=90). Without this rotation, the
   > pitch/roll decomposition would be incorrect for any non-zero yaw.
 
-- [ ] **`src/rendering/IrrlichtRenderer.cpp`** — Apply the same slope rotation in
+- [x] **`src/rendering/IrrlichtRenderer.cpp`** — Apply the same slope rotation in
   `spawnVehicleAgent()` (after Fix 2c adds the terrain query). The spawn node should match
   the rotation the first `moveVehicleAgent()` call will immediately set, so there is no single-
   frame pop from level-to-sloped orientation.
@@ -675,24 +675,24 @@ counts, so `NiceMock` avoids uninteresting-call warnings). The test fixture's
 destruction, as per the destructor-path contract documented in
 `architecture/testing/testability-architecture.md`.
 
-- [ ] **`VehicleMeshPath_CommercialZone_ReturnsBusMesh`** (`tests/simulation/`) — Include
+- [x] **`VehicleMeshPath_CommercialZone_ReturnsBusMesh`** (`tests/simulation/`) — Include
   `vehicle_mesh_path.h`. Call `vehicleMeshPath(ZoneType::Commercial)` and assert with
   `EXPECT_THAT(path, EndsWith("bus_standard_lod0.b3d"))`. Do NOT use exact-string
   equality — the base prefix comes from `getAssetsDir()` which varies by install path.
 
-- [ ] **`VehicleMeshPath_IndustrialZone_ReturnsTruckMesh`** (`tests/simulation/`) — Include
+- [x] **`VehicleMeshPath_IndustrialZone_ReturnsTruckMesh`** (`tests/simulation/`) — Include
   `vehicle_mesh_path.h`. Call `vehicleMeshPath(ZoneType::Industrial)` and assert with
   `EXPECT_THAT(path, EndsWith("truck_cargo_lod0.b3d"))`. Same rationale: suffix-only
   assertion avoids a runtime dependency on `getAssetsDir()` in tests.
 
-- [ ] **`TrafficVehicle_SpawnOnUnzonedDestination_FallsBackToProportionalDistribution`**
+- [x] **`TrafficVehicle_SpawnOnUnzonedDestination_FallsBackToProportionalDistribution`**
   (`tests/simulation/`) — Inject a `ManualRNG` pre-loaded with a single value `[72]`
   (>= 70 and < 90, which maps to `ZoneType::Commercial` per the 70/20/10 proportional
   distribution in Fix 1b). Spawn one vehicle with an unzoned destination tile. Assert
   `vehicle.zone == ZoneType::Commercial`. This deterministically verifies the
   proportional fallback without relying on probabilistic multi-spawn sampling.
 
-- [ ] **`TrafficVehicle_ZoneUpdated_OnTripCompletion`** (`tests/simulation/`) — Create
+- [x] **`TrafficVehicle_ZoneUpdated_OnTripCompletion`** (`tests/simulation/`) — Create
   a vehicle with `zone == ZoneType::Residential`. Set the destination tile's zone to
   `ZoneType::Commercial`. Exercise the trip-completion path via the **public `sim.tick(dt)`
   API** (which calls `doTrafficVehicleTick()` internally) -- do NOT call the private
@@ -708,7 +708,7 @@ interface needed (e.g., `IAudioSystem`) can use `NiceMock`. The test fixture's
 `TearDown()` must explicitly release Irrlicht resources (drop the device, null the
 renderer pointer) before fixture destruction to avoid dangling scene-graph references.
 
-- [ ] **`CMakeLists.txt`** — Register the new test file **`tests/rendering/VehicleYBiasTest.cpp`**
+- [x] **`CMakeLists.txt`** — Register the new test file **`tests/rendering/VehicleYBiasTest.cpp`**
   **inline in the `add_executable(opengl_tests ...)` call** (do NOT use `target_sources()` —
   `framework.md` prohibits it for `opengl_tests` to prevent ctest discovery timing issues).
   This single file contains all 4 renderer tests: the two Y-bias tests
@@ -721,16 +721,16 @@ renderer pointer) before fixture destruction to avoid dangling scene-graph refer
   Phase 5 per `architecture/testing/framework.md`); only `tests/simulation/` needs to be
   added so the Phase 11q Y-bias renderer tests can `#include "ManualTerrainQuery.h"`.
 
-- [ ] **`MoveVehicleAgent_FlatTerrain_VehicleYIncludesBias`** (`tests/rendering/`) — Create
+- [x] **`MoveVehicleAgent_FlatTerrain_VehicleYIncludesBias`** (`tests/rendering/`) — Create
   `IrrlichtRenderer` with a `ManualTerrainQuery` stub returning `0.0f` for all queries.
   Call `spawnVehicleAgent()` then `moveVehicleAgent()`. Retrieve the spawned scene node
   and assert `node->getPosition().Y == kRoadSurfaceYBias` (i.e. `0.25f`).
 
-- [ ] **`SpawnVehicleAgent_FlatTerrain_VehicleYIncludesBias`** (`tests/rendering/`) — Same
+- [x] **`SpawnVehicleAgent_FlatTerrain_VehicleYIncludesBias`** (`tests/rendering/`) — Same
   setup. Call `spawnVehicleAgent()` (Fix 2c) and assert the newly created node's
   `getPosition().Y == kRoadSurfaceYBias` without any subsequent `moveVehicleAgent()` call.
 
-- [ ] **`MoveVehicleAgent_SlopedTerrain_AppliesPitchAndRoll`** (`tests/rendering/`) —
+- [x] **`MoveVehicleAgent_SlopedTerrain_AppliesPitchAndRoll`** (`tests/rendering/`) —
   Configure `ManualTerrainQuery` with non-uniform heights: center tile height = `0.0f`,
   right neighbour (`+half-tile X`) height = `0.0f`, front neighbour (`+half-tile Z`)
   height = `1.0f`. Set vehicle `yaw = 0.0f` (facing +Z) in the test setup so the
@@ -741,7 +741,7 @@ renderer pointer) before fixture destruction to avoid dangling scene-graph refer
   non-zero due to the Z-axis slope) and `node->getRotation().Z == 0.0f` (roll is zero
   because the X-axis slope is flat and yaw=0 means Z-slope maps entirely to pitch).
 
-- [ ] **`MoveVehicleAgent_SlopedTerrain_YawRelativeDecomposition`** (`tests/rendering/`) —
+- [x] **`MoveVehicleAgent_SlopedTerrain_YawRelativeDecomposition`** (`tests/rendering/`) —
   Validates the non-trivial yaw case that the yaw=0 test above cannot catch.
   Configure `ManualTerrainQuery` with a pure Z-slope: center tile height = `0.0f`,
   `+half-tile X` neighbour height = `0.0f`, `+half-tile Z` neighbour height = `1.0f`.
@@ -790,16 +790,16 @@ renderer pointer) before fixture destruction to avoid dangling scene-graph refer
 
 ### Exit Criteria
 
-- [ ] `bus_standard_lod0.b3d` and `truck_cargo_lod0.b3d` appear in-game when Commercial
+- [x] `bus_standard_lod0.b3d` and `truck_cargo_lod0.b3d` appear in-game when Commercial
   and Industrial zones are placed adjacent to roads.
-- [ ] Vehicle Y position on flat terrain equals `terrain_height + 0.25` (verified by unit
+- [x] Vehicle Y position on flat terrain equals `terrain_height + 0.25` (verified by unit
   test `MoveVehicleAgent_FlatTerrain_VehicleYIncludesBias`).
-- [ ] Vehicle Y position on sloped terrain no longer diverges from the road surface
+- [x] Vehicle Y position on sloped terrain no longer diverges from the road surface
   (bilinear interpolation active).
-- [ ] `spawnVehicleAgent()` no longer places the node at world origin on non-flat terrain.
-- [ ] Vehicles pitch and roll to match road surface slope (verified visually and/or by asserting
+- [x] `spawnVehicleAgent()` no longer places the node at world origin on non-flat terrain.
+- [x] Vehicles pitch and roll to match road surface slope (verified visually and/or by asserting
   `node->getRotation().X != 0` on sloped terrain after `moveVehicleAgent()`).
-- [ ] All 4 new `simulation_tests` (unit label) pass.
-- [ ] All 4 new `opengl_tests` (requires-opengl label) pass.
-- [ ] All existing `simulation_tests` and `opengl_tests` continue to pass.
-- [ ] `all-checks-pass` CI job is green.
+- [x] All 4 new `simulation_tests` (unit label) pass.
+- [x] All 4 new `opengl_tests` (requires-opengl label) pass.
+- [x] All existing `simulation_tests` and `opengl_tests` continue to pass.
+- [x] `all-checks-pass` CI job is green.

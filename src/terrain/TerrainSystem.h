@@ -173,6 +173,11 @@ public:
     // (ref: architecture/graphics-architecture/procedural-terrain.md — setTileHeight Write Path)
     void setTileHeight(int tileX, int tileZ, float height) override;
 
+    // Bilinear-interpolated terrain height at arbitrary world coordinates.
+    // Uses the persistent LOD0 heightmap array (same data source as getHeightAt()).
+    // (ref: implementation/phase-11q.md Fix 2b)
+    float getHeightAtWorld(float worldX, float worldZ) const override;
+
     // Flush all pending terrain chunk rebuilds synchronously.
     // Delegates to flushPendingRebuilds(). Called after setTileHeight in placement helpers
     // to ensure terrain geometry is updated before the next render frame.

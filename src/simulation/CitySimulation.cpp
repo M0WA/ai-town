@@ -1784,6 +1784,11 @@ void CitySimulation::doTrafficVehicleTick(float realDeltaSeconds) {
                 v.srcX = v.dstX = kDespawnedVehicleTile; // no road to follow — despawn
                 continue;
             }
+            // Re-evaluate zone from the (possibly newly zoned) destination tile.
+            const TileData* newDst = findTile(v.dstX, v.dstZ);
+            if (newDst && newDst->isZoned) {
+                v.zone = newDst->zone;
+            }
             v.srcX = v.dstX;
             v.srcZ = v.dstZ;
             v.dstX = nextX;
@@ -2461,11 +2466,19 @@ void CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride)
             v.headingDeg = std::atan2(dx, dz) * (180.0f / kPiF);
             v.worldX = (static_cast<float>(tileX) + 0.5f) * kTileSizeMeters;
             v.worldZ = (static_cast<float>(tileZ) + 0.5f) * kTileSizeMeters;
-            // Zone nearest zoned tile for vehicle type selection
-            for (auto& d2 : dirs) {
-                const TileData* nd2 = findTile(tileX + d2[0], tileZ + d2[1]);
-                if (nd2 && nd2->isZoned) { v.zone = nd2->zone; break; }
+            // Derive zone from the destination tile.
+            ZoneType spawnZone = ZoneType::Residential; // fallback default
+            const TileData* dst = findTile(v.dstX, v.dstZ);
+            if (dst && dst->isZoned) {
+                spawnZone = dst->zone;
+            } else {
+                // Destination unzoned: proportional distribution matching city demographics.
+                const int roll = m_rng->nextInt(0, 99);
+                if (roll < 70)       spawnZone = ZoneType::Residential;
+                else if (roll < 90)  spawnZone = ZoneType::Commercial;
+                else                 spawnZone = ZoneType::Industrial;
             }
+            v.zone = spawnZone;
             m_trafficVehicles.push_back(v);
         }
     }
