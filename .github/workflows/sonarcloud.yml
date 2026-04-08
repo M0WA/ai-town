@@ -126,10 +126,12 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
+          PROJECT_VERSION=$(git describe --tags --always)
           SCANNER_BIN="$RUNNER_TEMP/sonar-scanner-cli-${SONAR_SCANNER_VERSION}-Linux-X64/bin/sonar-scanner"
           "$SCANNER_BIN" \
             -Dsonar.projectKey=M0WA_ai-town \
             -Dsonar.organization=m0wa \
+            -Dsonar.projectVersion="${PROJECT_VERSION}" \
             -Dsonar.sources=src,.github/workflows,docker,.devcontainer \
             -Dsonar.tests=tests \
             -Dsonar.coverageReportPaths=coverage.xml \
