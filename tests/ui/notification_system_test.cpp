@@ -965,3 +965,118 @@ TEST_F(UIManagerDeficitIntegrationTest, Coverage_Update_ForcedLoanNotification_S
     // The forced loan dialog should now be shown.
     EXPECT_TRUE(ui_->hasActiveModal());
 }
+
+// ============================================================================
+// Coverage-gap tests — paths not exercised by existing tests
+// ============================================================================
+
+// postCritical while the log panel is open triggers updateScrollThumb() (line 116).
+TEST_F(NotificationManagerTest, PostCritical_WhileLogOpen_UpdatesScrollThumb) {
+    // Pre-populate enough entries so the scrollbar track is non-trivial.
+    for (int i = 0; i < 5; ++i) {
+        notifMgr_->postNormal("Info" + std::to_string(i), "body", 10.0f);
+    }
+    notifMgr_->toggleLog();
+    ASSERT_TRUE(notifMgr_->isLogOpen());
+
+    // postCritical while log is open must call updateScrollThumb() without crash.
+    EXPECT_NO_FATAL_FAILURE(notifMgr_->postCritical("Crisis", "Deficit detected"));
+}
+
+// postNormal while the log panel is open triggers updateScrollThumb() (line 149).
+TEST_F(NotificationManagerTest, PostNormal_WhileLogOpen_UpdatesScrollThumb) {
+    notifMgr_->toggleLog();
+    ASSERT_TRUE(notifMgr_->isLogOpen());
+
+    EXPECT_NO_FATAL_FAILURE(notifMgr_->postNormal("Info", "Road built", 10.0f));
+}
+
+// Scroll UP (positive wheelDelta) while log is open decreases scroll offset (lines 258-259).
+TEST_F(NotificationManagerTest, OnEvent_PositiveWheelDelta_ScrollsUp) {
+    // Post enough entries that scrolling is meaningful (visibleRows = trackH/rowH = 25).
+    for (int i = 0; i < 30; ++i) {
+        notifMgr_->postNormal("N" + std::to_string(i), "body", 10.0f);
+    }
+    notifMgr_->toggleLog();
+
+    // Scroll down first so there is room to scroll back up.
+    InputEvent downWheel;
+    downWheel.type       = InputEvent::Type::MouseWheel;
+    downWheel.wheelDelta = -1.0f;
+    notifMgr_->onEvent(downWheel);
+    notifMgr_->onEvent(downWheel);
+
+    // Now scroll UP (positive delta) — should decrement offset by 1.
+    InputEvent upWheel;
+    upWheel.type       = InputEvent::Type::MouseWheel;
+    upWheel.wheelDelta = 1.0f;  // positive → scroll towards newer entries
+    bool consumed = notifMgr_->onEvent(upWheel);
+    EXPECT_TRUE(consumed);
+}
+
+// MouseButtonDown inside the scrollbar track area begins a drag and jumps the
+// thumb to the click position (lines 266-281).
+TEST_F(NotificationManagerTest, OnEvent_ClickInScrollTrack_BeginsScrollDrag) {
+    // Need enough entries so scrollbar track appears and maxOffset > 0.
+    for (int i = 0; i < 30; ++i) {
+        notifMgr_->postNormal("N" + std::to_string(i), "body", 10.0f);
+    }
+    notifMgr_->toggleLog();
+
+    // Click inside the scrollbar track (kLogTrackX=1856, kLogTrackY=56,
+    // kLogTrackW=12, kLogTrackH=500).
+    InputEvent click;
+    click.type   = InputEvent::Type::MouseButtonDown;
+    click.button = 0;
+    click.x      = 1858; // inside [1856, 1868)
+    click.y      = 200;  // inside [56, 556)
+    bool consumed = notifMgr_->onEvent(click);
+    EXPECT_TRUE(consumed);
+}
+
+// MouseMove while dragging updates the scroll offset (lines 287-300).
+TEST_F(NotificationManagerTest, OnEvent_MouseMoveWhileDragging_UpdatesScrollOffset) {
+    for (int i = 0; i < 30; ++i) {
+        notifMgr_->postNormal("N" + std::to_string(i), "body", 10.0f);
+    }
+    notifMgr_->toggleLog();
+
+    // Begin drag — click inside the scrollbar track.
+    InputEvent startClick;
+    startClick.type   = InputEvent::Type::MouseButtonDown;
+    startClick.button = 0;
+    startClick.x      = 1858;
+    startClick.y      = 56; // top of track
+    notifMgr_->onEvent(startClick);
+
+    // Drag downward — should update scrollOffset via the move handler.
+    InputEvent move;
+    move.type   = InputEvent::Type::MouseMove;
+    move.x      = 1858;
+    move.y      = 200; // moved down 144 px
+    bool consumed = notifMgr_->onEvent(move);
+    EXPECT_TRUE(consumed);
+}
+
+// MouseButtonUp while dragging ends the drag and returns true (lines 305-307).
+TEST_F(NotificationManagerTest, OnEvent_MouseButtonUp_EndsDragAndReturnsTrue) {
+    for (int i = 0; i < 30; ++i) {
+        notifMgr_->postNormal("N" + std::to_string(i), "body", 10.0f);
+    }
+    notifMgr_->toggleLog();
+
+    // Begin drag by clicking in the scrollbar track.
+    InputEvent startClick;
+    startClick.type   = InputEvent::Type::MouseButtonDown;
+    startClick.button = 0;
+    startClick.x      = 1858;
+    startClick.y      = 200;
+    notifMgr_->onEvent(startClick); // sets m_scrollDragging = true
+
+    // Release left button — must end drag and return true.
+    InputEvent up;
+    up.type   = InputEvent::Type::MouseButtonUp;
+    up.button = 0;
+    bool consumed = notifMgr_->onEvent(up);
+    EXPECT_TRUE(consumed);
+}

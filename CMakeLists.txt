@@ -550,6 +550,7 @@ add_executable(simulation_tests
     tests/simulation/undo_system_test.cpp
     tests/simulation/manual_rng_test.cpp
     tests/simulation/VehicleZoneTest.cpp
+    tests/simulation/subsystem_unit_test.cpp
 )
 # Adaptive music intensity and city simulation render tests.
 # adaptive_music_intensity_test.cpp — tests music intensity state machine driven by
