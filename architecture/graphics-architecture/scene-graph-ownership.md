@@ -489,7 +489,7 @@ placement time therefore survives LOD transitions without re-binding.
 
 `placeBuildingMesh(tileX, tileZ, assetBaseName)` places a zone building (residential, commercial, or industrial) at a given origin tile, with footprint and world origin determined by the building's `DensityTier`.
 
-**Footprint collision responsibility**: `placeBuildingMesh()` assumes the footprint is already validated as clear before being called. Footprint occupancy checking is the exclusive responsibility of `CitySimulation::placeZone()` — the renderer's sole responsibility is computing the world origin and placing the scene node. No occupancy validation logic belongs in the rendering layer. Cross-reference: `architecture/game-design/zoning-system.md` § Multi-Tile Footprint Placement Rules.
+**Footprint collision responsibility**: `placeBuildingMesh()` assumes the footprint is already validated as clear before being called. Footprint occupancy checking is the exclusive responsibility of `Zoning::placeZone()` (called from `CitySimulation::placeZone()`) — the renderer's sole responsibility is computing the world origin and placing the scene node. No occupancy validation logic belongs in the rendering layer. Cross-reference: `architecture/game-design/zoning-system.md` § Multi-Tile Footprint Placement Rules.
 
 **DensityTier derivation from assetBaseName**:
 The `DensityTier` is derived from the second delimiter-separated segment of `assetBaseName`. For example:

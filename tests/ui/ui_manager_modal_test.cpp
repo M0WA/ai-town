@@ -1352,7 +1352,7 @@ protected:
         ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::Village));
         ON_CALL(sim_, getTotalPopulation()).WillByDefault(Return(100));
         ON_CALL(sim_, getSimulationTime()).WillByDefault(Return(SimulationTime{1, 1}));
-        ON_CALL(sim_, getDemandPressurePct(_)).WillByDefault(Return(0.5f));
+        ON_CALL(sim_, getZoneDemandFactor(_)).WillByDefault(Return(0.5f));
         ON_CALL(sim_, hasUndoPendingAction()).WillByDefault(Return(false));
         ON_CALL(sim_, getUndoExpiryTimeSeconds()).WillByDefault(Return(0.0));
 
@@ -2117,7 +2117,7 @@ TEST_F(UIManagerEventRoutingTest, MainMenu_StartGame_TransitionsToGameplay) {
     ON_CALL(freshSim, getCityRating()).WillByDefault(Return(CityRatingTier::Village));
     ON_CALL(freshSim, getTotalPopulation()).WillByDefault(Return(100));
     ON_CALL(freshSim, getSimulationTime()).WillByDefault(Return(SimulationTime{1, 1}));
-    ON_CALL(freshSim, getDemandPressurePct(_)).WillByDefault(Return(0.5f));
+    ON_CALL(freshSim, getZoneDemandFactor(_)).WillByDefault(Return(0.5f));
     ON_CALL(freshSim, hasUndoPendingAction()).WillByDefault(Return(false));
     ON_CALL(freshSim, getUndoExpiryTimeSeconds()).WillByDefault(Return(0.0));
 

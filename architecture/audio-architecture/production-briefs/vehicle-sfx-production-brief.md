@@ -226,7 +226,7 @@ relay contact or a low-gain mechanical switch. Broadband transient energy, durat
 or sustained body — the tick must disappear immediately so it does not stack audibly
 across multiple simultaneous intersections. At −28 LUFS it should be inaudible beyond
 ~50 m under normal city noise; the pre-acquisition distance cull at > 80 m in
-`CitySimulation::tick()` handles suppression at further distances.
+`Traffic::doTrafficSignalTick()` (called from `CitySimulation::tick()`) handles suppression at further distances.
 
 ---
 

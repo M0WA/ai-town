@@ -180,8 +180,8 @@ Y component if perceptible mispositioning is observed with real terrain heights.
 
 ## Phase 10 Audio Callbacks for Service Events
 
-All audio calls below are made from within `CitySimulation::tick()` (or the budget-deficit
-degradation sub-routine it calls) and are guarded by `m_audio != nullptr`. Building world-space
+All audio calls below are made from within `Zoning::doServiceDegradationTick()` (called from
+`CitySimulation::doBudgetTick()`) and are guarded by `m_audio != nullptr`. Building world-space
 positions use `vec3{static_cast<float>(bldg.tileX), 0.0f, static_cast<float>(bldg.tileZ)}`
 (Y = 0.0f as per the Y-position note above).
 
@@ -194,13 +194,14 @@ given tick. Per the existing spec text ("Audio on degradation: only Fire, Police
 stations trigger `SFX_SERVICE_DEGRADE` on entering the reduced-coverage state"), all three
 building types share this single SFX.
 
-**Call site**: `CitySimulation::tick()`, inside the per-building degradation loop for Fire,
+**Call site**: `Zoning::doServiceDegradationTick()` (called from
+`CitySimulation::doBudgetTick()`), inside the per-building degradation loop for Fire,
 Police, and Water Tower buildings, immediately after
 `ISimulationRNG::nextFloat() < service_degradation_probability_per_tick` evaluates true
 and the building's state is set to degraded.
 
 ```cpp
-// In CitySimulation::tick(), per-building degradation roll (Fire, Police, Water Tower):
+// In Zoning::doServiceDegradationTick(), per-building degradation roll (Fire, Police, Water Tower):
 if (rngRoll < SimulationConstants::service_degradation_probability_per_tick) {
     bldg.degraded = true;
     if (m_audio) {
@@ -220,18 +221,19 @@ per-building RNG roll and the once-per-tick-per-building gate are sufficient thr
 ### `sfx_power_out` — Zone tile loses power coverage
 
 **Trigger**: When a zone tile transitions from powered to unpowered for the first time in a
-coverage cycle — specifically, when `CitySimulation::tick()` evaluates the power grid BFS and
+coverage cycle — specifically, when `Zoning::doServiceDegradationTick()` evaluates the power grid BFS and
 finds a tile that was covered in the previous tick is now uncovered (either due to a brownout
 BFS-depth reduction or a full power plant loss). Fires once per coverage-loss event, not once
 per tick the tile remains unpowered. A per-tile `wasPowered` flag (toggled from
 `wasPowered=true` to `wasPowered=false`) gates the call to prevent re-fire on subsequent ticks
 while the tile is already unpowered.
 
-**Call site**: `CitySimulation::tick()`, inside the power coverage evaluation pass, when a
+**Call site**: `Zoning::doServiceDegradationTick()` (called from
+`CitySimulation::doBudgetTick()`), inside the power coverage evaluation pass, when a
 tile's power coverage state transitions from covered to uncovered.
 
 ```cpp
-// In CitySimulation::tick(), power coverage evaluation:
+// In Zoning::doServiceDegradationTick(), power coverage evaluation:
 if (tile.wasPowered && !currentlyCovered) {
     tile.wasPowered = false;
     if (m_audio) {
@@ -253,11 +255,12 @@ zone tile that was previously covered by a Water Tower's coverage radius becomes
 (either because the Water Tower degraded and halved its radius, or because the tower was
 demolished). A per-tile `wasWaterCovered` flag gates the call.
 
-**Call site**: `CitySimulation::tick()`, inside the water coverage evaluation pass, when a
+**Call site**: `Zoning::doServiceDegradationTick()` (called from
+`CitySimulation::doBudgetTick()`), inside the water coverage evaluation pass, when a
 tile's water coverage state transitions from covered to uncovered.
 
 ```cpp
-// In CitySimulation::tick(), water coverage evaluation:
+// In Zoning::doServiceDegradationTick(), water coverage evaluation:
 if (tile.wasWaterCovered && !currentlyWaterCovered) {
     tile.wasWaterCovered = false;
     if (m_audio) {
@@ -282,18 +285,19 @@ priority — Fire first (→ `SFX_SERVICE_DEGRADE`), Police (→ `SFX_SERVICE_DE
 ### `sfx_fire_alert` and `sfx_police_alert` — Service alert events (CRITICAL priority)
 
 **Trigger**: These SFX fire when a covered zone tile transitions to an **active service event**
-state — specifically when `CitySimulation` detects that a zone tile that was previously covered
+state — specifically when `Zoning::doDesirabilityTick()` detects that a zone tile that was previously covered
 by a Fire Station or Police Station has crossed an internal alert threshold (e.g. desirability
 has fallen to or below `SimulationConstants::service_alert_desirability_threshold`). In V1 this
 represents a simulated service-demand spike on tiles with poor desirability under service
 pressure.
 
-**Call site**: `CitySimulation::tick()`, within the per-tile desirability update pass, when
+**Call site**: `Zoning::doDesirabilityTick()` (called from
+`CitySimulation::doBudgetTick()`), within the per-tile desirability update pass, when
 a zone tile's `desirability` first drops to or below the alert threshold while that tile is
 within a Fire Station or Police Station coverage radius.
 
 ```cpp
-// In CitySimulation::tick(), per-tile desirability update:
+// In Zoning::doDesirabilityTick(), per-tile desirability update:
 if (tile.desirability <= SimulationConstants::service_alert_desirability_threshold
     && !tile.alertFired) {
     tile.alertFired = true;
@@ -337,7 +341,7 @@ no additional cull logic is required in `CitySimulation`.
 ## Per-Tile Audio Transition Fields (TileData — Phase 10)
 
 The three bool fields below are added to `CitySimulation::TileData` (defined in
-`src/simulation/CitySimulation.h`) as part of Phase 10. Each guards exactly one SFX
+`src/simulation/Zoning.h`) as part of Phase 10. Each guards exactly one SFX
 per coverage-loss event (not per tick while uncovered). All three must be serialised
 in the save file (Phase 11) to prevent spurious SFX re-fire on load.
 

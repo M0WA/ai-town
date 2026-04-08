@@ -369,7 +369,7 @@ TEST_F(SimComprehensiveTest, GetNextUnlockThreshold_Normal_ReturnsPositive) {
 
 TEST_F(SimComprehensiveTest, GetDemandPressurePct_AllZones_InitiallyInRange) {
     for (int z = 0; z < 3; ++z) {
-        float d = sim_->getDemandPressurePct(static_cast<ZoneType>(z));
+        float d = sim_->getZoneDemandFactor(static_cast<ZoneType>(z));
         EXPECT_GE(d, 0.0f);
         EXPECT_LE(d, 1.0f);
     }

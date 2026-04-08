@@ -6,8 +6,8 @@
 // MockCitySimulation — GMock implementation of ICitySimulation.
 // Source location: tests/ui/mock_city_simulation.h
 //
-// SEMANTIC DISTINCTION: getDemandPressurePct vs getTrafficDemandFactor
-//   getDemandPressurePct  — post-combination, post-floor aggregate; used by HUD demand bars.
+// SEMANTIC DISTINCTION: getZoneDemandFactor vs getTrafficDemandFactor
+//   getZoneDemandFactor   — post-combination, post-floor aggregate; used by HUD demand bars.
 //   getTrafficDemandFactor — raw traffic-only rolling-window multiplier; used for save/load only.
 class MockCitySimulation : public ICitySimulation {
 public:
@@ -30,7 +30,7 @@ public:
     MOCK_METHOD(CityRatingTier, getCityRating, (), (const, override));
 
     // --- Demand pressure (city-wide aggregate; HUD demand bars) ---
-    MOCK_METHOD(float, getDemandPressurePct, (ZoneType zone), (const, override));
+    MOCK_METHOD(float, getZoneDemandFactor, (ZoneType zone), (const, override));
 
     // --- Population ---
     MOCK_METHOD(int, getTotalPopulation, (), (const, override));

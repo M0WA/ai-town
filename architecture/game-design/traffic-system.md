@@ -164,15 +164,15 @@ if (m_audio) {
 transition (green→red or red→green on the controlling road segment). The intersection is
 identified by its tile coordinates `(tileX, tileZ)`.
 
-**Call site**: `CitySimulation::tick()`, inside the traffic signal update loop, at the moment
+**Call site**: `Traffic::doTrafficSignalTick()`, inside the traffic signal update loop, at the moment
 a signal phase changes.
 
 ```cpp
-// In CitySimulation::tick(), traffic signal update loop:
+// In Traffic::doTrafficSignalTick(), traffic signal update loop:
 if (signal.phaseChanged) {
     if (m_audio) {
         // Pre-acquisition distance cull: skip entirely if beyond audible range.
-        // CitySimulation obtains the listener position from IRenderer::getListenerPosition()
+        // Traffic obtains the listener position from IRenderer::getListenerPosition()
         // (the Phase 11d addition — stores the camera position from the last setCamera() call).
         // Culling here prevents even the playPositionalSound() call for out-of-range signals,
         // reducing audio system overhead at large city scales (hundreds of intersections).
@@ -191,11 +191,11 @@ if (signal.phaseChanged) {
 `SFX_INTERSECTION_TICK` = SoundId 16 (`sfx_intersection_tick.wav`) — positional
 (`AL_SOURCE_RELATIVE = AL_FALSE`), no EFX bypass (subtle ambient detail — occlusion is
 acceptable). `SoundPriority::LOW` ensures this sound is the first evicted under pool
-pressure. **Distance cull (Phase 11d — in `CitySimulation`, NOT in `AudioSystem`)**: The
-80 m pre-acquisition cull is implemented in `CitySimulation::tick()` using
+pressure. **Distance cull (Phase 11d — in `Traffic`, NOT in `AudioSystem`)**: The
+80 m pre-acquisition cull is implemented in `Traffic::doTrafficSignalTick()` using
 `m_renderer->getListenerPosition()` (the `IRenderer` method added in Phase 11d — see
-`implementation/phase-11d.md`). `CitySimulation` skips the `playPositionalSound()` call
+`implementation/phase-11d.md`). `Traffic` skips the `playPositionalSound()` call
 entirely when `distance(listenerPos, signalPos) > 80.0f`. This is the only SFX with an
-explicit pre-acquisition distance cull at the `CitySimulation` call site. `AudioSystem`
+explicit pre-acquisition distance cull at the simulation call site. `AudioSystem`
 does NOT implement a separate cull for this sound — the `SoundPriority::LOW` eviction
 policy handles any residual pool pressure from signals that pass the 80 m cull.

@@ -1001,7 +1001,7 @@ TEST_F(EconomyTest, DemandPressure_NoZones_ValueInRange) {
     cs()->tick(SimulationConstants::SECONDS_PER_BUDGET_TICK);
 
     for (const auto zone : {ZoneType::Residential, ZoneType::Commercial, ZoneType::Industrial}) {
-        float d = sim_->getDemandPressurePct(zone);
+        float d = sim_->getZoneDemandFactor(zone);
         EXPECT_GE(d, 0.0f) << "Demand pressure must be >= 0.";
         EXPECT_LE(d, 1.0f) << "Demand pressure must be <= 1.";
     }

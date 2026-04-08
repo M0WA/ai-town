@@ -212,7 +212,7 @@ When a building upgrades to a higher density tier, its footprint expands (e.g., 
 
 4. **Cancel after 12 retries**: If `upgradeRetryCount` reaches 12 for a single tile, cancel the pending upgrade and emit a CRITICAL-priority toast: "Upgrade blocked — clear surrounding tiles". Upon cancellation, reset `upgradeRetryCount` to 0 AND set a per-tile boolean flag `upgradeBlocked = true`. While `upgradeBlocked` is `true`, the tile is excluded from upgrade resolution entirely — step 3's defer logic is skipped and no further CRITICAL toasts are emitted for this tile. The `upgradeBlocked` flag is cleared (and the tile becomes eligible for upgrade resolution again) when the player manually demolishes any tile that was previously blocking the upgrade — i.e., when a tile in the previously expanded footprint that was a road, a different zone type, a service building, or an out-of-bounds boundary is removed and the expanded footprint no longer contains any blocking tiles. Reset `upgradeRetryCount` to 0 and clear `upgradeBlocked` whenever a tile successfully upgrades, is manually demolished, OR whenever the blocking condition that caused a prior cancellation is resolved (e.g., a blocking neighbour tile is demolished and the footprint is now fully clear).
 
-The `upgradeRetryCount` is tracked per tile in a `std::unordered_map<TileKey, int>` on `CitySimulation`. The `upgradeBlocked` flag is tracked per tile in a `std::unordered_map<TileKey, bool>` on `CitySimulation`.
+The `upgradeRetryCount` is tracked per tile in a `std::unordered_map<TileKey, int>` on the `Zoning` sub-system (`src/simulation/Zoning.h/cpp`). The `upgradeBlocked` flag is tracked per tile in a `std::unordered_map<TileKey, bool>` on the `Zoning` sub-system.
 
 ### Service Building Street Adjacency
 
@@ -311,9 +311,9 @@ if (m_audio) {
 ### `sfx_zone_upgrade` — Zone tile auto-upgraded to higher density tier
 
 **Trigger**: Fired once per tile that is successfully upgraded during a density upgrade wave
-tick. The upgrade wave runs inside `CitySimulation::doDensityUnlockTick()`.
+tick. The upgrade wave runs inside `Population::doDensityUnlockTick()`.
 
-**Call site**: `CitySimulation::doDensityUnlockTick()`, immediately after a tile's density
+**Call site**: `Population::doDensityUnlockTick()`, immediately after a tile's density
 tier is incremented and before the 20%-per-type cap counter is updated.
 
 **Per-wave-tick audio call cap**: At most `SimulationConstants::sfx_zone_upgrade_per_tick_cap`
@@ -326,7 +326,7 @@ constant must be defined in `simulation_constants.h` as
 `static constexpr int sfx_zone_upgrade_per_tick_cap = 3`.
 
 ```cpp
-// In CitySimulation::doDensityUnlockTick(), per-tile upgrade:
+// In Population::doDensityUnlockTick(), per-tile upgrade:
 tile.densityTier = nextTier;
 if (m_audio && sfxCallsThisTick < SimulationConstants::sfx_zone_upgrade_per_tick_cap) {
     m_audio->playSound(SFX_ZONE_UPGRADE, SoundPriority::NORMAL, 1.0f);
