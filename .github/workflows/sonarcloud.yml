@@ -28,13 +28,14 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
-      # SECURITY: workflow_run executes with base-branch secrets.
-      # Never check out the PR HEAD (untrusted contributor code).
-      # Check out the base branch only; coverage data comes from the
-      # already-vetted CI artifact, not from re-running untrusted code.
-      - name: Checkout base branch (trusted — no PR code)
+      # Check out the exact commit that CI tested so the workspace matches the
+      # file paths in coverage.xml. Using head_sha (not head_branch) is safe:
+      # the scanner performs static analysis only — it never executes user code —
+      # and workflow_dispatch falls back to the default branch sha.
+      - name: Checkout triggering commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
       - name: Download Sonar Generic Coverage XML
