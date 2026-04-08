@@ -10,9 +10,9 @@ name: Microsoft C++ Code Analysis
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "develop"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "develop"]
   schedule:
     - cron: "33 13 * * 0"
 
@@ -46,7 +46,7 @@ jobs:
           "COMPILER_VERSION=$version" >> $env:GITHUB_ENV
 
       - name: Cache vcpkg packages
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: C:\Users\runneradmin\AppData\Local\vcpkg\archives
           key: vcpkg-${{ runner.os }}-${{ env.COMPILER_VERSION }}-${{ hashFiles('vcpkg.json') }}-${{ env.VCPKG_COMMIT_ID }}
@@ -88,7 +88,7 @@ jobs:
           }
 
       - name: Upload SARIF to GitHub
-        uses: github/codeql-action/upload-sarif@0e9f55954318745b37b7933c693bc093f7336125 # v4.35.1
+        uses: github/codeql-action/upload-sarif@5c8a8a642e79153f5d047b10ec1cba1d1cc65699 # v3.35.1
         with:
           sarif_file: ${{ steps.run-analysis.outputs.sarif }}
           category: msvc-code-analysis
