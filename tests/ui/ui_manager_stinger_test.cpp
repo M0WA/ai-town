@@ -70,7 +70,7 @@ static void setDefaultSimCalls(StrictMock<MockCitySimulation>& sim)
         .Times(AnyNumber()).WillRepeatedly(Return(false));
     EXPECT_CALL(sim, getUndoExpiryTimeSeconds())
         .Times(AnyNumber()).WillRepeatedly(Return(0.0));
-    EXPECT_CALL(sim, getDemandPressurePct(::testing::_))
+    EXPECT_CALL(sim, getZoneDemandFactor(::testing::_))
         .Times(AnyNumber()).WillRepeatedly(Return(0.5f));
     EXPECT_CALL(sim, getTrafficDemandFactor(::testing::_))
         .Times(AnyNumber()).WillRepeatedly(Return(0.5f));

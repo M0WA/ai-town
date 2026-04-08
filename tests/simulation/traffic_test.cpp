@@ -484,7 +484,7 @@ TEST_F(NiceTrafficTest, Smoothstep_ExercisedByTrafficTick)
     clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
     runTicks(4);
 
-    float resD = sim_->getDemandPressurePct(ZoneType::Residential);
+    float resD = sim_->getZoneDemandFactor(ZoneType::Residential);
     EXPECT_GE(resD, 0.0f);
     EXPECT_LE(resD, 100.0f);
 }
@@ -516,7 +516,7 @@ TEST_F(NiceTrafficTest, TrafficOverload_Commercial_Industrial_FiresTimeout)
     clock_.advance(SimulationConstants::grace_period_real_seconds + 1.0);
     runTicks(1);
 
-    float comD = sim_->getDemandPressurePct(ZoneType::Commercial);
+    float comD = sim_->getZoneDemandFactor(ZoneType::Commercial);
     EXPECT_GE(comD, 0.0f);
     EXPECT_LE(comD, 100.0f);
 }

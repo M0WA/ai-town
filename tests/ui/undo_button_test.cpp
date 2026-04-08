@@ -47,7 +47,7 @@ protected:
         ON_CALL(sim_, getCityRating()).WillByDefault(Return(CityRatingTier::Village));
         ON_CALL(sim_, getTotalPopulation()).WillByDefault(Return(100));
         ON_CALL(sim_, getSimulationTime()).WillByDefault(Return(SimulationTime{1, 1}));
-        ON_CALL(sim_, getDemandPressurePct(_)).WillByDefault(Return(0.5f));
+        ON_CALL(sim_, getZoneDemandFactor(_)).WillByDefault(Return(0.5f));
         ON_CALL(sim_, hasUndoPendingAction()).WillByDefault(Return(false));
         ON_CALL(sim_, getUndoExpiryTimeSeconds()).WillByDefault(Return(0.0));
 

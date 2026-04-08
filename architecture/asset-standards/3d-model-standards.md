@@ -170,25 +170,25 @@ Tripo3D source; ≤8,000 tris LOD1 DECIMATE COLLAPSE to ~5,000 tris target; ≤6
 
 **Phase 10 note**: Phase 10 always uses variant `_01` for every zone/tier combination — `assetBaseName` is always `"<zone>_<tier>_01"` (e.g. `"res_low_01"`, `"com_med_01"`). The round-robin counter described below is a Phase 11 enhancement; do NOT implement the counter in Phase 10. This keeps Phase 10's `CitySimulation` scope unambiguous and makes mock-renderer test assertions deterministic.
 
-**Phase 11 and later**: When `CitySimulation` places a zone tile, it selects a visual building variant from the available variants for that zone-tier combination using a **per-zone-tier round-robin counter**. The policy is:
+**Phase 11 and later**: When a zone tile is placed, the `Zoning` sub-system selects a visual building variant using `zoneAssetBaseName()` from the available variants for that zone-tier combination using a **per-zone-tier round-robin counter**. The policy is:
 
-- `CitySimulation` maintains one `int` counter per unique zone-tier combination (9 combinations in V1: Res/Com/Ind × Low/Med/High). Each counter starts at `0` and increments by `1` on every successful placement for that zone-tier combination.
+- `Zoning` sub-system (`src/simulation/Zoning.h`) maintains one `int` counter per unique zone-tier combination (9 combinations in V1: Res/Com/Ind × Low/Med/High). Each counter starts at `0` and increments by `1` on every successful placement for that zone-tier combination.
 - The variant index is `(counter % numVariants) + 1`, formatted as a zero-padded 2-digit string (`01`, `02`, `03`, `04`). `numVariants` is `4` for V1 (four variants per zone-tier slot). Service buildings have no variant system and do not use this counter.
 - The resulting `assetBaseName` passed to `IRenderer::placeBuildingMesh()` is `<zone>_<tier>_<variant>` (e.g. `"res_low_01"`, `"res_low_02"`, `"res_low_03"`, `"res_low_04"`, `"res_low_01"`, …).
-- After `CitySimulation::doDensityUnlockTick()` upgrades a tile to a higher density tier, the NEW `assetBaseName` uses the upgraded tier's round-robin counter (not the original tier's counter). Example: a tile originally placed as `"res_low_02"` that upgrades to Medium becomes `"res_med_<N>"` where `<N>` is the current Residential/Medium counter value.
-- The counter is a plain `int` member of `CitySimulation` per zone-tier slot. **Prior to Phase 11**, the counters are not persisted in the save file — on load, all existing zone tile variants are read from the tile's stored `assetBaseName` field in the save data, not recomputed from the counter; only newly placed tiles after a load use the counter (starting from 0), so save/load does not change existing visible building variants. **From Phase 11 onwards**, all 9 `m_buildingVariantCounters` are serialized to and deserialized from the save file so that post-load placements continue the pre-save sequence without restarting at 0; see `architecture/game-design/save-system.md`.
+- After `Population::doDensityUnlockTick()` upgrades a tile to a higher density tier, the NEW `assetBaseName` uses the upgraded tier's round-robin counter (not the original tier's counter). The variant counter is read from the `Zoning` sub-system by `Population` during upgrade. Example: a tile originally placed as `"res_low_02"` that upgrades to Medium becomes `"res_med_<N>"` where `<N>` is the current Residential/Medium counter value.
+- The counter is a plain `int` member of the `Zoning` sub-system per zone-tier slot. **Prior to Phase 11**, the counters are not persisted in the save file — on load, all existing zone tile variants are read from the tile's stored `assetBaseName` field in the save data, not recomputed from the counter; only newly placed tiles after a load use the counter (starting from 0), so save/load does not change existing visible building variants. **From Phase 11 onwards**, all 9 `m_buildingVariantCounters` are serialized to and deserialized from the save file so that post-load placements continue the pre-save sequence without restarting at 0; see `architecture/game-design/save-system.md`.
 - **No-repeat guarantee**: the round-robin cycles through the four V1 variants (01, 02, 03, 04, 01, 02, …) without shuffling or RNG. This is intentional — using `ISimulationRNG` for variant selection would couple visible-asset selection to the simulation RNG stream, making reproduction of RNG-dependent events (service degradation, loan issuance) dependent on the number of tiles placed, which would break deterministic test replay. Visual variant selection MUST NOT use `ISimulationRNG`.
-- **Counter storage location**: `CitySimulation` stores the nine counters as `std::array<int, 9> m_buildingVariantCounters` (indexed by `zone * 3 + tier` where `zone` = 0/1/2 for Res/Com/Ind and `tier` = 0/1/2 for Low/Med/High), initialised to `{0}` in the constructor initialiser list.
+- **Counter storage location**: `Zoning` sub-system (`src/simulation/Zoning.h/cpp`) stores the nine counters as `std::array<int, 9> m_buildingVariantCounters` (indexed by `zone * 3 + tier` where `zone` = 0/1/2 for Res/Com/Ind and `tier` = 0/1/2 for Low/Med/High), initialised to `{0}` in the constructor initialiser list.
 - **Service buildings**: Service buildings (`svc_fire_station`, `svc_police_station`,
   `svc_power_plant`, `svc_water_tower`) have **no variant system**. Each is a single
   unique model. There is no round-robin counter for service buildings, and no variant
   suffix (`_01`, `_02`, etc.) appears in their filenames. The `placeServiceBuildingMesh()`
   call always uses the canonical base name directly (e.g. `"svc_fire_station"`).
 
-**`assetBaseName` construction helper** (implement as a `static` free function in `CitySimulation.cpp`):
+**`assetBaseName` construction helper** (implement as a `static` free function in `Zoning.cpp`):
 
 ```cpp
-static std::string buildingAssetBaseName(ZoneType zone, DensityTier tier, int variantCounter) {
+static std::string zoneAssetBaseName(ZoneType zone, DensityTier tier, int variantCounter) {
     static const char* zoneStr[]  = {"res", "com", "ind"};
     static const char* tierStr[]  = {"low", "med", "high"};
     static const int numVariants  = 4;   // V1 constant
@@ -202,7 +202,7 @@ static std::string buildingAssetBaseName(ZoneType zone, DensityTier tier, int va
 }
 ```
 
-This function is internal to `CitySimulation.cpp` — do not expose it through `ICitySimulation`.
+This function is internal to `Zoning.cpp` — do not expose it through `ICitySimulation`.
 
 #### `BuildingAssetLoader` LOD Loading Contract
 

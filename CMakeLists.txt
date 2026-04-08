@@ -303,6 +303,13 @@ target_include_directories(aitown_sim
 )
 target_link_libraries(aitown_sim PRIVATE aitown_coverage_flags aitown_project_root_includes)
 target_compile_features(aitown_sim PRIVATE cxx_std_17)
+target_sources(aitown_sim PRIVATE
+    src/simulation/Economy.cpp
+    src/simulation/Traffic.cpp
+    src/simulation/Zoning.cpp
+    src/simulation/Population.cpp
+    src/simulation/SimTiming.cpp
+)
 
 # ----------------------------------------------------------------------------
 # aitown_ui — UIManager, UIScaler, CameraController, NotificationManager, dialogs

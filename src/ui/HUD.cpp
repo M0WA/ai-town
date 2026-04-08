@@ -253,10 +253,10 @@ void HUD::draw() {
         m_backend->setElementText(m_btnUndo, "Undo");
     }
 
-    // Demand pressure bars (R/C/I) — getDemandPressurePct returns [0.0, 1.0]
-    float demandR = m_sim->getDemandPressurePct(ZoneType::Residential) * 100.0f;
-    float demandC = m_sim->getDemandPressurePct(ZoneType::Commercial)  * 100.0f;
-    float demandI = m_sim->getDemandPressurePct(ZoneType::Industrial)  * 100.0f;
+    // Demand pressure bars (R/C/I) — getZoneDemandFactor returns [0.0, 1.0]
+    float demandR = m_sim->getZoneDemandFactor(ZoneType::Residential) * 100.0f;
+    float demandC = m_sim->getZoneDemandFactor(ZoneType::Commercial)  * 100.0f;
+    float demandI = m_sim->getZoneDemandFactor(ZoneType::Industrial)  * 100.0f;
 
     char demBuf[32];
     std::snprintf(demBuf, sizeof(demBuf), "%.0f%%", demandR);
