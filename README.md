@@ -7,6 +7,12 @@ manage finances, and grow a living city with traffic, economy simulation, and sp
 
 ---
 
+| main                                                                        | develop                                                                                       | image                                                                                            | sonarcloud                                                                                                                                                                  |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ![main](https://github.com/M0WA/ai-town/actions/workflows/ci.yml/badge.svg) | ![develop](https://github.com/M0WA/ai-town/actions/workflows/ci.yml/badge.svg?branch=develop) | ![docker ci cd](https://github.com/M0WA/ai-town/actions/workflows/docker-ci-image.yml/badge.svg) | [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=M0WA_ai-town&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=M0WA_ai-town) |
+
+---
+
 ## Installation
 
 Pre-built installer/packages are available on the [Releases page](https://github.com/M0WA/ai-town/releases).
