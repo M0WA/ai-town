@@ -9,6 +9,7 @@
     "fmt",
     "glew",
     "gtest",
-    "rapidcheck"
+    "rapidcheck",
+    "nlohmann-json"
   ]
 }
