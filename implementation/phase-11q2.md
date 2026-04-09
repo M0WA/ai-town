@@ -40,80 +40,80 @@ format into compliance with `architecture/game-design/service-coverage.md`.
 
 The static function has four nested loops (footprint × footprint × rx × rz = depth 4).
 
-- [ ] Add private static helper `nearestRoadFromCell(tiles, fx, fz, curMin) → int`
+- [x] Add private static helper `nearestRoadFromCell(tiles, fx, fz, curMin) → int`
   that runs the inner `rx`/`rz` scan for a single footprint cell and returns the
   updated minimum distance.
-- [ ] Refactor `nearestRoadDistance` to call `nearestRoadFromCell` in the footprint
+- [x] Refactor `nearestRoadDistance` to call `nearestRoadFromCell` in the footprint
   loops, reducing nesting to ≤ 3.
-- [ ] Add declaration to `Zoning.h` private section.
+- [x] Add declaration to `Zoning.h` private section.
 
 ##### 1b. `Zoning::getServiceCoverage` (S134 line 239)
 
 Three nested loops (service buildings × dz × dx) with an `if` guard inside = depth 4.
 
-- [ ] Add private static helper `collectCoverageTiles(sb, radius) →
+- [x] Add private static helper `collectCoverageTiles(sb, radius) →
   std::vector<ServiceCoverageTile>` that runs the inner `dz`/`dx` loops and
   returns the tile list for one service building.
-- [ ] Refactor `getServiceCoverage` to call `collectCoverageTiles` per building and
+- [x] Refactor `getServiceCoverage` to call `collectCoverageTiles` per building and
   append results, reducing nesting to ≤ 3.
-- [ ] Add declaration to `Zoning.h` private section.
+- [x] Add declaration to `Zoning.h` private section.
 
 ##### 1c. `Zoning::computePowerCoverage` (S3776 complexity 35, S134 lines 324–329)
 
 The BFS expansion `for (int d = 0; d < 4; ...)` is nested inside `while → for(sb)`
 reaching depth 4 with guarding `if` statements.
 
-- [ ] Add private member helper `runPowerBfs(sb, bfsDepth&, maxDepth&) const` that
+- [x] Add private member helper `runPowerBfs(sb, bfsDepth&, maxDepth&) const` that
   seeds the BFS queue from the service building footprint and runs the full BFS
   expansion, returning the populated `bfsDepth` map and `maxDepth`.
   - Internal nesting inside `runPowerBfs`: `for fdx → for fdz` (seed) and
     `while → for(d=0..3) → if` — all ≤ 3 levels.
-- [ ] Refactor `computePowerCoverage` to call `runPowerBfs`, reducing its nesting
+- [x] Refactor `computePowerCoverage` to call `runPowerBfs`, reducing its nesting
   and complexity to within limits.
-- [ ] Add declaration to `Zoning.h` private section.
+- [x] Add declaration to `Zoning.h` private section.
 
 ##### 1d. `Zoning::buildPowerCoverageCache` (S3776 complexity 47, S134 lines 395–432)
 
 Same BFS pattern as above plus a radial fallback loop with depth-4 `if` guards.
 
-- [ ] Refactor `buildPowerCoverageCache` to call `runPowerBfs` (from 1c above),
+- [x] Refactor `buildPowerCoverageCache` to call `runPowerBfs` (from 1c above),
   eliminating the BFS nesting violations at lines 395–400.
-- [ ] Add private member helper `addRadialFallbackCoverage(sb, radiusTiles,
+- [x] Add private member helper `addRadialFallbackCoverage(sb, radiusTiles,
   bfsDepth)` that runs the outer `dx`/`dz` radial scan and inserts keys into
   `m_powerCoverageCache`, keeping nesting ≤ 3.
-- [ ] Refactor `buildPowerCoverageCache` to call `addRadialFallbackCoverage`,
+- [x] Refactor `buildPowerCoverageCache` to call `addRadialFallbackCoverage`,
   eliminating violations at lines 429–432.
-- [ ] Add `addRadialFallbackCoverage` declaration to `Zoning.h` private section.
+- [x] Add `addRadialFallbackCoverage` declaration to `Zoning.h` private section.
 
 ##### 1e. `Zoning::applyDesirabilityScores` (S3776 complexity 112, S134 lines 496–630)
 
 The largest function in `Zoning.cpp`. Outer for-tile loop with deep residential
 neighbour scan, service coverage checks, water/power state updates, and alert firing.
 
-- [ ] Add `computeNeighborDesirabilityDelta(x, z) const → float`:
+- [x] Add `computeNeighborDesirabilityDelta(x, z) const → float`:
   runs the 11×11 neighbour scan and returns the net desirability delta.
   Max internal nesting: `for dz → for dx → if` = 3. ✓
-- [ ] Add `computeFirePoliceCoverageGap(x, z, hasFireStation, hasPolice) const → bool`:
+- [x] Add `computeFirePoliceCoverageGap(x, z, hasFireStation, hasPolice) const → bool`:
   checks ONLY fire and police radial coverage and returns whether either service
   is uncovered for tile (x, z). This helper does NOT check water or power
   coverage — those are the exclusive responsibility of `updateWaterState` and
   `updatePowerState` (see below). No ifs nested beyond L1 inside the helper. ✓
-- [ ] The all-services-absent short-circuit is a **caller** concern: in the
+- [x] The all-services-absent short-circuit is a **caller** concern: in the
   refactored `applyDesirabilityScores`, the caller checks
   `if (!hasFireStation && !hasPolice && !hasWater && !hasPower)` and, if true,
   sets `anyUncovered = true` without calling `computeFirePoliceCoverageGap`,
   `updateWaterState`, or `updatePowerState`. This avoids double-counting and
   keeps the guard visible at the call site.
-- [ ] Add `updateWaterState(tile&, x, z, hasWater, anyUncovered&, audio)`:
+- [x] Add `updateWaterState(tile&, x, z, hasWater, anyUncovered&, audio)`:
   computes water coverage, updates `tile.wasWaterCovered`, sets `anyUncovered`,
   plays `SFX_WATER_OUT` if coverage just dropped. No ifs beyond L1. ✓
   **Water uncovered contributions belong exclusively to this helper** — no other
   helper or caller logic may duplicate water coverage checks.
-- [ ] Add `updatePowerState(tile&, x, z, hasPower, anyUncovered&, audio)`:
+- [x] Add `updatePowerState(tile&, x, z, hasPower, anyUncovered&, audio)`:
   same pattern for power coverage cache. No ifs beyond L1. ✓
   **Power uncovered contributions belong exclusively to this helper** — no other
   helper or caller logic may duplicate power coverage checks.
-- [ ] Add `fireDesirabilityAlert(tile&, x, z, hasFireStation, hasPolice, audio)`:
+- [x] Add `fireDesirabilityAlert(tile&, x, z, hasFireStation, hasPolice, audio)`:
   checks `tile.alertFired`; if `hasFireStation` plays `SFX_FIRE_ALERT`, else if
   `hasPolice` plays `SFX_POLICE_ALERT` (fire station takes priority per
   `architecture/game-design/service-coverage.md`); sets `tile.alertFired = true`.
@@ -133,7 +133,7 @@ neighbour scan, service coverage checks, water/power state updates, and alert fi
   called from `applyDesirabilityScores`); the spec-side attribution error was corrected
   separately and is not a deliverable of this phase.
   No nesting beyond L1. ✓
-- [ ] Refactor `applyDesirabilityScores` to call these helpers. Final shape:
+- [x] Refactor `applyDesirabilityScores` to call these helpers. Final shape:
   - Outer for-tile loop (L1) → if Residential (L2) → helper calls (no nesting) ✓
   - All-services-absent guard at call site (L2):
     `if (!hasFireStation && !hasPolice && !hasWater && !hasPower) { anyUncovered = true; }`
@@ -152,14 +152,14 @@ neighbour scan, service coverage checks, water/power state updates, and alert fi
     in the CALLER — NOT inside `fireDesirabilityAlert`. This reset allows alerts to
     re-fire in future desirability-collapse episodes. Final shape:
     `if (desirability <= threshold) { fireDesirabilityAlert(...); } else { tile.alertFired = false; }` ✓
-- [ ] Add all five new declarations to `Zoning.h` private section.
+- [x] Add all five new declarations to `Zoning.h` private section.
 
 ##### 1f. `Zoning::doServiceDegradationTick` (S134 line 630)
 
 `if (roll < threshold)` is at depth 4 inside:
 `if (budget ≤ threshold)` → `for idx` → `if (!sb.degraded)` → `if (roll <...)`.
 
-- [ ] Add `tryDegradeService(sb&, rng, audio, notifications)`: checks `sb.degraded`,
+- [x] Add `tryDegradeService(sb&, rng, audio, notifications)`: checks `sb.degraded`,
   rolls probability, sets `sb.degraded = true`, plays `SFX_SERVICE_DEGRADE`, pushes
   `ServiceDegraded` notification. Max nesting inside: `if → if` = 2. ✓
 
@@ -171,9 +171,9 @@ neighbour scan, service coverage checks, water/power state updates, and alert fi
   deterministic (no RNG roll, no SFX\_SERVICE\_DEGRADE) per the service-coverage spec
   (`architecture/game-design/service-coverage.md`).
 
-- [ ] Refactor `doServiceDegradationTick` to call `tryDegradeService` instead of the
+- [x] Refactor `doServiceDegradationTick` to call `tryDegradeService` instead of the
   inline `if (!sb.degraded)` block. Nesting reduced to ≤ 3. ✓
-- [ ] Add `tryDegradeService` declaration to `Zoning.h` private section.
+- [x] Add `tryDegradeService` declaration to `Zoning.h` private section.
 
 ---
 
@@ -184,13 +184,13 @@ neighbour scan, service coverage checks, water/power state updates, and alert fi
 `if (baseName.size() >= 2 && variantNum...)` and `if (renderer)` sit at depth 4 inside:
 `for tiles → if underConstruction → if demand ≥ threshold → if ...`.
 
-- [ ] Add private static helper `completeConstruction(tile&, key, traffic, renderer)`:
+- [x] Add private static helper `completeConstruction(tile&, key, traffic, renderer)`:
   checks demand threshold; if met, clears `underConstruction`, builds the asset name
   with variant suffix, calls `renderer->placeBuildingMesh`. Max nesting: L1 = 1. ✓
-- [ ] Refactor `doPopulationTick` to call `completeConstruction` inside the
+- [x] Refactor `doPopulationTick` to call `completeConstruction` inside the
   `if (tile.underConstruction && footprintOriginX == -1)` block.
   Nesting in caller: `for → if` = 2. ✓
-- [ ] Add `completeConstruction` declaration to `Population.h` private section
+- [x] Add `completeConstruction` declaration to `Population.h` private section
   (as `static`).
 
 ##### 2b. `Population::applyDensityUpgrade` (S3776 complexity 101, S134 lines 225, 228, 261, 273)
@@ -200,27 +200,27 @@ Two violation clusters:
 **Blocker-scan (lines 225/228)** — `if` statements inside
 `for dx → for dz → if isZoned` reach depth 4.
 
-- [ ] Add file-scope (anonymous namespace in `Population.cpp`) helper struct
+- [x] Add file-scope (anonymous namespace in `Population.cpp`) helper struct
   `DemoEntry { int x; int z; int64_t originKey; }` (currently defined inline).
-- [ ] Add file-scope static helper
+- [x] Add file-scope static helper
   `checkZonedNeighbor(tiles, ft, fx, fz, candKey, targetZone, targetDensity,
   toDemo&) → bool`:
   examines one zoned footprint cell; returns `true` if it is a blocker, or
   `false` (and optionally appends to `toDemo`) if demotable. Max nesting: 2. ✓
-- [ ] Refactor the `for dx / for dz` scan in `applyDensityUpgrade` to call
+- [x] Refactor the `for dx / for dz` scan in `applyDensityUpgrade` to call
   `checkZonedNeighbor` for the `if (ft.isZoned)` branch.
   Nesting in caller: `for → for → if isZoned` = 3. ✓
 
 **Demo-clearance (lines 261/273)** — `if tileIt == end` and `if !insideNewFP`
 inside `for de → for ddx → for ddz` reach depth 4.
 
-- [ ] Add file-scope struct `OuterTile { int x; int z; ZoneType zone; }` (currently
+- [x] Add file-scope struct `OuterTile { int x; int z; ZoneType zone; }` (currently
   inline).
-- [ ] Add file-scope static helper
+- [x] Add file-scope static helper
   `clearFootprintCell(tiles&, cellX, cellZ, tx, tz, newN, outerTiles&)`:
   looks up one tile, computes `insideNewFP`, resets tile fields, appends to
   `outerTiles` if outside. Max nesting: 1. ✓
-- [ ] Refactor the `for de / for ddx / for ddz` demo loop to call
+- [x] Refactor the `for de / for ddx / for ddz` demo loop to call
   `clearFootprintCell`. Nesting in caller: `for → for → for` = 3. ✓
 
 ##### 2c. `Population::doDensityUnlockTick` (S3776 complexity 35)
@@ -228,24 +228,24 @@ inside `for de → for ddx → for ddz` reach depth 4.
 The function mixes a `switch` for scale, threshold-checking, and the upgrade wave
 loop, pushing complexity over 25.
 
-- [ ] Add private static helper `difficultyToUnlockScale(Difficulty) → float`:
+- [x] Add private static helper `difficultyToUnlockScale(Difficulty) → float`:
   one-switch function returning the correct scale constant.
-- [ ] Add private member helper `tickUnlockProgress(economy, scale)`:
+- [x] Add private member helper `tickUnlockProgress(economy, scale)`:
   the `for (int i = 0; i < 6; ...)` threshold-check loop that advances
   `consecutive_months_above_threshold` and sets `unlock_flags`. Complexity ≈ 8. ✓
-- [ ] Add private member helper `processUpgradeWave(zoning, traffic,
+- [x] Add private member helper `processUpgradeWave(zoning, traffic,
   wasAlreadyUnlocked*, renderer, audio, sfxCallsThisTick&, notifications)`:
   the second `for (int tierIdx = 0; ...)` loop that scans candidates and calls
   `applyDensityUpgrade`. Complexity ≈ 10. ✓
-- [ ] Refactor `doDensityUnlockTick` to call the three helpers.
+- [x] Refactor `doDensityUnlockTick` to call the three helpers.
   Remaining complexity ≈ 4 (well under 25). ✓
-- [ ] Add all three declarations to `Population.h` private section.
+- [x] Add all three declarations to `Population.h` private section.
 
 ---
 
 #### Intermediate coverage gate
 
-- [ ] **Intermediate coverage gate**: After completing all helper extractions
+- [x] **Intermediate coverage gate**: After completing all helper extractions
   (Deliverables 1 and 2), run `make test` locally and verify the per-file 85%
   coverage floor for `Zoning.cpp`, `Population.cpp`, and `CitySimulation.cpp`
   (using the `awk` pipeline from `architecture/testing/coverage.md`). If any file
@@ -261,12 +261,12 @@ loop, pushing complexity over 25.
 `if (bit != m_zoning.m_tiles.end() && bit->second.isRoad)` is at depth 4 inside:
 `if (m_terrain) → for dx → for dz`.
 
-- [ ] Introduce a local lambda `flattenIfRoad(bx, bz)` immediately inside the
+- [x] Introduce a local lambda `flattenIfRoad(bx, bz)` immediately inside the
   `if (m_terrain)` block. The lambda looks up the tile and calls
   `m_terrain->setTileHeight` if it is a road tile. Max nesting inside lambda: 1. ✓
-- [ ] Replace the inline `auto bit = ...` + `if (bit != ...)` block with a call to
+- [x] Replace the inline `auto bit = ...` + `if (bit != ...)` block with a call to
   the lambda. Nesting in caller: `if → for → for` = 3. ✓
-- [ ] No header change required (lambda is local).
+- [x] No header change required (lambda is local).
 
 ##### 3b. `CitySimulation::deserializeFromJson` + `serializeToJson` — replace hand-rolled parser with `nlohmann/json`
 
@@ -282,7 +282,7 @@ MIT licence, cross-platform Linux/Windows, CMake target
 `b2f068faf45a3f04145bec0f52a66526ad590227`.
 
 - [x] Add `"nlohmann-json"` to the `dependencies` array in `vcpkg.json`.
-- [ ] Add to `CMakeLists.txt` (near the other `find_package` calls):
+- [x] Add to `CMakeLists.txt` (near the other `find_package` calls):
 
   ```cmake
   find_package(nlohmann_json CONFIG REQUIRED)
@@ -291,14 +291,14 @@ MIT licence, cross-platform Linux/Windows, CMake target
   and link `nlohmann_json::nlohmann_json` to `aitown_sim` (the target that
   compiles `CitySimulation.cpp`) via
   `target_link_libraries(aitown_sim PRIVATE nlohmann_json::nlohmann_json)`.
-- [ ] Add `nlohmann_json::nlohmann_json` to
+- [x] Add `nlohmann_json::nlohmann_json` to
   `target_link_libraries(simulation_tests PRIVATE ...)` in `CMakeLists.txt`.
   The `aitown_sim` target links `nlohmann_json::nlohmann_json` as `PRIVATE`,
   so the include path does NOT propagate to `simulation_tests`. Without this
   explicit link, any test file using `#include <nlohmann/json.hpp>` for
   programmatic JSON manipulation (e.g., `nlohmann::json::parse()` + field
   mutation + `j.dump()`) will fail to compile with a "file not found" error.
-- [ ] Verify `architecture/testing/framework.md` already includes
+- [x] Verify `architecture/testing/framework.md` already includes
   `nlohmann_json::nlohmann_json` in the `target_link_libraries(simulation_tests
   PRIVATE ...)` example (added as part of Phase 11q2 spec preparation); if it is
   already present, no spec change is needed; if absent, add it with a comment
@@ -361,10 +361,10 @@ MIT licence, cross-platform Linux/Windows, CMake target
   Use digest-only format (`ghcr.io/m0wa/aitown-ci-linux@sha256:<digest>`) per
   CLAUDE.md atomicity item 4 (the `:tag@sha256:digest` double-separator breaks
   Docker layer caching).
-- [ ] Add `#include <nlohmann/json.hpp>` in `CitySimulation.cpp`; remove the entire
+- [x] Add `#include <nlohmann/json.hpp>` in `CitySimulation.cpp`; remove the entire
   hand-rolled anonymous namespace (`skipWs`, `expect`, `parseString`, `parseInt64`,
   `parseFloat`, `parseBool`, `parseKey` plus any helpers).
-- [ ] Rewrite `deserializeFromJson` using the nlohmann API:
+- [x] Rewrite `deserializeFromJson` using the nlohmann API:
   - Parse with `nlohmann::json::parse(json, nullptr, /*exceptions=*/false)` and
     check `.is_discarded()` for the error path.
   - Access fields using three tiers based on their presence in the save format history:
@@ -406,16 +406,16 @@ MIT licence, cross-platform Linux/Windows, CMake target
   - Iterate tile/service-building arrays with a range-for.
   - Target cognitive complexity ≤ 25 (all nesting is flat key-access, no manual loops
     over characters). ✓
-- [ ] Rewrite `serializeToJson` using the nlohmann API (`nlohmann::json j; j["key"] = value; … return j.dump(2);`), replacing the current hand-built string concatenation.
+- [x] Rewrite `serializeToJson` using the nlohmann API (`nlohmann::json j; j["key"] = value; … return j.dump(2);`), replacing the current hand-built string concatenation.
   (`serializeToJson` has no SonarCloud violations today but the manual string building
   is equally fragile — replacing both sides is the cleaner delta.)
   - Note: the nlohmann `serializeToJson` rewrite MUST add `"was_powered"` and `"was_water_covered"` to the per-tile output alongside the existing `"alert_fired"` field — the hand-rolled serializer omits these two fields, making this a net-new addition that brings the serializer into compliance with `architecture/game-design/service-coverage.md` (Per-Tile Audio Transition Fields: "All three must be serialised in the save file to prevent spurious SFX re-fire on load"). These fields are written for **every tile** in the tiles array (not filtered by zone type), because `TileData` defines `wasPowered` and `wasWaterCovered` for all zone types in `Zoning.h`. Corresponding deserialization must use `j.value("was_powered", true)`, `j.value("was_water_covered", true)`, and `j.value("alert_fired", false)` (backward-compatible defaults — `alertFired` defaults to `false` per the Per-Tile Audio Transition Fields table in `architecture/game-design/service-coverage.md`, ensuring the first-alert SFX is not suppressed on tiles loaded from pre-Phase-10 saves).
 - [x] Update `.devcontainer/Dockerfile` to ensure `nlohmann-json` is available in
   the dev container (it is installed via vcpkg during the container build, so no
   extra system package is needed — verify the container build still passes).
-- [ ] No header change to `CitySimulation.h` required; the JSON functions keep the
+- [x] No header change to `CitySimulation.h` required; the JSON functions keep the
   same signatures.
-- [ ] Review all `Serialize_*` / `Deserialize_*` unit tests in **all** test files
+- [x] Review all `Serialize_*` / `Deserialize_*` unit tests in **all** test files
   that call `serializeToJson()` or `deserializeFromJson()`. At minimum the
   following files require review:
   - `tests/simulation/city_simulation_extra_test.cpp`
@@ -510,21 +510,21 @@ MIT licence, cross-platform Linux/Windows, CMake target
 
 #### 4. Update `Zoning.h` and `Population.h`
 
-- [ ] Add a `private:` section to `Zoning.h` (currently has none) with declarations
+- [x] Add a `private:` section to `Zoning.h` (currently has none) with declarations
   for all new helpers added in section 1.
-- [ ] Add declarations for the helpers added in section 2c to the existing `private:`
+- [x] Add declarations for the helpers added in section 2c to the existing `private:`
   section of `Population.h`.
 
 ---
 
 ### Exit Criteria
 
-- [ ] `npx markdownlint-cli 'implementation/phase-11q2.md'` — no errors.
-- [ ] All deliverable checkboxes above are checked.
-- [ ] `make build` passes with zero new warnings or errors.
-- [ ] `ctest -LE "integration|requires-opengl"` — zero regressions.
-- [ ] `ctest -L "^integration$"` — zero regressions.
-- [ ] `xvfb-run --auto-servernum ctest -L "^requires-opengl$"` — zero regressions.
+- [x] `npx markdownlint-cli 'implementation/phase-11q2.md'` — no errors.
+- [x] All deliverable checkboxes above are checked.
+- [x] `make build` passes with zero new warnings or errors.
+- [x] `ctest -LE "integration|requires-opengl"` — zero regressions.
+- [x] `ctest -L "^integration$"` — zero regressions.
+- [x] `xvfb-run --auto-servernum ctest -L "^requires-opengl$"` — zero regressions.
 - [ ] SonarCloud re-scan on `fix/phase-11q2` shows all 32 open HIGH issues resolved:
   - `cpp:S134` violations gone from `Zoning.cpp`, `Population.cpp`,
     `CitySimulation.cpp`.
@@ -534,8 +534,8 @@ MIT licence, cross-platform Linux/Windows, CMake target
     `CitySimulation::deserializeFromJson` (598).
 - [ ] `nlohmann-json` compiles and links on both Linux (CI `build-linux` job) and
   Windows (CI `build-windows` job) without additional system packages.
-- [ ] All existing JSON serialisation tests pass: `ctest -R "Serialize|Deserialize"`
+- [x] All existing JSON serialisation tests pass: `ctest -R "Serialize|Deserialize"`
   — zero failures; any test whose assertions depended on hand-rolled parser error
   messages has been updated to match nlohmann error output.
-- [ ] `make test` passes (enforces >=95% total line coverage gate per `architecture/testing/coverage.md`).
-- [ ] Per-file 85% floor check passes for all modified `src/simulation/` files (`Zoning.cpp`, `Population.cpp`, `CitySimulation.cpp`) — run the `awk` pipeline from `architecture/testing/coverage.md` against `coverage_filtered.info`.
+- [x] `make test` passes (enforces >=95% total line coverage gate per `architecture/testing/coverage.md`).
+- [x] Per-file 85% floor check passes for all modified `src/simulation/` files (`Zoning.cpp`, `Population.cpp`, `CitySimulation.cpp`) — run the `awk` pipeline from `architecture/testing/coverage.md` against `coverage_filtered.info`.

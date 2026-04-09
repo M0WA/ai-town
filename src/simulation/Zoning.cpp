@@ -33,6 +33,25 @@
 
 /*static*/ int Zoning::serviceFootprintSize() { return 2; }
 
+/*static*/ int Zoning::nearestRoadFromCell(
+    const std::unordered_map<int64_t, TileData>& tiles,
+    int fx, int fz, int curMin)
+{
+    int minDist = curMin;
+    for (int rx = -3; rx <= 3; ++rx) {
+        for (int rz = -3; rz <= 3; ++rz) {
+            int chebyshev = std::max(std::abs(rx), std::abs(rz));
+            if (chebyshev == 0 || chebyshev >= minDist) continue;
+            int64_t key = tileKey(fx + rx, fz + rz);
+            auto it = tiles.find(key);
+            if (it != tiles.end() && it->second.isRoad) {
+                minDist = chebyshev;
+            }
+        }
+    }
+    return minDist;
+}
+
 /*static*/ int Zoning::nearestRoadDistance(
     const std::unordered_map<int64_t, TileData>& tiles,
     int tileX, int tileZ, int footprintN)
@@ -40,18 +59,7 @@
     int minDist = INT_MAX;
     for (int dx = 0; dx < footprintN; ++dx) {
         for (int dz = 0; dz < footprintN; ++dz) {
-            int fx = tileX + dx, fz = tileZ + dz;
-            for (int rx = -3; rx <= 3; ++rx) {
-                for (int rz = -3; rz <= 3; ++rz) {
-                    int chebyshev = std::max(std::abs(rx), std::abs(rz));
-                    if (chebyshev == 0 || chebyshev >= minDist) continue;
-                    int64_t key = tileKey(fx + rx, fz + rz);
-                    auto it = tiles.find(key);
-                    if (it != tiles.end() && it->second.isRoad) {
-                        minDist = chebyshev;
-                    }
-                }
-            }
+            minDist = nearestRoadFromCell(tiles, tileX + dx, tileZ + dz, minDist);
         }
     }
     return minDist;
@@ -224,6 +232,27 @@ QueryResult Zoning::queryTile(int tileX, int tileZ) const {
 // getServiceCoverage
 // ---------------------------------------------------------------------------
 
+/*static*/ std::vector<ServiceCoverageTile> Zoning::collectCoverageTiles(
+    const ServiceBuilding& sb, float radius)
+{
+    std::vector<ServiceCoverageTile> result;
+    int radiusTiles = static_cast<int>(radius / kTileSizeMeters) + 1;
+
+    for (int dz = -radiusTiles; dz <= radiusTiles; ++dz) {
+        for (int dx = -radiusTiles; dx <= radiusTiles; ++dx) {
+            float dist = std::sqrt(static_cast<float>(dx*dx + dz*dz)) * kTileSizeMeters;
+            if (dist > radius) continue;
+            ServiceCoverageTile sct;
+            sct.tileX     = sb.x + dx;
+            sct.tileZ     = sb.z + dz;
+            sct.coveredBy = sb.type;
+            sct.degraded  = sb.degraded;
+            result.push_back(sct);
+        }
+    }
+    return result;
+}
+
 std::vector<ServiceCoverageTile> Zoning::getServiceCoverage() const {
     std::vector<ServiceCoverageTile> coverage;
 
@@ -231,20 +260,8 @@ std::vector<ServiceCoverageTile> Zoning::getServiceCoverage() const {
         if (sb.type == ServiceBuildingType::None) continue;
 
         float radius = computeServiceCoverageRadius(sb.type, sb.degraded);
-        int radiusTiles = static_cast<int>(radius / kTileSizeMeters) + 1;
-
-        for (int dz = -radiusTiles; dz <= radiusTiles; ++dz) {
-            for (int dx = -radiusTiles; dx <= radiusTiles; ++dx) {
-                float dist = std::sqrt(static_cast<float>(dx*dx + dz*dz)) * kTileSizeMeters;
-                if (dist > radius) continue;
-                ServiceCoverageTile sct;
-                sct.tileX     = sb.x + dx;
-                sct.tileZ     = sb.z + dz;
-                sct.coveredBy = sb.type;
-                sct.degraded  = sb.degraded;
-                coverage.push_back(sct);
-            }
-        }
+        auto tiles = collectCoverageTiles(sb, radius);
+        coverage.insert(coverage.end(), tiles.begin(), tiles.end());
     }
     return coverage;
 }
@@ -291,45 +308,56 @@ float Zoning::computeRadialCoverage(int tileX, int tileZ, ServiceBuildingType ty
     return 0.0f;
 }
 
-float Zoning::computePowerCoverage(int tileX, int tileZ) const {
+void Zoning::runPowerBfs(const ServiceBuilding& sb,
+                         std::unordered_map<int64_t, int>& bfsDepth,
+                         int& maxDepth) const {
     const int dx4[] = {0, 0, -1, 1};
     const int dz4[] = {-1, 1, 0, 0};
 
+    const int sN = serviceFootprintSize();
+    for (int fdx = 0; fdx < sN; ++fdx) {
+        for (int fdz = 0; fdz < sN; ++fdz) {
+            int64_t fpKey = tileKey(sb.x + fdx, sb.z + fdz);
+            bfsDepth[fpKey] = 0;
+        }
+    }
+
+    std::queue<std::pair<int,int>> bfsQueue;
+    for (int fdx = 0; fdx < sN; ++fdx) {
+        for (int fdz = 0; fdz < sN; ++fdz) {
+            bfsQueue.push({sb.x + fdx, sb.z + fdz});
+        }
+    }
+
+    maxDepth = 0;
+
+    while (!bfsQueue.empty()) {
+        auto [cx, cz] = bfsQueue.front();
+        bfsQueue.pop();
+        int depth = bfsDepth[tileKey(cx, cz)];
+
+        for (int d = 0; d < 4; ++d) {
+            int nx = cx + dx4[d];
+            int nz = cz + dz4[d];
+            int64_t nkey = tileKey(nx, nz);
+            if (bfsDepth.count(nkey)) continue;
+            if (!isBuildableTile(nx, nz)) continue;
+
+            int newDepth = depth + 1;
+            bfsDepth[nkey] = newDepth;
+            if (newDepth > maxDepth) maxDepth = newDepth;
+            bfsQueue.push({nx, nz});
+        }
+    }
+}
+
+float Zoning::computePowerCoverage(int tileX, int tileZ) const {
     for (const ServiceBuilding& sb : m_serviceBuildings) {
         if (sb.type != ServiceBuildingType::PowerPlant) continue;
 
         std::unordered_map<int64_t, int> bfsDepth;
-        std::queue<std::pair<int,int>> bfsQueue;
-
-        const int sN = serviceFootprintSize();
-        for (int fdx = 0; fdx < sN; ++fdx) {
-            for (int fdz = 0; fdz < sN; ++fdz) {
-                int64_t fpKey = tileKey(sb.x + fdx, sb.z + fdz);
-                bfsDepth[fpKey] = 0;
-                bfsQueue.push({sb.x + fdx, sb.z + fdz});
-            }
-        }
-
         int maxDepth = 0;
-
-        while (!bfsQueue.empty()) {
-            auto [cx, cz] = bfsQueue.front();
-            bfsQueue.pop();
-            int depth = bfsDepth[tileKey(cx, cz)];
-
-            for (int d = 0; d < 4; ++d) {
-                int nx = cx + dx4[d];
-                int nz = cz + dz4[d];
-                int64_t nkey = tileKey(nx, nz);
-                if (bfsDepth.count(nkey)) continue;
-                if (!isBuildableTile(nx, nz)) continue;
-
-                int newDepth = depth + 1;
-                bfsDepth[nkey] = newDepth;
-                if (newDepth > maxDepth) maxDepth = newDepth;
-                bfsQueue.push({nx, nz});
-            }
-        }
+        runPowerBfs(sb, bfsDepth, maxDepth);
 
         int64_t targetKey = tileKey(tileX, tileZ);
         auto it = bfsDepth.find(targetKey);
@@ -361,46 +389,33 @@ float Zoning::computePowerCoverage(int tileX, int tileZ) const {
 // buildPowerCoverageCache
 // ---------------------------------------------------------------------------
 
+void Zoning::addRadialFallbackCoverage(const ServiceBuilding& sb, float radiusTiles,
+                                        const std::unordered_map<int64_t, int>& bfsDepth) {
+    int r = static_cast<int>(std::ceil(radiusTiles)) + 1;
+    for (int dx = -r; dx <= r; ++dx) {
+        for (int dz = -r; dz <= r; ++dz) {
+            int nx = sb.x + dx;
+            int nz = sb.z + dz;
+            int64_t nkey = tileKey(nx, nz);
+            if (bfsDepth.count(nkey)) continue;
+            float fdx = static_cast<float>(dx);
+            float fdz = static_cast<float>(dz);
+            if (std::sqrt(fdx * fdx + fdz * fdz) <= radiusTiles) {
+                m_powerCoverageCache.insert(nkey);
+            }
+        }
+    }
+}
+
 void Zoning::buildPowerCoverageCache() {
     m_powerCoverageCache.clear();
-
-    const int dx4[] = {0, 0, -1, 1};
-    const int dz4[] = {-1, 1, 0, 0};
 
     for (const ServiceBuilding& sb : m_serviceBuildings) {
         if (sb.type != ServiceBuildingType::PowerPlant) continue;
 
         std::unordered_map<int64_t, int> bfsDepth;
-        std::queue<std::pair<int,int>> bfsQueue;
-
-        const int sN = serviceFootprintSize();
-        for (int fdx = 0; fdx < sN; ++fdx) {
-            for (int fdz = 0; fdz < sN; ++fdz) {
-                int64_t fpKey = tileKey(sb.x + fdx, sb.z + fdz);
-                bfsDepth[fpKey] = 0;
-                bfsQueue.push({sb.x + fdx, sb.z + fdz});
-            }
-        }
-
         int maxDepth = 0;
-        while (!bfsQueue.empty()) {
-            auto [cx, cz] = bfsQueue.front();
-            bfsQueue.pop();
-            int depth = bfsDepth[tileKey(cx, cz)];
-
-            for (int d = 0; d < 4; ++d) {
-                int nx = cx + dx4[d];
-                int nz = cz + dz4[d];
-                int64_t nkey = tileKey(nx, nz);
-                if (bfsDepth.count(nkey)) continue;
-                if (!isBuildableTile(nx, nz)) continue;
-
-                int newDepth = depth + 1;
-                bfsDepth[nkey] = newDepth;
-                if (newDepth > maxDepth) maxDepth = newDepth;
-                bfsQueue.push({nx, nz});
-            }
-        }
+        runPowerBfs(sb, bfsDepth, maxDepth);
 
         int coverDepth = maxDepth;
         if (m_budgetSurplusPctRef <=
@@ -420,20 +435,7 @@ void Zoning::buildPowerCoverageCache() {
             }
         }
 
-        int r = static_cast<int>(std::ceil(radiusTiles)) + 1;
-        for (int dx = -r; dx <= r; ++dx) {
-            for (int dz = -r; dz <= r; ++dz) {
-                int nx = sb.x + dx;
-                int nz = sb.z + dz;
-                int64_t nkey = tileKey(nx, nz);
-                if (bfsDepth.count(nkey)) continue;
-                float fdx = static_cast<float>(dx);
-                float fdz = static_cast<float>(dz);
-                if (std::sqrt(fdx * fdx + fdz * fdz) <= radiusTiles) {
-                    m_powerCoverageCache.insert(nkey);
-                }
-            }
-        }
+        addRadialFallbackCoverage(sb, radiusTiles, bfsDepth);
     }
 }
 
@@ -479,6 +481,100 @@ void Zoning::doDesirabilityTick(const Economy& economy, const Traffic& /*traffic
 // applyDesirabilityScores
 // ---------------------------------------------------------------------------
 
+float Zoning::computeNeighborDesirabilityDelta(int x, int z) const {
+    float delta = 0.0f;
+    for (int dz = -5; dz <= 5; ++dz) {
+        for (int dx = -5; dx <= 5; ++dx) {
+            if (dx == 0 && dz == 0) continue;
+            int chebyshevDist = std::max(std::abs(dx), std::abs(dz));
+            if (chebyshevDist > 5) continue;
+
+            const TileData* neighbor = findTile(x + dx, z + dz);
+            if (!neighbor || !neighbor->isZoned) continue;
+
+            if (neighbor->zone == ZoneType::Industrial) {
+                float falloff = 1.0f - static_cast<float>(chebyshevDist - 1) / 4.0f;
+                delta -= SimulationConstants::adjacency_industrial_residential_base_penalty
+                         * falloff;
+            } else if (neighbor->zone == ZoneType::Commercial && chebyshevDist == 1) {
+                delta += static_cast<float>(SimulationConstants::adjacency_commercial_residential_bonus);
+            }
+        }
+    }
+    return delta;
+}
+
+bool Zoning::computeFirePoliceCoverageGap(int x, int z,
+                                           bool hasFireStation, bool hasPolice) const {
+    if (hasFireStation) {
+        float cov = computeRadialCoverage(x, z, ServiceBuildingType::FireStation);
+        if (cov == 0.0f) return true;
+    }
+    if (hasPolice) {
+        float cov = computeRadialCoverage(x, z, ServiceBuildingType::PoliceStation);
+        if (cov == 0.0f) return true;
+    }
+    return false;
+}
+
+void Zoning::updateWaterState(TileData& tile, int x, int z, bool hasWater,
+                               bool& anyUncovered, IAudioSystem* audio) {
+    bool currentlyWaterCovered = false;
+    if (hasWater) {
+        float cov = computeRadialCoverage(x, z, ServiceBuildingType::WaterTower);
+        if (cov == 0.0f) {
+            anyUncovered = true;
+        } else {
+            currentlyWaterCovered = true;
+        }
+    }
+    if (tile.wasWaterCovered && !currentlyWaterCovered && hasWater) {
+        if (audio) {
+            audio->playSound(SFX_WATER_OUT, SoundPriority::NORMAL, 1.0f);
+        }
+        tile.wasWaterCovered = false;
+    } else if (currentlyWaterCovered) {
+        tile.wasWaterCovered = true;
+    }
+}
+
+void Zoning::updatePowerState(TileData& tile, int x, int z, bool hasPower,
+                               bool& anyUncovered, IAudioSystem* audio) {
+    bool currentlyPowered = false;
+    if (hasPower) {
+        if (!m_powerCoverageCache.count(tileKey(x, z))) {
+            anyUncovered = true;
+        } else {
+            currentlyPowered = true;
+        }
+    }
+    if (tile.wasPowered && !currentlyPowered && hasPower) {
+        if (audio) {
+            audio->playSound(SFX_POWER_OUT, SoundPriority::NORMAL, 1.0f);
+        }
+        tile.wasPowered = false;
+    } else if (currentlyPowered) {
+        tile.wasPowered = true;
+    }
+}
+
+void Zoning::fireDesirabilityAlert(TileData& tile, int x, int z,
+                                    bool hasFireStation, bool hasPolice,
+                                    IAudioSystem* audio) {
+    if (!tile.alertFired) {
+        if (hasFireStation) {
+            audio->playPositionalSound(SFX_FIRE_ALERT,
+                vec3{static_cast<float>(x), 0.0f, static_cast<float>(z)},
+                SoundPriority::CRITICAL, 1.0f);
+        } else if (hasPolice) {
+            audio->playPositionalSound(SFX_POLICE_ALERT,
+                vec3{static_cast<float>(x), 0.0f, static_cast<float>(z)},
+                SoundPriority::CRITICAL, 1.0f);
+        }
+        tile.alertFired = true;
+    }
+}
+
 void Zoning::applyDesirabilityScores(bool hasFireStation, bool hasPolice,
                                       bool hasWater, bool hasPower,
                                       const Economy& /*economy*/, IAudioSystem* audio,
@@ -492,73 +588,18 @@ void Zoning::applyDesirabilityScores(bool hasFireStation, bool hasPolice,
         float desirability = tile.desirability;
 
         if (tile.zone == ZoneType::Residential) {
-            for (int dz = -5; dz <= 5; ++dz) {
-                for (int dx = -5; dx <= 5; ++dx) {
-                    if (dx == 0 && dz == 0) continue;
-                    int chebyshevDist = std::max(std::abs(dx), std::abs(dz));
-                    if (chebyshevDist > 5) continue;
-
-                    const TileData* neighbor = findTile(x + dx, z + dz);
-                    if (!neighbor || !neighbor->isZoned) continue;
-
-                    if (neighbor->zone == ZoneType::Industrial) {
-                        float falloff = 1.0f - static_cast<float>(chebyshevDist - 1) / 4.0f;
-                        desirability -= SimulationConstants::adjacency_industrial_residential_base_penalty
-                                        * falloff;
-                    } else if (neighbor->zone == ZoneType::Commercial && chebyshevDist == 1) {
-                        desirability += static_cast<float>(SimulationConstants::adjacency_commercial_residential_bonus);
-                    }
-                }
-            }
+            desirability += computeNeighborDesirabilityDelta(x, z);
 
             bool anyUncovered = false;
 
             if (!hasFireStation && !hasPolice && !hasWater && !hasPower) {
                 anyUncovered = true;
-            }
-
-            if (hasFireStation) {
-                float cov = computeRadialCoverage(x, z, ServiceBuildingType::FireStation);
-                if (cov == 0.0f) anyUncovered = true;
-            }
-            if (hasPolice) {
-                float cov = computeRadialCoverage(x, z, ServiceBuildingType::PoliceStation);
-                if (cov == 0.0f) anyUncovered = true;
-            }
-
-            bool currentlyWaterCovered = false;
-            if (hasWater) {
-                float cov = computeRadialCoverage(x, z, ServiceBuildingType::WaterTower);
-                if (cov == 0.0f) {
+            } else {
+                if (computeFirePoliceCoverageGap(x, z, hasFireStation, hasPolice)) {
                     anyUncovered = true;
-                } else {
-                    currentlyWaterCovered = true;
                 }
-            }
-            if (tile.wasWaterCovered && !currentlyWaterCovered && hasWater) {
-                if (audio) {
-                    audio->playSound(SFX_WATER_OUT, SoundPriority::NORMAL, 1.0f);
-                }
-                tile.wasWaterCovered = false;
-            } else if (currentlyWaterCovered) {
-                tile.wasWaterCovered = true;
-            }
-
-            bool currentlyPowered = false;
-            if (hasPower) {
-                if (!m_powerCoverageCache.count(tileKey(x, z))) {
-                    anyUncovered = true;
-                } else {
-                    currentlyPowered = true;
-                }
-            }
-            if (tile.wasPowered && !currentlyPowered && hasPower) {
-                if (audio) {
-                    audio->playSound(SFX_POWER_OUT, SoundPriority::NORMAL, 1.0f);
-                }
-                tile.wasPowered = false;
-            } else if (currentlyPowered) {
-                tile.wasPowered = true;
+                updateWaterState(tile, x, z, hasWater, anyUncovered, audio);
+                updatePowerState(tile, x, z, hasPower, anyUncovered, audio);
             }
 
             if (anyUncovered) {
@@ -576,18 +617,7 @@ void Zoning::applyDesirabilityScores(bool hasFireStation, bool hasPolice,
 
         if (tile.isZoned && tile.zone == ZoneType::Residential && audio) {
             if (tile.desirability <= static_cast<float>(SimulationConstants::service_alert_desirability_threshold)) {
-                if (!tile.alertFired) {
-                    if (hasFireStation) {
-                        audio->playPositionalSound(SFX_FIRE_ALERT,
-                            vec3{static_cast<float>(x), 0.0f, static_cast<float>(z)},
-                            SoundPriority::CRITICAL, 1.0f);
-                    } else if (hasPolice) {
-                        audio->playPositionalSound(SFX_POLICE_ALERT,
-                            vec3{static_cast<float>(x), 0.0f, static_cast<float>(z)},
-                            SoundPriority::CRITICAL, 1.0f);
-                    }
-                    tile.alertFired = true;
-                }
+                fireDesirabilityAlert(tile, x, z, hasFireStation, hasPolice, audio);
             } else {
                 tile.alertFired = false;
             }
@@ -598,6 +628,21 @@ void Zoning::applyDesirabilityScores(bool hasFireStation, bool hasPolice,
 // ---------------------------------------------------------------------------
 // doServiceDegradationTick
 // ---------------------------------------------------------------------------
+
+void Zoning::tryDegradeService(ServiceBuilding& sb, ISimulationRNG& rng,
+                                IAudioSystem* audio,
+                                std::queue<SimulationNotification>& notifications) {
+    if (!sb.degraded) {
+        float roll = rng.nextFloat();
+        if (roll < SimulationConstants::service_degradation_probability_per_tick) {
+            sb.degraded = true;
+            if (audio) {
+                audio->playSound(SFX_SERVICE_DEGRADE, SoundPriority::NORMAL, 1.0f);
+            }
+            notifications.push({NotificationType::ServiceDegraded, 0, 0, 0});
+        }
+    }
+}
 
 void Zoning::doServiceDegradationTick(const Economy& economy, ISimulationRNG& rng,
                                        IAudioSystem* audio,
@@ -625,16 +670,7 @@ void Zoning::doServiceDegradationTick(const Economy& economy, ISimulationRNG& rn
                 sb.degraded = true;
                 continue;
             }
-            if (!sb.degraded) {
-                float roll = rng.nextFloat();
-                if (roll < SimulationConstants::service_degradation_probability_per_tick) {
-                    sb.degraded = true;
-                    if (audio) {
-                        audio->playSound(SFX_SERVICE_DEGRADE, SoundPriority::NORMAL, 1.0f);
-                    }
-                    notifications.push({NotificationType::ServiceDegraded, 0, 0, 0});
-                }
-            }
+            tryDegradeService(sb, rng, audio, notifications);
         }
     } else {
         for (ServiceBuilding& sb : m_serviceBuildings) {
