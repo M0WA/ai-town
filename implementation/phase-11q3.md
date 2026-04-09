@@ -1,6 +1,6 @@
 ## Phase 11q3: Fix SonarCloud HIGH Maintainability Issues (S134 + S3776) — Remaining Files
 
-**Status: In Progress**
+**Status: DONE**
 
 **Prerequisite**: phase-11q2 merged (completed S134 + S3776 fixes in Zoning.cpp,
 Population.cpp, and a subset of CitySimulation.cpp).
