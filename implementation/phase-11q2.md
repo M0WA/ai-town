@@ -334,6 +334,7 @@ MIT licence, cross-platform Linux/Windows, CMake target
 - [ ] Rewrite `serializeToJson` using the nlohmann API (`nlohmann::json j; j["key"] = value; … return j.dump(2);`), replacing the current hand-built string concatenation.
   (`serializeToJson` has no SonarCloud violations today but the manual string building
   is equally fragile — replacing both sides is the cleaner delta.)
+  - Note: the nlohmann `serializeToJson` rewrite MUST add `"was_powered"` and `"was_water_covered"` to the per-tile output alongside the existing `"alert_fired"` field — the hand-rolled serializer omits these two fields, making this a net-new addition that brings the serializer into compliance with `architecture/game-design/service-coverage.md` (Per-Tile Audio Transition Fields: "All three must be serialised in the save file to prevent spurious SFX re-fire on load"). Corresponding deserialization already uses `j.value("was_powered", true)` and `j.value("was_water_covered", true)` (backward-compatible defaults).
 - [ ] Update `.devcontainer/Dockerfile` to ensure `nlohmann-json` is available in
   the dev container (it is installed via vcpkg during the container build, so no
   extra system package is needed — verify the container build still passes).
@@ -419,3 +420,5 @@ MIT licence, cross-platform Linux/Windows, CMake target
 - [ ] All existing JSON serialisation tests pass: `ctest -R "Serialize|Deserialize"`
   — zero failures; any test whose assertions depended on hand-rolled parser error
   messages has been updated to match nlohmann error output.
+- [ ] `make test` passes (enforces >=95% total line coverage gate per `architecture/testing/coverage.md`).
+- [ ] Per-file 85% floor check passes for all modified `src/simulation/` files (`Zoning.cpp`, `Population.cpp`, `CitySimulation.cpp`) — run the `awk` pipeline from `architecture/testing/coverage.md` against `coverage_filtered.info`.
