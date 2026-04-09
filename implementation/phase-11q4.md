@@ -58,9 +58,9 @@ the inline expression with the env var reference:
           git -C /opt/vcpkg fetch --depth=1 origin "$VCPKG_COMMIT_ID"
 ```
 
-- [ ] `env:` block added to the "Set up vcpkg" step with `VCPKG_COMMIT_ID: ${{ inputs.vcpkg_commit_id }}`.
-- [ ] Shell command uses `"$VCPKG_COMMIT_ID"` (double-quoted, no `${{ }}` expression).
-- [ ] No other `${{ inputs.vcpkg_commit_id }}` expressions remain in `run:` blocks in this file.
+- [x] `env:` block added to the "Set up vcpkg" step with `VCPKG_COMMIT_ID: ${{ inputs.vcpkg_commit_id }}`.
+- [x] Shell command uses `"$VCPKG_COMMIT_ID"` (double-quoted, no `${{ }}` expression).
+- [x] No other `${{ inputs.vcpkg_commit_id }}` expressions remain in `run:` blocks in this file.
 
 #### 2. Fix `_package-linux-deb.yml` — `pkg_version` injection (line 109)
 
@@ -87,9 +87,9 @@ Locate the "Resolve package version" step and apply the same env-var pattern:
         run: echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
 ```
 
-- [ ] `env:` block added to the "Resolve package version" step with `PKG_VERSION: ${{ inputs.pkg_version }}`.
-- [ ] Shell command uses `$PKG_VERSION` (no `${{ }}` expression).
-- [ ] No other `${{ inputs.pkg_version }}` expressions remain in `run:` blocks in this file.
+- [x] `env:` block added to the "Resolve package version" step with `PKG_VERSION: ${{ inputs.pkg_version }}`.
+- [x] Shell command uses `$PKG_VERSION` (no `${{ }}` expression).
+- [x] No other `${{ inputs.pkg_version }}` expressions remain in `run:` blocks in this file.
 
 #### 3. Fix `_package-windows.yml` — `pkg_version` injection (line 48)
 
@@ -119,9 +119,9 @@ step, and apply the env-var pattern for PowerShell:
         run: echo "version=$env:PKG_VERSION" >> $env:GITHUB_OUTPUT
 ```
 
-- [ ] `env:` block added to the "Resolve package version" step with `PKG_VERSION: ${{ inputs.pkg_version }}`.
-- [ ] PowerShell command uses `$env:PKG_VERSION` (no `${{ }}` expression).
-- [ ] No other `${{ inputs.pkg_version }}` expressions remain in `run:` blocks in this file.
+- [x] `env:` block added to the "Resolve package version" step with `PKG_VERSION: ${{ inputs.pkg_version }}`.
+- [x] PowerShell command uses `$env:PKG_VERSION` (no `${{ }}` expression).
+- [x] No other `${{ inputs.pkg_version }}` expressions remain in `run:` blocks in this file.
 
 ---
 
