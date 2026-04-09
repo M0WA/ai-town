@@ -139,8 +139,11 @@ tests/
 ```cmake
 # Example CMakeLists.txt registration:
 add_executable(simulation_tests tests/simulation/economy_test.cpp ...)
-target_link_libraries(simulation_tests PRIVATE aitown_sim aitown_platform GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
+target_link_libraries(simulation_tests PRIVATE aitown_sim aitown_platform GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest nlohmann_json::nlohmann_json)
 # aitown_platform: Phase 11q — required for getAssetsDir() called by vehicleMeshPath()
+# nlohmann_json::nlohmann_json: Phase 11q2+ — required for programmatic JSON manipulation
+# (nlohmann::json::parse / j.dump()) in serialize/deserialize tests; aitown_sim links it
+# PRIVATE so the include path does not propagate to simulation_tests automatically
 # src/simulation/ is REQUIRED: simulation test files use #include "simulation_constants.h" and other
 # simulation headers (e.g. simulation_types.h, city_simulation.h) via project-relative paths that
 # resolve relative to src/simulation/. Without this entry, the compiler cannot find these headers
