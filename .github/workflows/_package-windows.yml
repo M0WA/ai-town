@@ -45,7 +45,9 @@ jobs:
       - name: Resolve package version
         id: pkgver
         shell: pwsh
-        run: echo "version=${{ inputs.pkg_version }}" >> $env:GITHUB_OUTPUT
+        env:
+          PKG_VERSION: ${{ inputs.pkg_version }}
+        run: echo "version=$env:PKG_VERSION" >> $env:GITHUB_OUTPUT
 
       # CMake configure only — does NOT build the binaries.
       # Purpose: produce CMakeCache.txt so that cpack -C Release can locate install
