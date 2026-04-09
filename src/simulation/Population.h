@@ -7,6 +7,7 @@
 #include <vector>
 
 // Forward declarations for cross-system references
+struct TileData;
 class Zoning;
 class Traffic;
 class Economy;
@@ -74,4 +75,14 @@ private:
                              DensityTier currentRequired, int& sfxCallsThisTick,
                              IRenderer* renderer, IAudioSystem* audio,
                              std::queue<SimulationNotification>& notifications);
+
+    static void completeConstruction(TileData& tile, int64_t key,
+                                     const Traffic& traffic, IRenderer* renderer);
+    static float difficultyToUnlockScale(Difficulty d);
+    void tickUnlockProgress(const Economy& economy, float scale);
+    void processUpgradeWave(Zoning& zoning, const Traffic& traffic,
+                            const bool* wasAlreadyUnlocked,
+                            IRenderer* renderer, IAudioSystem* audio,
+                            int& sfxCallsThisTick,
+                            std::queue<SimulationNotification>& notifications);
 };
