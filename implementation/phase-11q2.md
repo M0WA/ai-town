@@ -1,6 +1,6 @@
 ## Phase 11q2: Fix SonarCloud HIGH Maintainability Issues (S134 + S3776)
 
-**Status: Planned**
+**Status: DONE**
 
 **Prerequisite**: phase-11q1 (decomposed `CitySimulation.cpp` into `Zoning`, `Population`,
 `Traffic`, `Economy`, `SimTiming`).
