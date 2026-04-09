@@ -126,7 +126,7 @@ All open contradictions have been resolved. See the Resolved Contradictions list
 - [Phase 11q: Bug-Fix Batch — Buses/Trucks Never Appear & Vehicle Road Surface Alignment](phase-11q.md)
 - [Phase 11q1: Split `CitySimulation` into Sub-Systems](phase-11q1.md)
 - [Phase 11q2: Fix SonarCloud HIGH Maintainability Issues (S134 + S3776)](phase-11q2.md)
-- [Phase 11q3: Split `IrrlichtRenderer` into Core and Vehicle Sub-Object](phase-11q3.md)
+- [Phase 11q3: Fix SonarCloud HIGH Maintainability Issues (S134 + S3776) — Remaining Files](phase-11q3.md)
 - [Phase 11q4: Suppress `ValidationContext` Struct Size Warning](phase-11q4.md)
 
 - [Phase 12: Polish, Performance & V1 Hardening](phase-12.md)
