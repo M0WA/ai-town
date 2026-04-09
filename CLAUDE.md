@@ -391,8 +391,8 @@ ctest --test-dir build -C Release --output-on-failure
   2. `ci.yml` — `VCPKG_COMMIT_ID` env var updated to the same commit
   3. `docker/ci-linux/Dockerfile` — `ARG VCPKG_COMMIT` build-arg updated to the same value
   4. `.devcontainer/Dockerfile` — `FROM` line updated to
-     `ghcr.io/m0wa/aitown-ci-linux:vcpkg-<short-sha>@sha256:<digest>` (tag for
-     human readability + digest for immutability; identical `sha256:` to item 5)
+     `ghcr.io/m0wa/aitown-ci-linux@sha256:<digest>` (digest-only — the `:tag@sha256:digest`
+     double-separator format breaks Docker layer caching; identical `sha256:` to item 5)
   5. `ci.yml` AND `.devcontainer/Dockerfile` — image digest pin (`sha256:...`)
      updated to the `sha256:` output of the `docker-ci-image.yml` push step
      (identical value in both files; the `.devcontainer/Dockerfile` FROM line
