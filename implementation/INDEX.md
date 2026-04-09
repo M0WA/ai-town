@@ -88,7 +88,7 @@ All open contradictions have been resolved. See the Resolved Contradictions list
 | [11q1](phase-11q1.md) | Split `CitySimulation` into Sub-Systems and Introduce Sub-Interfaces | `Economy`, `Traffic`, `Zoning`, `Population`, `SimTiming` sub-system structs under `src/simulation/`; `IEconomyQuery` (12 methods), `IZoningActions` (9 methods), `ISimulationState` (15 methods) sub-interfaces under `src/interfaces/`; `ICitySimulation` reduced to 7 own methods; `CitySimulation` fields 65 → 20; `getDemandPressurePct` renamed to `getZoneDemandFactor` codebase-wide | `graphics-dev-irrlicht`, `test-dev-cpp` | **DONE** |
 | [11q2](phase-11q2.md) | Fix SonarCloud HIGH Maintainability Issues (S134 + S3776) | 10 private helpers in `Zoning.cpp` (22 S134/S3776 violations); 8 private helpers in `Population.cpp` (8 violations); `flattenIfRoad` lambda in `CitySimulation.cpp`; replace hand-rolled JSON parser with `nlohmann/json`; add `was_powered`/`was_water_covered` per-tile serialization fields | `graphics-dev-irrlicht`, `test-dev-cpp`, `cicd-dev-github` | **DONE** |
 | [11q3](phase-11q3.md) | Fix SonarCloud HIGH Maintainability Issues (S134 + S3776) — Remaining Files | 46 private helper methods across `TerrainSystem`, `IrrlichtRenderer`, `CitySimulation`, `EventReceiver`, `BuildingAssetLoader`, `Zoning`, `TextureCache`, `Population`, `CameraController`, `main.cpp` to reduce S134 (nesting > 3) and S3776 (cognitive complexity > 25) violations | `graphics-dev-irrlicht`, `test-dev-cpp` | **DONE** |
-| [11q4](phase-11q4.md) | Suppress `ValidationContext` Struct Size Warning | Suppress SonarCloud `cpp:S6234` warning on `ValidationContext` struct; env-var injection pattern in CI workflow inputs | `cicd-dev-github` | Planned |
+| [11q4](phase-11q4.md) | Fix SonarCloud BLOCKER Security Issues (S7630 Script Injection) | Env-var injection pattern for three `githubactions:S7630` BLOCKER script-injection issues in `_package-linux-deb.yml` (`inputs.vcpkg_commit_id` line 82, `inputs.pkg_version` line 109) and `_package-windows.yml` (`inputs.pkg_version` line 48) | `cicd-dev-github` | Planned |
 | [12](phase-12.md) | Polish, Performance & V1 Hardening | 60 FPS @ 10,000 agents verified, map size 256×256–1024×1024 confirmed, ≤2,000 draw calls, VRAM ≤170 MB scene / ≤1.0 GB total, colorblind mode QA verification pass (Phase 8 delivers implementation; Phase 12 verifies correctness at 1280×720 and 1920×1080), coverage gate ≥80% verified (not raised — gate established Phase 5), all spec contradictions resolved, fixed-seed regression pinning (`0xDEADBEEF00000001`), full QA pass, `all-checks-pass` consistently green | All roles | Planned |
 
 ---
@@ -129,7 +129,7 @@ All open contradictions have been resolved. See the Resolved Contradictions list
 - [Phase 11q1: Split `CitySimulation` into Sub-Systems](phase-11q1.md)
 - [Phase 11q2: Fix SonarCloud HIGH Maintainability Issues (S134 + S3776)](phase-11q2.md)
 - [Phase 11q3: Fix SonarCloud HIGH Maintainability Issues (S134 + S3776) — Remaining Files](phase-11q3.md)
-- [Phase 11q4: Suppress `ValidationContext` Struct Size Warning](phase-11q4.md)
+- [Phase 11q4: Fix SonarCloud BLOCKER Security Issues (S7630 Script Injection)](phase-11q4.md)
 
 - [Phase 12: Polish, Performance & V1 Hardening](phase-12.md)
 - [Post-V1 Backlog](post-v1-backlog.md)
