@@ -2,13 +2,16 @@
 
 **Status: Planned**
 
-**Prerequisite**: phase-11q2 must be merged first (`IVehicleRenderer` must exist).
+**Prerequisite**: a dedicated `IVehicleRenderer` extraction phase must be merged first
+(`IVehicleRenderer` must exist). Phase 11q2 now delivers SonarCloud maintainability
+fixes (S134 + S3776), not the `IVehicleRenderer` extraction.
 
 ### Goal
 
 `IrrlichtRenderer` has 69 methods and 45 fields — violates both `cpp:S1448` (max 35
-methods) and `cpp:S1820` (max 20 fields). After phase-11q2, the 9 vehicle methods
-are inherited from `IVehicleRenderer` rather than declared on `IRenderer`; but
+methods) and `cpp:S1820` (max 20 fields). After the `IVehicleRenderer` extraction
+phase (predecessor to this phase), the 9 vehicle methods are inherited from
+`IVehicleRenderer` rather than declared on `IRenderer`; but
 `IrrlichtRenderer` still declares ~60 methods and 45 fields.
 
 The fix: extract all vehicle / traffic agent / service-coverage-overlay logic into
