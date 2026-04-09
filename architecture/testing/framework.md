@@ -273,6 +273,12 @@ target_link_libraries(integration_tests PRIVATE
     aitown_render aitown_ui
     GTest::gtest_main GTest::gmock
     rapidcheck rapidcheck_gtest)
+# nlohmann_json::nlohmann_json: add to integration_tests PRIVATE if any integration test
+# source file uses `#include <nlohmann/json.hpp>` for programmatic JSON manipulation
+# (e.g., nlohmann::json::parse / j.dump() in serialize/deserialize assertions). This is
+# conditional — only needed when integration tests call serializeToJson/deserializeFromJson
+# directly. aitown_sim links nlohmann_json PRIVATE so the include path does not propagate
+# automatically. See also simulation_tests above (Phase 11q2+).
 target_include_directories(integration_tests PRIVATE
     tests/simulation/ tests/ui/ src/interfaces/ src/ui/ src/rendering/ ${CMAKE_SOURCE_DIR})
 aitown_add_tests(integration_tests LABEL "integration")

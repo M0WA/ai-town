@@ -23,7 +23,10 @@ All 32 issues are spread across three files:
 | `src/simulation/CitySimulation.cpp` | 2 |
 
 **Fix strategy:** extract deeply-nested inner blocks and oversized functions into
-focused private helper methods. Zero behaviour changes — no logic is altered.
+focused private helper methods. Zero gameplay behaviour changes — no simulation
+logic is altered. The only functional change in this phase is adding the missing
+`was_powered` and `was_water_covered` serialization fields to bring the save
+format into compliance with `architecture/game-design/service-coverage.md`.
 
 ---
 
@@ -117,7 +120,12 @@ neighbour scan, service coverage checks, water/power state updates, and alert fi
   (`hasFireStation` and `hasPolice` passed to this helper are the **city-wide
   service existence booleans** produced by `buildServiceCoverageMap`, NOT per-tile
   radial coverage values — per-tile fire/police coverage is handled by
-  `computeFirePoliceCoverageGap`.)
+  `computeFirePoliceCoverageGap`. This city-wide boolean behavior matches the
+  existing implementation and is intentionally preserved unchanged by this
+  zero-behavior-change phase; the spec-vs-implementation misalignment — where
+  `architecture/game-design/service-coverage.md` specifies per-tile radial
+  coverage for alert SFX — is a pre-existing deviation that is out of scope
+  here and should be tracked as future work.)
   No nesting beyond L1. ✓
 - [ ] Refactor `applyDesirabilityScores` to call these helpers. Final shape:
   - Outer for-tile loop (L1) → if Residential (L2) → helper calls (no nesting) ✓
@@ -127,6 +135,11 @@ neighbour scan, service coverage checks, water/power state updates, and alert fi
     `updatePowerState` individually — each contributes to `anyUncovered`. ✓
   - Inline uncovered penalty: merge double-nested `if anyUncovered → if !firstTick`
     into single `if (anyUncovered && !tile.firstDesirabilityTick)` to stay ≤ 3. ✓
+  - Service-recovery `else if` branch: the
+    `else if (!anyUncovered && (hasFireStation || hasPolice || hasWater || hasPower)) { desirability += SimulationConstants::service_recovery_desirability_per_tick; }`
+    branch that immediately follows the penalty condition in the existing code must be
+    preserved unchanged. This implements the service-coverage recovery rate
+    (ref: `architecture/game-design/service-coverage.md`). ✓
   - Alert block at end: `if (isZoned&&Residential&&audio)` (L2) →
     `if (desirability <= threshold)` (L3) → `fireDesirabilityAlert(...)` (no deeper nesting);
     the `else` branch (desirability > threshold) must reset `tile.alertFired = false`
@@ -297,11 +310,24 @@ MIT licence, cross-platform Linux/Windows, CMake target
   `dependencies` array. Once this PR merges, `docker-ci-image.yml` auto-triggers
   and publishes a new CI image with `nlohmann-json` baked in.
 
-  **Before opening the preparatory PR**: confirm that `docker/ci-linux/Dockerfile`
-  installs packages in vcpkg manifest mode (i.e., it reads `vcpkg.json` during the
-  Docker build). If the Dockerfile uses an explicit `vcpkg install <port-list>`
-  invocation rather than manifest mode, that explicit list must also be updated to
-  include `nlohmann-json` alongside the `vcpkg.json` change.
+  **Before opening the preparatory PR** perform both of these checks:
+
+  1. Confirm that `docker/ci-linux/Dockerfile` installs packages in vcpkg
+     manifest mode (i.e., it reads `vcpkg.json` during the Docker build). If the
+     Dockerfile uses an explicit `vcpkg install <port-list>` invocation rather
+     than manifest mode, that explicit list must also be updated to include
+     `nlohmann-json` alongside the `vcpkg.json` change.
+  2. Verify that `nlohmann-json` is available at the `msvc.yml` `VCPKG_COMMIT_ID`
+     baseline by running
+     `gh api "/repos/microsoft/vcpkg/contents/ports/nlohmann-json?ref=<VCPKG_COMMIT_ID>"`
+     (substitute the actual commit ID from `.github/workflows/msvc.yml`). This
+     check is required because `msvc.yml` triggers on `develop` pushes — once
+     Step 1 merges the updated `vcpkg.json` to `develop`, `msvc.yml` will
+     attempt to install `nlohmann-json` at its own independent baseline. If the
+     port is absent, `msvc.yml` will fail on every `develop` push until a
+     baseline bump is landed. If the port is NOT present, bump the `msvc.yml`
+     `VCPKG_COMMIT_ID` to a baseline that includes `nlohmann-json` as part of
+     the Step 1 preparatory PR.
 
   **Step 2 — main phase PR**: After the new image digest is published, deliver
   all remaining code changes (nlohmann migration in `CitySimulation.cpp`,
@@ -334,24 +360,42 @@ MIT licence, cross-platform Linux/Windows, CMake target
 - [ ] Rewrite `deserializeFromJson` using the nlohmann API:
   - Parse with `nlohmann::json::parse(json, nullptr, /*exceptions=*/false)` and
     check `.is_discarded()` for the error path.
-  - Access fields using two patterns depending on whether the field is required or
-    backward-compatible:
-    - **Required fields** (must exist — throw if absent): use `.at("key").get<T>()`.
-      Only `schema_version` falls in this category — the version check happens first
-      and if missing the function must return early with an error.
-    - **Optional backward-compatible fields** (may be absent in saves from prior game
-      versions): use `j.value("key", defaultValue)` which returns `defaultValue` when
-      the key is absent, preserving backward compatibility. This applies to all tile
-      fields (`wasPowered`, `wasWaterCovered`, `alertFired`, etc.), per-tile state
-      fields (`fp_origin_x`, `fp_origin_z`, `population_milestone_fired`,
-      `building_variant_counters`, etc.), and save-game metadata fields other than
-      `schema_version` (e.g. `speed_multiplier`).
+  - Access fields using three tiers based on their presence in the save format history:
+    - **Tier 1 — Required-since-schema-v1** (documented as "MUST include" in
+      `architecture/game-design/save-system.md`; present in every valid save since
+      the game launched): use `.at("key").get<T>()` inside a try/catch block. In the
+      catch, set `errorOut = "missing or invalid <key>"` and return. This preserves
+      existing error-detection behavior — a corrupted save missing `treasury_balance`
+      returns `LoadResult::Corrupted` instead of silently loading with $0. Top-level
+      Tier 1 fields: `treasury_balance`, `tax_rates`, `tiles` (array),
+      `service_buildings` (array), `outstanding_bond_uses`,
+      `consecutive_deficit_months`, `total_ticks`, `month`, `year`,
+      `outstanding_debt`. Core per-tile fields (`zone`, `density`, `is_zoned`,
+      `is_road`, `population`, `desirability`) also use `.at()` within the tile
+      loop. `schema_version` is a special case: it uses `.at()` for the early
+      version-check and the function returns immediately if missing or wrong.
+    - **Tier 2 — Added in later phases, required in new saves, may be absent in
+      very old saves**: use `j.value("key", defaultValue)`. Fields:
+      `speed_multiplier`, `population_milestone_fired`, `building_variant_counters`,
+      `fp_origin_x` / `fp_origin_z` per tile, `is_abandoned`, `under_construction`,
+      `building_variant_num`, `alert_fired` (default `false` — already written by
+      the hand-rolled serializer; `j.value()` handles any very old saves that
+      predate it).
+    - **Tier 3 — New in this phase** (absent in ALL pre-Phase-11q2 saves; the
+      hand-rolled serializer never wrote these keys): use
+      `j.value("key", defaultValue)` with the spec-defined default.
+      Fields: `was_powered` (default `true`), `was_water_covered` (default `true`),
+      per the Per-Tile Audio Transition Fields table in
+      `architecture/game-design/service-coverage.md`.
 
-    **Note**: Use `j.value("key", defaultValue)` for all fields that may be absent in
-    saves from prior game versions; reserve `.at("key")` only for `schema_version`
-    which is always required and is checked at the top of deserialization. This
-    satisfies the backward-compatible loading requirement in
-    `architecture/game-design/save-system.md`.
+    **Important**: Tier 1 fields use `.at()` to preserve the existing
+    error-detection contract — changing these to `j.value()` would silently accept
+    corrupted saves that the current implementation correctly rejects. Only Tier 2
+    and Tier 3 fields (added progressively across phases) use `j.value()`. Tiers
+    2 and 3 are mutually exclusive: Tier 2 fields were written by the hand-rolled
+    serializer; Tier 3 fields (`was_powered`, `was_water_covered`) are new to
+    this phase. This distinction upholds the "zero gameplay behaviour changes"
+    goal for both valid and corrupted save handling.
   - Iterate tile/service-building arrays with a range-for.
   - Target cognitive complexity ≤ 25 (all nesting is flat key-access, no manual loops
     over characters). ✓
@@ -377,9 +421,16 @@ MIT licence, cross-platform Linux/Windows, CMake target
   `grep -rn "serializeToJson\|deserializeFromJson" tests/` to discover any
   additional callers not listed above. Every file discovered by this grep MUST
   be reviewed and updated before the test update work proceeds; do not begin
-  modifying test files until the full caller set is known.
+  modifying test files until the full caller set is known. If the grep
+  discovers callers in `tests/integration/`, `nlohmann_json::nlohmann_json`
+  must also be added to
+  `target_link_libraries(integration_tests PRIVATE nlohmann_json::nlohmann_json)`
+  in `CMakeLists.txt` — the `aitown_sim` PRIVATE link does not propagate
+  include paths, so integration test files using `#include <nlohmann/json.hpp>`
+  for programmatic JSON manipulation will fail to compile without this
+  explicit link (same rationale as the `simulation_tests` link above).
 
-  The review must cover three categories of test changes:
+  The review must cover four categories of test changes:
 
   1. **Error-message assertions**: update tests that assert specific hand-rolled
      parser error messages (e.g. expected-token strings from `expect()`,
@@ -414,6 +465,39 @@ MIT licence, cross-platform Linux/Windows, CMake target
      `SimulationTime_Preserved`, `Corruption_ReturnsFalse`, and ~2
      `applyLoadedJson` tests) that must be verified for format-dependent
      assertions.
+  4. **Backward-compatible default and round-trip verification for
+     `was_powered` / `was_water_covered`**: Deliverable 3b adds `was_powered`
+     and `was_water_covered` as net-new fields in `serializeToJson`. Add at
+     least the following new tests:
+     - **Missing-key defaults**: Deserialize a JSON string that contains a
+       valid tile entry but LACKS the `was_powered` and `was_water_covered`
+       keys entirely (simulating a save from a pre-Phase-11q2 game version).
+       Assert the loaded tile has `wasPowered == true` and
+       `wasWaterCovered == true` — the backward-compatible defaults specified
+       in the Per-Tile Audio Transition Fields table of
+       `architecture/game-design/service-coverage.md`.
+     - **Round-trip (true case)**: Construct a city state where a tile has
+       `wasPowered = true` and `wasWaterCovered = true`, serialize with
+       `serializeToJson`, deserialize the output with `deserializeFromJson`,
+       and assert the values survive the cycle unchanged.
+     - **Round-trip (false case)**: Same as above but with
+       `wasPowered = false` and `wasWaterCovered = false`, verifying the
+       non-default values also round-trip correctly.
+
+     **Test file placement**: Place the three new tests (`missing-key defaults`,
+     `round-trip true case`, `round-trip false case`) in
+     `tests/simulation/save_system_real_test.cpp` — it already contains the
+     `SaveSystemWithSimTest` fixture providing a real `CitySimulation` instance
+     wired with mocks, which is exactly what these tests need to call
+     `serializeToJson`/`deserializeFromJson` on. Do **not** place them in
+     `save_system_test.cpp` (its anonymous-namespace stub classes
+     `ICitySimulationSerializable` / `ISaveSystem` conflict with the real
+     headers) or `save_system_integration_test.cpp` (that file belongs to the
+     `integration_tests` CMake target with label `integration`, whereas these
+     are unit-level tests under `simulation_tests` with label `unit`). Per
+     `architecture/testing/coverage.md` Coverage Test Placement Convention and
+     the stub/real split exception (lines 321-325) -- do **not** create a new
+     standalone or gap-style test file for these tests.
 
 ---
 
