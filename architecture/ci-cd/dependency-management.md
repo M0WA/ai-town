@@ -14,6 +14,7 @@
     "libvorbis",
     "fmt",
     "glew",
+    "nlohmann-json",
     "gtest",
     "rapidcheck"
   ]
@@ -21,6 +22,8 @@
 ```
 
 **`fmt` is a required explicit dependency**: the `openal-soft` vcpkg portfile applies a `devendor-fmt.diff` patch that replaces OpenAL Soft's bundled copy of `{fmt}` with the external vcpkg `fmt` package. This means `libopenal.a` contains object files that reference `fmt::v12::report_error` and other `fmt` symbols. Any CMake target that links (directly or transitively) against `OpenAL::OpenAL` must also link `fmt::fmt`, or the linker will fail with `undefined reference to fmt::v12::report_error`. Adding `fmt` to `vcpkg.json` ensures the vcpkg `fmt` package is installed; `fmt::fmt` must then be linked PRIVATE to `aitown_audio` in `CMakeLists.txt`.
+
+**`nlohmann-json` provides JSON serialization/deserialization**: header-only, MIT licence, used by `CitySimulation.cpp` for save-file serialization (`serializeToJson`) and deserialization (`deserializeFromJson`). The vcpkg port is `nlohmann-json`; CMake target is `nlohmann_json::nlohmann_json` (config-mode). Link it to the target that compiles `CitySimulation.cpp` (i.e., `aitown_sim`). Being header-only, it requires no DLL copy rules on Windows and no additional system packages on Linux.
 
 - CMake configured with `-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake`
 - CI uses `lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1 # v11.5` with a pinned vcpkg commit hash stored as `env.VCPKG_COMMIT_ID`. `lukka/run-vcpkg` is used only in the Windows job. Linux jobs set `VCPKG_MANIFEST_INSTALL=OFF` and read from `/opt/vcpkg_installed` which is baked into the CI image at image-build time. **`VCPKG_COMMIT_ID` must be declared at the workflow level** (in the top-level `env:` block of the CI YAML file, not at the job or step level) so it is available to all jobs and steps. Declaring it at the job level would make it unavailable to the baseline validation step if that step runs in a different job. Example declaration at workflow level:
@@ -101,6 +104,8 @@ find_package(Vorbis REQUIRED)
 find_package(Irrlicht REQUIRED)
 # GLEW: required for the sRGB raw GL upload path (glCompressedTexImage2D and related calls).
 find_package(GLEW REQUIRED)
+# nlohmann-json: header-only JSON library used by CitySimulation for save-file serialization.
+find_package(nlohmann_json CONFIG REQUIRED)
 # Phase 0: route OpenAL, fmt, and Vorbis to aitown_audio stub library (NOT to 'aitown' — that
 # executable does not exist at Phase 0). The 'aitown' executable is the final game binary added
 # in a later phase.
@@ -108,6 +113,8 @@ target_link_libraries(aitown_audio PRIVATE OpenAL::OpenAL fmt::fmt Vorbis::vorbi
 # Irrlicht and GLEW link to aitown_render (PRIVATE — headers must NOT propagate to test targets).
 # GLEW::GLEW must appear before Irrlicht — required for GLEW symbol deduplication per irrlicht-device-lifecycle.md mitigation-2.
 target_link_libraries(aitown_render PRIVATE GLEW::GLEW Irrlicht)
+# nlohmann_json links to the target compiling CitySimulation.cpp (header-only — no binary artifact).
+target_link_libraries(aitown_sim PRIVATE nlohmann_json::nlohmann_json)
 ```
 
 **GLEW — Windows triplet note**: On Windows with the `x64-windows` triplet active, vcpkg resolves `glew` to `glew:x64-windows` automatically — no platform-specific triplet override in `vcpkg.json` is needed. Before committing a baseline update that adds GLEW, verify the `glew` port exists at the pinned baseline using `gh api /repos/microsoft/vcpkg/contents/ports/glew`. A 200 response confirms the port is present at that baseline; a 404 means the port was removed or renamed — try an adjacent vcpkg commit. This verification is mandatory: a missing port at the pinned baseline causes a hard build failure on all platforms.
