@@ -29,6 +29,7 @@
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <cmath>
 #include <cstring>
@@ -44,7 +45,6 @@
 using ::testing::_;
 using ::testing::AnyNumber;
 using ::testing::NiceMock;
-using ::testing::Return;
 
 // ===========================================================================
 // Fixture helpers
@@ -962,24 +962,13 @@ TEST_F(NiceCoverageTest, Serialize_ScenarioId_WithSpecialChars_EscapedCorrectly)
 }
 
 TEST_F(NiceCoverageTest, Deserialize_UnknownTileField_IsSkipped) {
-    // Build JSON with an extra unknown field inside a tile object.
-    std::string baseJson = cs()->serializeToJson();
-    // Find the tiles array and inject a custom field.
-    size_t tilesPos = baseJson.find("\"tiles\": [\n");
-    if (tilesPos != std::string::npos) {
-        // The tiles array will be empty for a new sim; we need at least one tile.
-        // Manually add a tile with an unknown field.
-        cs()->placeRoad(0, 0);
-        std::string jsonWithTile = cs()->serializeToJson();
-        // Find a tile object and inject an unknown field.
-        size_t tileObjStart = jsonWithTile.find("{\"x\":");
-        if (tileObjStart != std::string::npos) {
-            jsonWithTile.insert(tileObjStart + 1,
-                                "\"unknown_tile_field\": \"hello\", ");
-            std::string err;
-            bool ok = cs()->deserializeFromJson(jsonWithTile, err);
-            EXPECT_TRUE(ok) << "Unknown tile field must be skipped; error: " << err;
-        }
+    cs()->placeRoad(0, 0);
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    if (j.contains("tiles") && j["tiles"].is_array() && !j["tiles"].empty()) {
+        j["tiles"][0]["unknown_tile_field"] = "hello";
+        std::string err;
+        bool ok = cs()->deserializeFromJson(j.dump(), err);
+        EXPECT_TRUE(ok) << "Unknown tile field must be skipped; error: " << err;
     }
 }
 
@@ -1011,6 +1000,154 @@ TEST_F(NiceCoverageTest, Deserialize_AllSpeedMultipliers_DeserializeCorrectly) {
                 << "Deserialized speed must match enum for speedInt=" << speedInt;
         }
     }
+}
+
+// ===========================================================================
+// Deserialize — missing required Tier 1 fields (catch-block coverage)
+// ===========================================================================
+
+TEST_F(NiceCoverageTest, Deserialize_MissingMapTilesX_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j.erase("map_tiles_x");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_MissingMapTilesZ_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j.erase("map_tiles_z");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_MissingTreasuryBalance_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j.erase("treasury_balance");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_MissingTaxRates_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j.erase("tax_rates");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_MissingOutstandingDebt_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j.erase("outstanding_debt");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_MissingOutstandingBondUses_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j.erase("outstanding_bond_uses");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_MissingConsecutiveDeficitMonths_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j.erase("consecutive_deficit_months");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_InvalidTilesArray_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j["tiles"] = nlohmann::json(42);  // not an array — triggers catch block
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_InvalidServiceBuildingsArray_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j["service_buildings"] = nlohmann::json(42);  // not an array — triggers catch block
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_InvalidPopulationMilestoneFired_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j["population_milestone_fired"][0] = "not-a-bool";
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_InvalidBuildingVariantCounters_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j["building_variant_counters"][0] = "invalid";
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_InvalidDensityUnlockRevenueCounter_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j["density_unlock_revenue_counter"] = "not-an-array";
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_MissingTotalTicks_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j.erase("total_ticks");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_MissingMonth_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j.erase("month");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_MissingYear_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j.erase("year");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
+}
+
+TEST_F(NiceCoverageTest, Deserialize_MissingScenarioState_ReturnsError) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j.erase("scenario_state");
+    std::string err;
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
+    EXPECT_FALSE(ok);
+    EXPECT_FALSE(err.empty());
 }
 
 // ===========================================================================
@@ -1184,22 +1321,11 @@ TEST_F(HardExtraTest, GetNextUnlockThreshold_Hard_AllTiersLocked) {
     EXPECT_GT(t, 0.0f);
 }
 
-static std::string patchUnlockFlags(const std::string& json, int numUnlocked) {
-    std::string search = "\"density_unlock_flags\": [";
-    size_t pos = json.find(search);
-    if (pos == std::string::npos) return json;
-    size_t arrStart = pos + search.size() - 1;
-    size_t arrEnd = json.find(']', arrStart);
-    if (arrEnd == std::string::npos) return json;
-    std::string newArr = "[";
-    for (int i = 0; i < 6; ++i) {
-        if (i > 0) newArr += ", ";
-        newArr += (i < numUnlocked) ? "true" : "false";
-    }
-    newArr += "]";
-    std::string result = json;
-    result.replace(arrStart, arrEnd - arrStart + 1, newArr);
-    return result;
+static std::string patchUnlockFlags(const std::string& jsonStr, int numUnlocked) {
+    nlohmann::json j = nlohmann::json::parse(jsonStr);
+    for (int i = 0; i < 6; ++i)
+        j["density_unlock_flags"][i] = (i < numUnlocked);
+    return j.dump(2);
 }
 
 TEST_F(NiceExtraCoverageTest, GetNextUnlockThreshold_Case1_WhenTier0Unlocked) {
@@ -1316,121 +1442,97 @@ TEST_F(NiceExtraCoverageTest, Deserialize_ParseInt64Error_NoDigit) {
 }
 
 TEST_F(NiceExtraCoverageTest, Deserialize_ParseBoolError_InvalidValue) {
-    std::string base = cs()->serializeToJson();
-    std::string bad = base;
-    std::string old = "\"density_unlock_flags\": [false";
-    std::string repl = "\"density_unlock_flags\": [maybe";
-    size_t p = bad.find(old);
-    if (p == std::string::npos) { GTEST_SKIP() << "Could not find density_unlock_flags in base JSON"; }
-    bad.replace(p, old.size(), repl);
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    // Replace density_unlock_flags with invalid (non-bool) values
+    j["density_unlock_flags"] = nlohmann::json::array({"maybe", "false", "false", "false", "false", "false"});
     std::string err;
-    bool ok = cs()->deserializeFromJson(bad, err);
+    bool ok = cs()->deserializeFromJson(j.dump(), err);
     EXPECT_FALSE(ok);
     EXPECT_FALSE(err.empty());
 }
 
-TEST_F(NiceExtraCoverageTest, Deserialize_UnknownTileFieldWithStringValue_Skipped) {
-    cs()->placeZone(5, 5, ZoneType::Residential, DensityTier::Low);
-    std::string base = cs()->serializeToJson();
-    std::string bad = base;
-    std::string search = "\"is_zoned\"";
-    size_t p = bad.find(search);
-    if (p == std::string::npos) { GTEST_SKIP() << "Could not find tile is_zoned field"; }
-    bad.insert(p, "\"unknown_tile_str\": \"some_value\", ");
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownTileFieldWithStringValue_IsIgnored) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    nlohmann::json tile;
+    tile["x"] = 5;  tile["z"] = 5;
+    tile["zone"] = 1;  tile["tier"] = 0;
+    tile["is_zoned"] = true;  tile["is_road"] = false;
+    tile["population"] = 0.0f;
+    tile["unknown_tile_str"] = "some_value";
+    j["tiles"].push_back(std::move(tile));
     std::string err;
-    bool ok = cs()->deserializeFromJson(bad, err);
-    EXPECT_TRUE(ok) << "Unknown tile string field must be skipped: " << err;
+    bool ok = cs()->deserializeFromJson(j.dump(2), err);
+    EXPECT_TRUE(ok) << "Unknown tile string field must be ignored: " << err;
 }
 
-TEST_F(NiceExtraCoverageTest, Deserialize_UnknownTileFieldWithNumericValue_Skipped) {
-    cs()->placeZone(3, 3, ZoneType::Commercial, DensityTier::Low);
-    std::string base = cs()->serializeToJson();
-    std::string bad = base;
-    std::string search = "\"is_zoned\"";
-    size_t p = bad.find(search);
-    if (p == std::string::npos) { GTEST_SKIP() << "Could not find tile is_zoned field"; }
-    bad.insert(p, "\"unknown_tile_num\": 42, ");
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownTileFieldWithNumericValue_IsIgnored) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    nlohmann::json tile;
+    tile["x"] = 3;  tile["z"] = 3;
+    tile["zone"] = 2;  tile["tier"] = 0;
+    tile["is_zoned"] = true;  tile["is_road"] = false;
+    tile["population"] = 0.0f;
+    tile["unknown_tile_num"] = 42;
+    j["tiles"].push_back(std::move(tile));
     std::string err;
-    bool ok = cs()->deserializeFromJson(bad, err);
-    EXPECT_TRUE(ok) << "Unknown tile numeric field must be skipped: " << err;
+    bool ok = cs()->deserializeFromJson(j.dump(2), err);
+    EXPECT_TRUE(ok) << "Unknown tile numeric field must be ignored: " << err;
 }
 
-TEST_F(NiceExtraCoverageTest, Deserialize_UnknownServiceBuildingFieldString_Skipped) {
-    cs()->placeServiceBuilding(7, 7, ServiceBuildingType::FireStation);
-    std::string base = cs()->serializeToJson();
-    std::string bad = base;
-    std::string sbSection = "\"service_buildings\": [";
-    size_t sbPos = bad.find(sbSection);
-    if (sbPos == std::string::npos) { GTEST_SKIP() << "No service buildings in JSON"; }
-    size_t objPos = bad.find("{", sbPos + sbSection.size());
-    if (objPos == std::string::npos) { GTEST_SKIP() << "No service building object found"; }
-    bad.insert(objPos + 1, "\"unk_sb_str\": \"val\", ");
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownServiceBuildingFieldString_IsIgnored) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    nlohmann::json sb;
+    sb["x"] = 7;  sb["z"] = 7;
+    sb["type"] = 0;  sb["degraded"] = false;
+    sb["unk_sb_str"] = "val";
+    j["service_buildings"].push_back(std::move(sb));
     std::string err;
-    bool ok = cs()->deserializeFromJson(bad, err);
-    EXPECT_TRUE(ok) << "Unknown service building string field must be skipped: " << err;
+    bool ok = cs()->deserializeFromJson(j.dump(2), err);
+    EXPECT_TRUE(ok) << "Unknown service building string field must be ignored: " << err;
 }
 
-TEST_F(NiceExtraCoverageTest, Deserialize_UnknownServiceBuildingFieldNumeric_Skipped) {
-    cs()->placeServiceBuilding(2, 2, ServiceBuildingType::PoliceStation);
-    std::string base = cs()->serializeToJson();
-    std::string bad = base;
-    std::string sbSection = "\"service_buildings\": [";
-    size_t sbPos = bad.find(sbSection);
-    if (sbPos == std::string::npos) { GTEST_SKIP() << "No service buildings in JSON"; }
-    size_t objPos = bad.find("{", sbPos + sbSection.size());
-    if (objPos == std::string::npos) { GTEST_SKIP() << "No service building object found"; }
-    bad.insert(objPos + 1, "\"unk_sb_num\": 99, ");
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownServiceBuildingFieldNumeric_IsIgnored) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    nlohmann::json sb;
+    sb["x"] = 2;  sb["z"] = 2;
+    sb["type"] = 1;  sb["degraded"] = false;
+    sb["unk_sb_num"] = 99;
+    j["service_buildings"].push_back(std::move(sb));
     std::string err;
-    bool ok = cs()->deserializeFromJson(bad, err);
-    EXPECT_TRUE(ok) << "Unknown service building numeric field must be skipped: " << err;
+    bool ok = cs()->deserializeFromJson(j.dump(2), err);
+    EXPECT_TRUE(ok) << "Unknown service building numeric field must be ignored: " << err;
 }
 
-TEST_F(NiceExtraCoverageTest, Deserialize_UnknownScenarioFieldString_Skipped) {
-    std::string base = cs()->serializeToJson();
-    std::string bad = base;
-    std::string search = "\"scenario_state\": {";
-    size_t p = bad.find(search);
-    if (p == std::string::npos) { GTEST_SKIP() << "No scenario_state in JSON"; }
-    size_t bracePos = bad.find("{", p + search.size() - 1);
-    if (bracePos == std::string::npos) { GTEST_SKIP() << "Could not find scenario_state opening brace"; }
-    bad.insert(bracePos + 1, "\"unk_sc_str\": \"xyz\", ");
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownScenarioFieldString_IsIgnored) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j["scenario_state"]["unk_sc_str"] = "xyz";
     std::string err;
-    bool ok = cs()->deserializeFromJson(bad, err);
-    EXPECT_TRUE(ok) << "Unknown scenario_state string field must be skipped: " << err;
+    bool ok = cs()->deserializeFromJson(j.dump(2), err);
+    EXPECT_TRUE(ok) << "Unknown scenario_state string field must be ignored: " << err;
 }
 
-TEST_F(NiceExtraCoverageTest, Deserialize_UnknownScenarioFieldNumeric_Skipped) {
-    std::string base = cs()->serializeToJson();
-    std::string bad = base;
-    std::string search = "\"scenario_state\": {";
-    size_t p = bad.find(search);
-    if (p == std::string::npos) { GTEST_SKIP() << "No scenario_state in JSON"; }
-    size_t bracePos = bad.find("{", p + search.size() - 1);
-    if (bracePos == std::string::npos) { GTEST_SKIP() << "Could not find scenario_state opening brace"; }
-    bad.insert(bracePos + 1, "\"unk_sc_num\": 999, ");
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownScenarioFieldNumeric_IsIgnored) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j["scenario_state"]["unk_sc_num"] = 999;
     std::string err;
-    bool ok = cs()->deserializeFromJson(bad, err);
-    EXPECT_TRUE(ok) << "Unknown scenario_state numeric field must be skipped: " << err;
+    bool ok = cs()->deserializeFromJson(j.dump(2), err);
+    EXPECT_TRUE(ok) << "Unknown scenario_state numeric field must be ignored: " << err;
 }
 
-TEST_F(NiceExtraCoverageTest, Deserialize_UnknownTopLevelObjectKey_Skipped) {
-    std::string base = cs()->serializeToJson();
-    size_t lastBrace = base.rfind('}');
-    if (lastBrace == std::string::npos) { GTEST_SKIP() << "Malformed JSON from serializeToJson"; }
-    base.insert(lastBrace, ",\n  \"unknown_obj\": {\"nested\": \"a\\\"b\", \"arr\": [1, 2]}\n");
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownTopLevelObjectKey_IsIgnored) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j["unknown_obj"] = nlohmann::json::object({{"nested", "a\"b"}, {"arr", nlohmann::json::array({1, 2})}});
     std::string err;
-    bool ok = cs()->deserializeFromJson(base, err);
-    EXPECT_TRUE(ok) << "Unknown top-level object must be skipped: " << err;
+    bool ok = cs()->deserializeFromJson(j.dump(2), err);
+    EXPECT_TRUE(ok) << "Unknown top-level object must be ignored: " << err;
 }
 
-TEST_F(NiceExtraCoverageTest, Deserialize_UnknownTopLevelStringKey_Skipped) {
-    std::string base = cs()->serializeToJson();
-    size_t lastBrace = base.rfind('}');
-    if (lastBrace == std::string::npos) { GTEST_SKIP() << "Malformed JSON from serializeToJson"; }
-    base.insert(lastBrace, ",\n  \"unknown_str\": \"hello world\"\n");
+TEST_F(NiceExtraCoverageTest, Deserialize_UnknownTopLevelStringKey_IsIgnored) {
+    nlohmann::json j = nlohmann::json::parse(cs()->serializeToJson());
+    j["unknown_str"] = "hello world";
     std::string err;
-    bool ok = cs()->deserializeFromJson(base, err);
-    EXPECT_TRUE(ok) << "Unknown top-level string must be skipped: " << err;
+    bool ok = cs()->deserializeFromJson(j.dump(2), err);
+    EXPECT_TRUE(ok) << "Unknown top-level string key must be ignored: " << err;
 }
 
 TEST_F(NiceExtraCoverageTest, Deserialize_EscapeSequences_AllBranches) {

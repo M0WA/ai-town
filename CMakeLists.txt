@@ -96,6 +96,9 @@ find_package(Vorbis REQUIRED)
 # linking ours first ensures our symbols win the linker conflict).
 find_package(GLEW REQUIRED)
 
+# nlohmann/json: required for CitySimulation JSON save/load (Phase 11).
+find_package(nlohmann_json CONFIG REQUIRED)
+
 # Irrlicht transitive dependencies (Linux static link only).
 # The adrido/irrlicht-vcpkg port builds Irrlicht as a STATIC library on Linux.
 # Its CMake exported target does NOT declare INTERFACE_LINK_LIBRARIES for the
@@ -301,7 +304,7 @@ target_include_directories(aitown_sim
     INTERFACE src/interfaces/      # shared interfaces propagated to consumers
     INTERFACE src/simulation/      # CitySimulation.h visible to consumers
 )
-target_link_libraries(aitown_sim PRIVATE aitown_coverage_flags aitown_project_root_includes)
+target_link_libraries(aitown_sim PRIVATE aitown_coverage_flags aitown_project_root_includes nlohmann_json::nlohmann_json)
 target_compile_features(aitown_sim PRIVATE cxx_std_17)
 target_sources(aitown_sim PRIVATE
     src/simulation/Economy.cpp
@@ -570,6 +573,7 @@ target_link_libraries(simulation_tests PRIVATE
     rapidcheck
     rapidcheck_gtest
     aitown_project_root_includes
+    nlohmann_json::nlohmann_json
 )
 target_compile_features(simulation_tests PRIVATE cxx_std_17)
 # tests/simulation/ — owns shared mock headers (mock_audio_system.h, mock_renderer.h,

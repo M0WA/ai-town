@@ -22,6 +22,7 @@
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <memory>
@@ -378,6 +379,82 @@ TEST_F(SaveSystemWithSimTest, WriteJsonToFile_BadPath_ReturnsError) {
     EXPECT_FALSE(r.error.empty());
 
     fs::remove(slotPath, ec);
+}
+
+// ============================================================================
+// was_powered / was_water_covered serialization (Phase 11q2)
+// ============================================================================
+
+TEST_F(SaveSystemWithSimTest, WasPowered_WasWaterCovered_MissingKeys_DefaultToTrue) {
+    // Simulate a pre-Phase-11q2 save that lacks was_powered and was_water_covered.
+    // Place a road tile so the tiles array is non-empty.
+    sim_->placeRoad(0, 0);
+    std::string raw = sim_->serializeToJson();
+    nlohmann::json j = nlohmann::json::parse(raw);
+    // Remove was_powered and was_water_covered from every tile.
+    for (auto& tobj : j["tiles"]) {
+        tobj.erase("was_powered");
+        tobj.erase("was_water_covered");
+    }
+    std::string err;
+    bool ok = sim_->deserializeFromJson(j.dump(), err);
+    ASSERT_TRUE(ok) << "deserializeFromJson must succeed with missing was_powered/was_water_covered: " << err;
+    // Verify defaults are applied. Access tile state via re-serializing and checking.
+    std::string reserialized = sim_->serializeToJson();
+    nlohmann::json j2 = nlohmann::json::parse(reserialized);
+    for (const auto& tobj : j2["tiles"]) {
+        EXPECT_TRUE(tobj.value("was_powered", false))
+            << "was_powered must default to true on load from old save";
+        EXPECT_TRUE(tobj.value("was_water_covered", false))
+            << "was_water_covered must default to true on load from old save";
+    }
+}
+
+TEST_F(SaveSystemWithSimTest, WasPowered_WasWaterCovered_RoundTrip_True) {
+    // Serialize a city with default tile state (wasPowered=true, wasWaterCovered=true).
+    sim_->placeRoad(0, 0);
+    std::string json = sim_->serializeToJson();
+    // Verify the fields are written as true.
+    nlohmann::json j = nlohmann::json::parse(json);
+    for (const auto& tobj : j["tiles"]) {
+        EXPECT_TRUE(tobj.value("was_powered", false))
+            << "was_powered must be true in serialized output";
+        EXPECT_TRUE(tobj.value("was_water_covered", false))
+            << "was_water_covered must be true in serialized output";
+    }
+    // Deserialize and re-serialize; values must survive the round-trip.
+    std::string err;
+    ASSERT_TRUE(sim_->deserializeFromJson(json, err)) << err;
+    std::string json2 = sim_->serializeToJson();
+    nlohmann::json j2 = nlohmann::json::parse(json2);
+    for (const auto& tobj : j2["tiles"]) {
+        EXPECT_TRUE(tobj.value("was_powered", false))
+            << "was_powered=true must survive round-trip";
+        EXPECT_TRUE(tobj.value("was_water_covered", false))
+            << "was_water_covered=true must survive round-trip";
+    }
+}
+
+TEST_F(SaveSystemWithSimTest, WasPowered_WasWaterCovered_RoundTrip_False) {
+    // Inject was_powered=false, was_water_covered=false via programmatic JSON manipulation.
+    sim_->placeRoad(0, 0);
+    std::string raw = sim_->serializeToJson();
+    nlohmann::json j = nlohmann::json::parse(raw);
+    for (auto& tobj : j["tiles"]) {
+        tobj["was_powered"] = false;
+        tobj["was_water_covered"] = false;
+    }
+    std::string err;
+    ASSERT_TRUE(sim_->deserializeFromJson(j.dump(), err)) << err;
+    // Re-serialize: the false values must survive.
+    std::string reserialized = sim_->serializeToJson();
+    nlohmann::json j2 = nlohmann::json::parse(reserialized);
+    for (const auto& tobj : j2["tiles"]) {
+        EXPECT_FALSE(tobj.value("was_powered", true))
+            << "was_powered=false must survive round-trip";
+        EXPECT_FALSE(tobj.value("was_water_covered", true))
+            << "was_water_covered=false must survive round-trip";
+    }
 }
 
 // ============================================================================

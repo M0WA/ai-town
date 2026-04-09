@@ -15,6 +15,60 @@
 #include <cmath>
 #include <limits>
 #include <string>
+#include <unordered_map>
+
+namespace {
+
+struct DemoEntry { int x; int z; int64_t originKey; };
+struct OuterTile { int x; int z; ZoneType zone; };
+
+static bool checkZonedNeighbor(std::unordered_map<int64_t, TileData>& tiles,
+                               const TileData& ft, int fx, int fz,
+                               int64_t candKey, ZoneType targetZone,
+                               DensityTier targetDensity,
+                               std::vector<DemoEntry>& toDemo) {
+    int originX = (ft.footprintOriginX == -1) ? fx : ft.footprintOriginX;
+    int originZ = (ft.footprintOriginZ == -1) ? fz : ft.footprintOriginZ;
+    int64_t ftOriginKey = Zoning::tileKey(originX, originZ);
+
+    auto ftOIt = tiles.find(ftOriginKey);
+    if (ftOIt == tiles.end()) return true;
+    const TileData& ftO = ftOIt->second;
+
+    if (ftO.zone == targetZone && ftO.density < targetDensity) {
+        if (ftOriginKey == candKey) return false;
+        bool alreadyAdded = false;
+        for (auto& de : toDemo) {
+            if (de.originKey == ftOriginKey) { alreadyAdded = true; break; }
+        }
+        if (!alreadyAdded)
+            toDemo.push_back({originX, originZ, ftOriginKey});
+        return false;
+    }
+    return true;
+}
+
+static void clearFootprintCell(std::unordered_map<int64_t, TileData>& tiles,
+                               int cellX, int cellZ,
+                               int tx, int tz, int newN,
+                               std::vector<OuterTile>& outerTiles) {
+    auto tileIt = tiles.find(Zoning::tileKey(cellX, cellZ));
+    if (tileIt == tiles.end()) return;
+    TileData& t = tileIt->second;
+    bool insideNewFP = (cellX >= tx && cellX < tx + newN &&
+                        cellZ >= tz && cellZ < tz + newN);
+    t.isZoned           = !insideNewFP;
+    t.density           = insideNewFP ? t.density : DensityTier::Low;
+    t.population        = 0.0f;
+    t.footprintOriginX  = -1;
+    t.footprintOriginZ  = -1;
+    t.isAbandoned       = false;
+    if (!insideNewFP) {
+        outerTiles.push_back({cellX, cellZ, t.zone});
+    }
+}
+
+} // anonymous namespace
 
 // ---------------------------------------------------------------------------
 // Public accessors
@@ -126,6 +180,25 @@ void Population::accumulateHouseDemand(const Zoning& zoning,
 // doPopulationTick
 // ---------------------------------------------------------------------------
 
+/*static*/ void Population::completeConstruction(TileData& tile, int64_t key,
+                                                  const Traffic& traffic, IRenderer* renderer) {
+    float effective_demand_factor = traffic.getZoneDemandFactor(tile.zone);
+    if (effective_demand_factor >= SimulationConstants::construction_delay_demand_threshold) {
+        tile.underConstruction = false;
+        int tileX = static_cast<int>(key >> 32);
+        int tileZ = static_cast<int>(static_cast<uint32_t>(key));
+        std::string baseName = Zoning::zoneAssetBaseName(tile.zone, tile.density);
+        int variantNum = tile.buildingVariantNum;
+        if (baseName.size() >= 2 && variantNum >= 1 && variantNum <= 4) {
+            baseName[baseName.size() - 2] = '0';
+            baseName[baseName.size() - 1] = static_cast<char>('0' + variantNum);
+        }
+        if (renderer) {
+            renderer->placeBuildingMesh(tileX, tileZ, baseName);
+        }
+    }
+}
+
 void Population::doPopulationTick(Zoning& zoning, const Traffic& traffic, const Economy& /*economy*/,
                                    IAudioSystem* /*audio*/, IRenderer* renderer,
                                    std::queue<SimulationNotification>& notifications) {
@@ -133,21 +206,7 @@ void Population::doPopulationTick(Zoning& zoning, const Traffic& traffic, const 
         if (!tile.isZoned || tile.isRoad) continue;
 
         if (tile.underConstruction && tile.footprintOriginX == -1) {
-            float effective_demand_factor = traffic.getZoneDemandFactor(tile.zone);
-            if (effective_demand_factor >= SimulationConstants::construction_delay_demand_threshold) {
-                tile.underConstruction = false;
-                int tileX = static_cast<int>(key >> 32);
-                int tileZ = static_cast<int>(static_cast<uint32_t>(key));
-                std::string baseName = Zoning::zoneAssetBaseName(tile.zone, tile.density);
-                int variantNum = tile.buildingVariantNum;
-                if (baseName.size() >= 2 && variantNum >= 1 && variantNum <= 4) {
-                    baseName[baseName.size() - 2] = '0';
-                    baseName[baseName.size() - 1] = static_cast<char>('0' + variantNum);
-                }
-                if (renderer) {
-                    renderer->placeBuildingMesh(tileX, tileZ, baseName);
-                }
-            }
+            completeConstruction(tile, key, traffic, renderer);
             if (tile.underConstruction) continue;
         }
 
@@ -201,7 +260,6 @@ bool Population::applyDensityUpgrade(Zoning& zoning, int tx, int tz, int64_t can
     }
 
     bool hasBlocker = false;
-    struct DemoEntry { int x; int z; int64_t originKey; };
     std::vector<DemoEntry> toDemo;
 
     for (int dx = 0; dx < newN && !hasBlocker; ++dx) {
@@ -217,25 +275,8 @@ bool Population::applyDensityUpgrade(Zoning& zoning, int tx, int tz, int64_t can
             const TileData& ft = fit->second;
             if (ft.isRoad) { hasBlocker = true; break; }
             if (ft.isZoned) {
-                int originX = (ft.footprintOriginX == -1) ? fx : ft.footprintOriginX;
-                int originZ = (ft.footprintOriginZ == -1) ? fz : ft.footprintOriginZ;
-                int64_t ftOriginKey = Zoning::tileKey(originX, originZ);
-
-                auto ftOIt = zoning.m_tiles.find(ftOriginKey);
-                if (ftOIt == zoning.m_tiles.end()) { hasBlocker = true; break; }
-                const TileData& ftO = ftOIt->second;
-
-                if (ftO.zone == targetZone && ftO.density < targetDensity) {
-                    if (ftOriginKey == candKey) continue;
-                    bool alreadyAdded = false;
-                    for (auto& de : toDemo) {
-                        if (de.originKey == ftOriginKey) { alreadyAdded = true; break; }
-                    }
-                    if (!alreadyAdded)
-                        toDemo.push_back({originX, originZ, ftOriginKey});
-                } else {
-                    hasBlocker = true;
-                }
+                hasBlocker = checkZonedNeighbor(zoning.m_tiles, ft, fx, fz,
+                                                candKey, targetZone, targetDensity, toDemo);
             }
         }
     }
@@ -245,7 +286,6 @@ bool Population::applyDensityUpgrade(Zoning& zoning, int tx, int tz, int64_t can
         return false;
     }
 
-    struct OuterTile { int x; int z; ZoneType zone; };
     std::vector<OuterTile> outerTiles;
 
     for (auto& de : toDemo) {
@@ -257,22 +297,8 @@ bool Population::applyDensityUpgrade(Zoning& zoning, int tx, int tz, int64_t can
 
         for (int ddx = 0; ddx < oldN; ++ddx) {
             for (int ddz = 0; ddz < oldN; ++ddz) {
-                auto tileIt = zoning.m_tiles.find(Zoning::tileKey(de.x + ddx, de.z + ddz));
-                if (tileIt == zoning.m_tiles.end()) continue;
-                TileData& t = tileIt->second;
-                int tileX = de.x + ddx;
-                int tileZ = de.z + ddz;
-                bool insideNewFP = (tileX >= tx && tileX < tx + newN &&
-                                    tileZ >= tz && tileZ < tz + newN);
-                t.isZoned           = !insideNewFP;
-                t.density           = insideNewFP ? t.density : DensityTier::Low;
-                t.population        = 0.0f;
-                t.footprintOriginX  = -1;
-                t.footprintOriginZ  = -1;
-                t.isAbandoned       = false;
-                if (!insideNewFP) {
-                    outerTiles.push_back({tileX, tileZ, t.zone});
-                }
+                clearFootprintCell(zoning.m_tiles, de.x + ddx, de.z + ddz,
+                                   tx, tz, newN, outerTiles);
             }
         }
 
@@ -342,24 +368,16 @@ bool Population::applyDensityUpgrade(Zoning& zoning, int tx, int tz, int64_t can
     return true;
 }
 
-void Population::doDensityUnlockTick(Zoning& zoning, const Traffic& traffic, const Economy& economy,
-                                      Difficulty difficulty, IRenderer* renderer, IAudioSystem* audio,
-                                      std::queue<SimulationNotification>& notifications) {
-    int sfxCallsThisTick = 0;
-
-    float scale;
-    switch (difficulty) {
-        case Difficulty::Easy:   scale = SimulationConstants::density_unlock_scale_easy;   break;
-        case Difficulty::Normal: scale = SimulationConstants::density_unlock_scale_normal; break;
-        case Difficulty::Hard:   scale = SimulationConstants::density_unlock_scale_hard;   break;
-        default:                 scale = SimulationConstants::density_unlock_scale_normal; break;
+/*static*/ float Population::difficultyToUnlockScale(Difficulty d) {
+    switch (d) {
+        case Difficulty::Easy:   return SimulationConstants::density_unlock_scale_easy;
+        case Difficulty::Normal: return SimulationConstants::density_unlock_scale_normal;
+        case Difficulty::Hard:   return SimulationConstants::density_unlock_scale_hard;
+        default:                 return SimulationConstants::density_unlock_scale_normal;
     }
+}
 
-    bool wasAlreadyUnlocked[6];
-    for (int i = 0; i < 6; ++i) {
-        wasAlreadyUnlocked[i] = m_densityUnlockState.unlock_flags[i];
-    }
-
+void Population::tickUnlockProgress(const Economy& economy, float scale) {
     for (int i = 0; i < 6; ++i) {
         if (m_densityUnlockState.unlock_flags[i]) continue;
         if (i == 3 && !m_densityUnlockState.unlock_flags[2]) continue;
@@ -375,7 +393,13 @@ void Population::doDensityUnlockTick(Zoning& zoning, const Traffic& traffic, con
             m_densityUnlockState.consecutive_months_above_threshold[i] = 0;
         }
     }
+}
 
+void Population::processUpgradeWave(Zoning& zoning, const Traffic& traffic,
+                                     const bool* wasAlreadyUnlocked,
+                                     IRenderer* renderer, IAudioSystem* audio,
+                                     int& sfxCallsThisTick,
+                                     std::queue<SimulationNotification>& notifications) {
     struct TierMapping { ZoneType zone; DensityTier target; DensityTier current; };
     static constexpr TierMapping kTierMap[6] = {
         {ZoneType::Residential, DensityTier::Medium, DensityTier::Low},
@@ -415,6 +439,17 @@ void Population::doDensityUnlockTick(Zoning& zoning, const Traffic& traffic, con
             }
         }
     }
+}
+
+void Population::doDensityUnlockTick(Zoning& zoning, const Traffic& traffic, const Economy& economy,
+                                      Difficulty difficulty, IRenderer* renderer, IAudioSystem* audio,
+                                      std::queue<SimulationNotification>& notifications) {
+    int sfxCallsThisTick = 0;
+    float scale = difficultyToUnlockScale(difficulty);
+    bool wasAlreadyUnlocked[6];
+    for (int i = 0; i < 6; ++i) wasAlreadyUnlocked[i] = m_densityUnlockState.unlock_flags[i];
+    tickUnlockProgress(economy, scale);
+    processUpgradeWave(zoning, traffic, wasAlreadyUnlocked, renderer, audio, sfxCallsThisTick, notifications);
 }
 
 // ---------------------------------------------------------------------------

@@ -117,4 +117,28 @@ public:
     std::unordered_map<int64_t, int>       m_upgradeRetryCount;
     std::array<int, 9>                     m_buildingVariantCounters{};
     float                                  m_budgetSurplusPctRef{0.0f};  // cached from Economy for BFS
+
+private:
+    static int nearestRoadFromCell(const std::unordered_map<int64_t, TileData>& tiles,
+                                   int fx, int fz, int curMin);
+    static std::vector<ServiceCoverageTile> collectCoverageTiles(
+        const ServiceBuilding& sb, float radius);
+    void runPowerBfs(const ServiceBuilding& sb,
+                     std::unordered_map<int64_t, int>& bfsDepth,
+                     int& maxDepth) const;
+    void addRadialFallbackCoverage(const ServiceBuilding& sb, float radiusTiles,
+                                   const std::unordered_map<int64_t, int>& bfsDepth);
+    float computeNeighborDesirabilityDelta(int x, int z) const;
+    bool  computeFirePoliceCoverageGap(int x, int z,
+                                       bool hasFireStation, bool hasPolice) const;
+    void  updateWaterState(TileData& tile, int x, int z, bool hasWater,
+                           bool& anyUncovered, IAudioSystem* audio);
+    void  updatePowerState(TileData& tile, int x, int z, bool hasPower,
+                           bool& anyUncovered, IAudioSystem* audio);
+    void  fireDesirabilityAlert(TileData& tile, int x, int z,
+                                bool hasFireStation, bool hasPolice,
+                                IAudioSystem* audio);
+    void  tryDegradeService(ServiceBuilding& sb, ISimulationRNG& rng,
+                            IAudioSystem* audio,
+                            std::queue<SimulationNotification>& notifications);
 };
