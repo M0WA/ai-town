@@ -114,6 +114,10 @@ neighbour scan, service coverage checks, water/power state updates, and alert fi
   checks `tile.alertFired`; if `hasFireStation` plays `SFX_FIRE_ALERT`, else if
   `hasPolice` plays `SFX_POLICE_ALERT` (fire station takes priority per
   `architecture/game-design/service-coverage.md`); sets `tile.alertFired = true`.
+  (`hasFireStation` and `hasPolice` passed to this helper are the **city-wide
+  service existence booleans** produced by `buildServiceCoverageMap`, NOT per-tile
+  radial coverage values — per-tile fire/police coverage is handled by
+  `computeFirePoliceCoverageGap`.)
   No nesting beyond L1. ✓
 - [ ] Refactor `applyDesirabilityScores` to call these helpers. Final shape:
   - Outer for-tile loop (L1) → if Residential (L2) → helper calls (no nesting) ✓
@@ -220,6 +224,17 @@ loop, pushing complexity over 25.
 
 ---
 
+#### Intermediate coverage gate
+
+- [ ] **Intermediate coverage gate**: After completing all helper extractions
+  (Deliverables 1 and 2), run `make test` locally and verify the per-file 85%
+  coverage floor for `Zoning.cpp`, `Population.cpp`, and `CitySimulation.cpp`
+  (using the `awk` pipeline from `architecture/testing/coverage.md`). If any file
+  drops below 85%, add targeted unit tests for the newly extracted helpers before
+  proceeding to Deliverable 3.
+
+---
+
 #### 3. Fix `src/simulation/CitySimulation.cpp` — 2 issues
 
 ##### 3a. Border-ring terrain flattening (S134 line 385)
@@ -264,11 +279,11 @@ MIT licence, cross-platform Linux/Windows, CMake target
   explicit link, any test file using `#include <nlohmann/json.hpp>` for
   programmatic JSON manipulation (e.g., `nlohmann::json::parse()` + field
   mutation + `j.dump()`) will fail to compile with a "file not found" error.
-- [ ] Update `architecture/testing/framework.md` — add
-  `nlohmann_json::nlohmann_json` to the `target_link_libraries(simulation_tests
-  PRIVATE ...)` example block, with a comment noting it is required for
-  programmatic JSON manipulation in serialize/deserialize tests (Phase 11q2+),
-  to keep the testing spec in sync with the new `CMakeLists.txt` dependency.
+- [ ] Verify `architecture/testing/framework.md` already includes
+  `nlohmann_json::nlohmann_json` in the `target_link_libraries(simulation_tests
+  PRIVATE ...)` example (added as part of Phase 11q2 spec preparation); if it is
+  already present, no spec change is needed; if absent, add it with a comment
+  noting Phase 11q2+ programmatic JSON manipulation.
 - [ ] Rebuild the CI Docker image with `nlohmann-json` baked in. Linux CI runs with
   `VCPKG_MANIFEST_INSTALL=OFF` and relies on packages installed at image build
   time; without a rebuilt image, `find_package(nlohmann_json)` will fail in the
@@ -281,6 +296,12 @@ MIT licence, cross-platform Linux/Windows, CMake target
   containing ONLY the `vcpkg.json` change that adds `"nlohmann-json"` to the
   `dependencies` array. Once this PR merges, `docker-ci-image.yml` auto-triggers
   and publishes a new CI image with `nlohmann-json` baked in.
+
+  **Before opening the preparatory PR**: confirm that `docker/ci-linux/Dockerfile`
+  installs packages in vcpkg manifest mode (i.e., it reads `vcpkg.json` during the
+  Docker build). If the Dockerfile uses an explicit `vcpkg install <port-list>`
+  invocation rather than manifest mode, that explicit list must also be updated to
+  include `nlohmann-json` alongside the `vcpkg.json` change.
 
   **Step 2 — main phase PR**: After the new image digest is published, deliver
   all remaining code changes (nlohmann migration in `CitySimulation.cpp`,
@@ -299,6 +320,9 @@ MIT licence, cross-platform Linux/Windows, CMake target
   `gh api "/repos/microsoft/vcpkg/contents/ports/nlohmann-json?ref=<VCPKG_COMMIT_ID>"`.
   If the port is present, no baseline bump is needed for `msvc.yml`. (This
   mirrors the `irrlicht` port verification pattern used in prior baseline bumps.)
+  Since `msvc.yml` uses manifest mode with `vcpkg.json`, adding `nlohmann-json`
+  to `vcpkg.json` is sufficient — no changes to `msvc.yml` are needed provided
+  the port exists at the pinned baseline (confirmed by the `gh api` check above).
 
   (`ci.yml` itself contains no `container: image:` lines — the digest pins
   live exclusively in the reusable workflows above.)
@@ -334,7 +358,7 @@ MIT licence, cross-platform Linux/Windows, CMake target
 - [ ] Rewrite `serializeToJson` using the nlohmann API (`nlohmann::json j; j["key"] = value; … return j.dump(2);`), replacing the current hand-built string concatenation.
   (`serializeToJson` has no SonarCloud violations today but the manual string building
   is equally fragile — replacing both sides is the cleaner delta.)
-  - Note: the nlohmann `serializeToJson` rewrite MUST add `"was_powered"` and `"was_water_covered"` to the per-tile output alongside the existing `"alert_fired"` field — the hand-rolled serializer omits these two fields, making this a net-new addition that brings the serializer into compliance with `architecture/game-design/service-coverage.md` (Per-Tile Audio Transition Fields: "All three must be serialised in the save file to prevent spurious SFX re-fire on load"). Corresponding deserialization already uses `j.value("was_powered", true)` and `j.value("was_water_covered", true)` (backward-compatible defaults).
+  - Note: the nlohmann `serializeToJson` rewrite MUST add `"was_powered"` and `"was_water_covered"` to the per-tile output alongside the existing `"alert_fired"` field — the hand-rolled serializer omits these two fields, making this a net-new addition that brings the serializer into compliance with `architecture/game-design/service-coverage.md` (Per-Tile Audio Transition Fields: "All three must be serialised in the save file to prevent spurious SFX re-fire on load"). These fields are written for **every tile** in the tiles array (not filtered by zone type), because `TileData` defines `wasPowered` and `wasWaterCovered` for all zone types in `Zoning.h`. Corresponding deserialization must use `j.value("was_powered", true)`, `j.value("was_water_covered", true)`, and `j.value("alert_fired", false)` (backward-compatible defaults — `alertFired` defaults to `false` per the Per-Tile Audio Transition Fields table in `architecture/game-design/service-coverage.md`, ensuring the first-alert SFX is not suppressed on tiles loaded from pre-Phase-10 saves).
 - [ ] Update `.devcontainer/Dockerfile` to ensure `nlohmann-json` is available in
   the dev container (it is installed via vcpkg during the container build, so no
   extra system package is needed — verify the container build still passes).
@@ -349,9 +373,11 @@ MIT licence, cross-platform Linux/Windows, CMake target
   - `tests/simulation/save_system_test.cpp`
   - `tests/simulation/save_system_integration_test.cpp`
 
-  Before starting, run
+  **Blocking prerequisite** — before starting ANY test file updates, run
   `grep -rn "serializeToJson\|deserializeFromJson" tests/` to discover any
-  additional callers not listed above — all must be reviewed.
+  additional callers not listed above. Every file discovered by this grep MUST
+  be reviewed and updated before the test update work proceeds; do not begin
+  modifying test files until the full caller set is known.
 
   The review must cover three categories of test changes:
 
