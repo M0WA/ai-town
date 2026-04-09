@@ -581,4 +581,46 @@ private:
                                                 float h00, float h10, float h01, float h11,
                                                 bool isEW);
 
+    // --- Phase 11q3 refactoring helpers (Section 2a–2f) ---
+
+    // 2a: showServiceCoverageOverlay() helpers.
+    // collectBFSCoverageTiles: BFS tile collection for PowerPlant coverage.
+    void collectBFSCoverageTiles(int tileX, int tileZ, int maxDepth,
+                                 int mapW, int mapH,
+                                 std::vector<irr::core::vector2di>& out);
+
+    // collectRadiusCoverageTiles: radius-based tile collection for Fire/Police/Water.
+    void collectRadiusCoverageTiles(int tileX, int tileZ, float radiusM,
+                                    int mapW, int mapH,
+                                    std::vector<irr::core::vector2di>& out);
+
+    // buildCoverageMesh: assembles an SMesh from collected tile positions and colour.
+    // Caller must call ->drop() on the returned SMesh* after addMeshSceneNode.
+    irr::scene::SMesh* buildCoverageMesh(const std::vector<irr::core::vector2di>& tiles,
+                                          irr::video::SColor color, float kTileSize);
+
+    // 2b: setZoneOverlay() helper.
+    // flushZoneOverlayBuffer: flush current buffer to mesh when index limit is reached.
+    void flushZoneOverlayBuffer(irr::scene::SMeshBuffer*& cur,
+                                irr::scene::SMesh* mesh, irr::u32& quadsInCur);
+
+    // 2c: pickTerrainTile() helper.
+    // ddaAdvance: advance one step in the DDA traversal.
+    // Returns false if the new cell is out of map bounds.
+    bool ddaAdvance(float& tMaxX, float& tMaxZ, float tDeltaX, float tDeltaZ,
+                    int& cx, int& cz, int dirX, int dirZ,
+                    int mapTilesX, int mapTilesZ) const;
+
+    // 2d: evictLODNodeRegistry() helper.
+    // evictOneLODNode: runs the eviction sequence on a single LODNode entry.
+    void evictOneLODNode(LODNode* lodNode);
+
+    // 2e: setCamera() helper.
+    // updateCameraFrustum: updates clip distances on the camera.
+    void updateCameraFrustum(const CameraParams& p);
+
+    // 2f: placeVehicle() helper.
+    // bindVehicleAtlasMaterials: binds atlas texture fallback to unbound material slots.
+    void bindVehicleAtlasMaterials(irr::scene::ISceneNode* node);
+
 };

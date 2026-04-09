@@ -67,4 +67,9 @@ private:
     bool m_rmbDragActive{false};  // true while RMB (button=1) is held down
     bool m_rmbMoved{false};       // true if mouse moved during current RMB press (drag vs click)
     bool m_mmbDragActive{false};  // true while MMB (button=2) is held down
+
+    // Phase 11q3 — extracted helpers for OnEvent (S3776 + S134)
+    bool handleGuiEvent(const irr::SEvent::SGUIEvent& guiEvt, InputEvent& out);
+    bool handleKeyboardEvent(const irr::SEvent::SKeyInput& key, InputEvent& out);
+    bool handleMouseEvent(const irr::SEvent::SMouseInput& mouse, InputEvent& out);
 };

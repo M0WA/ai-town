@@ -111,4 +111,17 @@ private:
                    float&             cullDist,
                    int&               atlasRow,
                    int&               atlasCol);
+
+    // --- Phase 11q3 refactoring helpers (Section 5a–5b) ---
+
+    // 5a: load() helper.
+    // resolveAtlasPath: determines the atlas texture path from the asset base path.
+    std::string resolveAtlasPath(const std::string& basePath) const;
+
+    // 5b: parseMeta() helpers (static — no member state needed).
+    // parseLodDistances: extracts lod_distances [a, b, c] from .meta content string.
+    static bool parseLodDistances(const std::string& content, float& lod0, float& lod1, float& cull);
+
+    // parseAtlasCell: extracts atlas_cell row/col from .meta content string.
+    static bool parseAtlasCell(const std::string& content, int& row, int& col);
 };

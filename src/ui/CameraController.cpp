@@ -32,6 +32,55 @@ void CameraController::resetOrbit() {
     m_zoomDistance = kDefaultZoomDistance;
 }
 
+// ---------------------------------------------------------------------------
+// OnInputEvent — extracted helpers (Phase 11q3)
+// ---------------------------------------------------------------------------
+
+void CameraController::applyMouseDrag(float dx, float dy) {
+    if (m_rmbDragActive) {
+        // RMB drag: rotate (yaw and pitch)
+        // UX-1: drag-delta MUST use physX/physY, NOT virtual x/y.
+        m_yaw   += dx * kRotateSpeed;
+        m_pitch -= dy * kRotateSpeed;
+        // Clamp pitch to [-70, -20] INCLUSIVE (std::clamp semantics)
+        m_pitch = std::clamp(m_pitch, -70.0f, -20.0f);
+    }
+
+    if (m_mmbDragActive) {
+        // MMB drag: pan (move target in world XZ plane)
+        // UX-1: drag-delta MUST use physX/physY, NOT virtual x/y.
+        // Pan speed scales with zoom distance: panSpeed = kBasePanSpeed * (zoom / defaultZoom)
+        const float panSpeed = kBasePanSpeed * (m_zoomDistance / kDefaultZoomDistance)
+                             * m_sensitivityMultiplier;
+        // Negate dx for camera-right to world-right mapping
+        // Negate dy for screen-down to world-back mapping
+        const float yaw_rad = m_yaw * static_cast<float>(M_PI / 180.0);
+        // Right vector in XZ plane: perpendicular to forward at yaw
+        const float rightX =  std::cos(yaw_rad);
+        const float rightZ = -std::sin(yaw_rad);
+        // Forward vector in XZ plane
+        const float fwdX   = std::sin(yaw_rad);
+        const float fwdZ   = std::cos(yaw_rad);
+
+        const float scale = panSpeed * 0.01f; // tune: pixels to world units
+        m_targetX -= dx * rightX * scale;
+        m_targetZ -= dx * rightZ * scale;
+        m_targetX += dy * fwdX  * scale;
+        m_targetZ += dy * fwdZ  * scale;
+    }
+}
+
+void CameraController::applyScrollZoom(float delta) {
+    // Scroll wheel controls zoom distance ONLY — NOT pitch angle.
+    // (Pitch clamp tests use RMB vertical drag, not scroll wheel.)
+    m_zoomDistance -= delta * kZoomSpeed;
+    m_zoomDistance = std::clamp(m_zoomDistance, kMinZoomDistance, kMaxZoomDistance);
+}
+
+// ---------------------------------------------------------------------------
+// OnInputEvent
+// ---------------------------------------------------------------------------
+
 bool CameraController::OnInputEvent(const InputEvent& event) {
     using Type = InputEvent::Type;
 
@@ -78,42 +127,13 @@ bool CameraController::OnInputEvent(const InputEvent& event) {
 
     case Type::MouseMove:
         {
-            const int dx = event.physX - m_prevPhysX;
-            const int dy = event.physY - m_prevPhysY;
+            const float dx = static_cast<float>(event.physX - m_prevPhysX);
+            const float dy = static_cast<float>(event.physY - m_prevPhysY);
             bool consumed = false;
 
-            if (m_rmbDragActive) {
-                // RMB drag: rotate (yaw and pitch)
-                // UX-1: drag-delta MUST use physX/physY, NOT virtual x/y.
-                m_yaw   += static_cast<float>(dx) * kRotateSpeed;
-                m_pitch -= static_cast<float>(dy) * kRotateSpeed;
-                // Clamp pitch to [-70, -20] INCLUSIVE (std::clamp semantics)
-                m_pitch = std::clamp(m_pitch, -70.0f, -20.0f);
-                consumed = true;
-            }
-
-            if (m_mmbDragActive) {
-                // MMB drag: pan (move target in world XZ plane)
-                // UX-1: drag-delta MUST use physX/physY, NOT virtual x/y.
-                // Pan speed scales with zoom distance: panSpeed = kBasePanSpeed * (zoom / defaultZoom)
-                const float panSpeed = kBasePanSpeed * (m_zoomDistance / kDefaultZoomDistance)
-                                     * m_sensitivityMultiplier;
-                // Negate dx for camera-right to world-right mapping
-                // Negate dy for screen-down to world-back mapping
-                const float yaw_rad = m_yaw * static_cast<float>(M_PI / 180.0);
-                // Right vector in XZ plane: perpendicular to forward at yaw
-                const float rightX =  std::cos(yaw_rad);
-                const float rightZ = -std::sin(yaw_rad);
-                // Forward vector in XZ plane
-                const float fwdX   = std::sin(yaw_rad);
-                const float fwdZ   = std::cos(yaw_rad);
-
-                const float scale = panSpeed * 0.01f; // tune: pixels to world units
-                m_targetX -= static_cast<float>(dx) * rightX * scale;
-                m_targetZ -= static_cast<float>(dx) * rightZ * scale;
-                m_targetX += static_cast<float>(dy) * fwdX  * scale;
-                m_targetZ += static_cast<float>(dy) * fwdZ  * scale;
-                consumed = true;
+            if (m_rmbDragActive || m_mmbDragActive) {
+                applyMouseDrag(dx, dy);
+                consumed = (m_rmbDragActive || m_mmbDragActive);
             }
 
             // Edge scroll (virtual coordinate space — InputEvent.x)
@@ -155,10 +175,7 @@ bool CameraController::OnInputEvent(const InputEvent& event) {
         }
 
     case Type::MouseWheel:
-        // Scroll wheel controls zoom distance ONLY — NOT pitch angle.
-        // (Pitch clamp tests use RMB vertical drag, not scroll wheel.)
-        m_zoomDistance -= event.wheelDelta * kZoomSpeed;
-        m_zoomDistance = std::clamp(m_zoomDistance, kMinZoomDistance, kMaxZoomDistance);
+        applyScrollZoom(event.wheelDelta);
         return true;
 
     case Type::KeyDown:

@@ -85,4 +85,14 @@ private:
                             IRenderer* renderer, IAudioSystem* audio,
                             int& sfxCallsThisTick,
                             std::queue<SimulationNotification>& notifications);
+
+    // Phase 11q3 — extracted helpers for applyDensityUpgrade (S3776)
+    bool validateUpgradeFootprint(Zoning& zoning, int tx, int tz,
+                                  DensityTier targetDensity, int newN) const;
+    void applyUpgradeFootprint(Zoning& zoning, int tx, int tz,
+                               ZoneType zone, DensityTier targetDensity, int newN);
+    void notifyUpgradeResult(int tx, int tz, ZoneType zone, DensityTier targetDensity,
+                             IRenderer* renderer, IAudioSystem* audio,
+                             std::queue<SimulationNotification>& notifications,
+                             int& sfxCalls);
 };

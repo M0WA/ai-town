@@ -279,26 +279,21 @@ QueryResult CitySimulation::queryTile(int tileX, int tileZ) const {
 }
 
 // ---------------------------------------------------------------------------
-// placeZone
+// placeZone — extracted helpers (Phase 11q3)
 // ---------------------------------------------------------------------------
 
-void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier tier,
-                               int earthworksCostOverride) {
-    const int N = Zoning::footprintSize(tier);
-
+bool CitySimulation::checkZoneFootprintClear(int tileX, int tileZ, int N) const {
     // Multi-tile footprint guard — check all N*N tiles empty and in-bounds.
     for (int dx = 0; dx < N; ++dx) {
         for (int dz = 0; dz < N; ++dz) {
             int fx = tileX + dx, fz = tileZ + dz;
             if (fx < 0 || fz < 0) {
-                m_notifications.push({NotificationType::PlacementBlocked, tileX, tileZ, 0});
-                return;
+                return false;
             }
             int64_t fkey = Zoning::tileKey(fx, fz);
             auto fit = m_zoning.m_tiles.find(fkey);
             if (fit != m_zoning.m_tiles.end() && (fit->second.isRoad || fit->second.isZoned)) {
-                m_notifications.push({NotificationType::PlacementBlocked, tileX, tileZ, 0});
-                return;
+                return false;
             }
         }
     }
@@ -311,8 +306,7 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
                 for (int dx = 0; dx < N; ++dx) {
                     for (int dz = 0; dz < N; ++dz) {
                         if (tileX + dx == sx && tileZ + dz == sz) {
-                            m_notifications.push({NotificationType::PlacementBlocked, tileX, tileZ, 0});
-                            return;
+                            return false;
                         }
                     }
                 }
@@ -320,28 +314,10 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
         }
     }
 
-    // Road proximity check.
-    if (Zoning::nearestRoadDistance(m_zoning.m_tiles, tileX, tileZ, N) > 3) {
-        m_notifications.push({NotificationType::PlacementBlocked, tileX, tileZ, 0});
-        return;
-    }
+    return true;
+}
 
-    int64_t key = Zoning::tileKey(tileX, tileZ);
-
-    // Record previous state for undo.
-    UndoAction undoAction;
-    undoAction.actionType = UndoAction::Type::PlaceZone;
-    undoAction.tileX = tileX;
-    undoAction.tileZ = tileZ;
-    {
-        auto it = m_zoning.m_tiles.find(key);
-        undoAction.previousState = (it != m_zoning.m_tiles.end()) ? it->second : TileData{};
-    }
-    undoAction.costPaid = static_cast<int64_t>(earthworksCostOverride);
-
-    // Deduct earthworks cost.
-    m_economy.m_treasury -= static_cast<int64_t>(earthworksCostOverride);
-
+void CitySimulation::applyZoneFootprint(int tileX, int tileZ, ZoneType type, DensityTier tier, int N) {
     // Sample origin tile height BEFORE any setTileHeight calls.
     const float flatHeight = m_terrain ? m_terrain->getHeightAt(tileX, tileZ) : 0.0f;
 
@@ -388,6 +364,44 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
         }
         m_terrain->flushTerrainRebuilds();
     }
+}
+
+// ---------------------------------------------------------------------------
+// placeZone
+// ---------------------------------------------------------------------------
+
+void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier tier,
+                               int earthworksCostOverride) {
+    const int N = Zoning::footprintSize(tier);
+
+    if (!checkZoneFootprintClear(tileX, tileZ, N)) {
+        m_notifications.push({NotificationType::PlacementBlocked, tileX, tileZ, 0});
+        return;
+    }
+
+    // Road proximity check.
+    if (Zoning::nearestRoadDistance(m_zoning.m_tiles, tileX, tileZ, N) > 3) {
+        m_notifications.push({NotificationType::PlacementBlocked, tileX, tileZ, 0});
+        return;
+    }
+
+    int64_t key = Zoning::tileKey(tileX, tileZ);
+
+    // Record previous state for undo.
+    UndoAction undoAction;
+    undoAction.actionType = UndoAction::Type::PlaceZone;
+    undoAction.tileX = tileX;
+    undoAction.tileZ = tileZ;
+    {
+        auto it = m_zoning.m_tiles.find(key);
+        undoAction.previousState = (it != m_zoning.m_tiles.end()) ? it->second : TileData{};
+    }
+    undoAction.costPaid = static_cast<int64_t>(earthworksCostOverride);
+
+    // Deduct earthworks cost.
+    m_economy.m_treasury -= static_cast<int64_t>(earthworksCostOverride);
+
+    applyZoneFootprint(tileX, tileZ, type, tier, N);
 
     // Play audio.
     if (m_audio && m_clock) {
@@ -502,6 +516,30 @@ void CitySimulation::placeRoad(int tileX, int tileZ, int earthworksCostOverride)
 }
 
 // ---------------------------------------------------------------------------
+// demolishTile — extracted helper (Phase 11q3)
+// ---------------------------------------------------------------------------
+
+void CitySimulation::removeTileFromScene(int tileX, int tileZ, bool wasRoad,
+                                         bool hadServiceBuilding, const TileData& prev) {
+    if (m_renderer) {
+        if (wasRoad) {
+            m_renderer->removeRoadMesh(tileX, tileZ);
+        } else if (hadServiceBuilding) {
+            m_renderer->removeServiceBuildingMesh(tileX, tileZ);
+        } else if (prev.isZoned) {
+            m_renderer->removeBuildingMesh(tileX, tileZ);
+        }
+    }
+
+    m_zoning.m_serviceBuildings.erase(
+        std::remove_if(m_zoning.m_serviceBuildings.begin(), m_zoning.m_serviceBuildings.end(),
+            [tileX, tileZ](const ServiceBuilding& sb) {
+                return sb.x == tileX && sb.z == tileZ;
+            }),
+        m_zoning.m_serviceBuildings.end());
+}
+
+// ---------------------------------------------------------------------------
 // demolishTile
 // ---------------------------------------------------------------------------
 
@@ -569,24 +607,30 @@ void CitySimulation::demolishTile(int tileX, int tileZ) {
             SoundPriority::NORMAL, 1.0f);
     }
 
-    if (m_renderer) {
-        if (wasRoad) {
-            m_renderer->removeRoadMesh(tileX, tileZ);
-        } else if (hadServiceBuilding) {
-            m_renderer->removeServiceBuildingMesh(tileX, tileZ);
-        } else if (undoAction.previousState.isZoned) {
-            m_renderer->removeBuildingMesh(tileX, tileZ);
-        }
-    }
-
-    m_zoning.m_serviceBuildings.erase(
-        std::remove_if(m_zoning.m_serviceBuildings.begin(), m_zoning.m_serviceBuildings.end(),
-            [tileX, tileZ](const ServiceBuilding& sb) {
-                return sb.x == tileX && sb.z == tileZ;
-            }),
-        m_zoning.m_serviceBuildings.end());
+    removeTileFromScene(tileX, tileZ, wasRoad, hadServiceBuilding, undoAction.previousState);
 
     recordUndoAction(undoAction);
+}
+
+// ---------------------------------------------------------------------------
+// placeServiceBuilding — extracted helper (Phase 11q3)
+// ---------------------------------------------------------------------------
+
+bool CitySimulation::checkServiceFootprintClear(int tileX, int tileZ, int sN) const {
+    for (int dx = 0; dx < sN; ++dx) {
+        for (int dz = 0; dz < sN; ++dz) {
+            int fx = tileX + dx, fz = tileZ + dz;
+            const TileData* ft = m_zoning.findTile(fx, fz);
+            if (ft) return false;
+            for (const ServiceBuilding& sb : m_zoning.m_serviceBuildings) {
+                if (fx >= sb.x && fx < sb.x + sN &&
+                    fz >= sb.z && fz < sb.z + sN) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -596,25 +640,13 @@ void CitySimulation::demolishTile(int tileX, int tileZ) {
 void CitySimulation::placeServiceBuilding(int tileX, int tileZ,
                                           ServiceBuildingType type,
                                           int earthworksCostOverride) {
-    {
-        const int sN = Zoning::serviceFootprintSize();
-        for (int dx = 0; dx < sN; ++dx) {
-            for (int dz = 0; dz < sN; ++dz) {
-                int fx = tileX + dx, fz = tileZ + dz;
-                const TileData* ft = m_zoning.findTile(fx, fz);
-                if (ft) return;
-                for (const ServiceBuilding& sb : m_zoning.m_serviceBuildings) {
-                    if (fx >= sb.x && fx < sb.x + sN &&
-                        fz >= sb.z && fz < sb.z + sN) {
-                        return;
-                    }
-                }
-            }
-        }
+    const int sN = Zoning::serviceFootprintSize();
+
+    if (!checkServiceFootprintClear(tileX, tileZ, sN)) {
+        return;
     }
 
     {
-        const int sN = Zoning::serviceFootprintSize();
         bool hasRoadAdjacent = false;
         const int dirs[4][2] = {{0,-1},{0,1},{-1,0},{1,0}};
         for (int dx = 0; dx < sN && !hasRoadAdjacent; ++dx) {
@@ -840,6 +872,126 @@ std::string CitySimulation::serializeToJson() const {
 }
 
 // ---------------------------------------------------------------------------
+// deserializeFromJson — extracted parse helpers (Phase 11q3)
+// ---------------------------------------------------------------------------
+
+bool CitySimulation::parseEconomySection(const nlohmann::json& j, int64_t& treasury,
+                                         float taxRates[3], std::string& err) {
+    try { treasury = j.at("treasury_balance").get<int64_t>(); }
+    catch (...) { err = "missing treasury_balance"; return false; }
+
+    try {
+        const auto& taxArr = j.at("tax_rates");
+        for (int i = 0; i < 3; ++i)
+            taxRates[i] = taxArr.at(i).get<float>();
+    } catch (...) {
+        err = "missing tax_rates";
+        return false;
+    }
+
+    try { j.at("outstanding_debt"); }
+    catch (...) { err = "missing outstanding_debt"; return false; }
+
+    return true;
+}
+
+bool CitySimulation::parseZoningSection(const nlohmann::json& j, std::string& err) {
+    try {
+        for (const auto& tobj : j.at("tiles")) {
+            int tileX = tobj.at("x").get<int>();
+            int tileZ = tobj.at("z").get<int>();
+            TileData td{};
+            int zoneVal = tobj.at("zone").get<int>();
+            if (zoneVal < 0 || zoneVal > 2) { err = "invalid zone value"; return false; }
+            td.zone = static_cast<ZoneType>(zoneVal);
+            int tierVal = tobj.at("tier").get<int>();
+            if (tierVal < 0 || tierVal > 2) { err = "invalid tier value"; return false; }
+            td.density = static_cast<DensityTier>(tierVal);
+            td.isZoned = tobj.at("is_zoned").get<bool>();
+            td.isRoad  = tobj.at("is_road").get<bool>();
+            td.population = tobj.at("population").get<float>();
+            td.footprintOriginX   = tobj.value("fp_origin_x", -1);
+            td.footprintOriginZ   = tobj.value("fp_origin_z", -1);
+            td.isAbandoned        = tobj.value("is_abandoned", false);
+            td.underConstruction  = tobj.value("under_construction", false);
+            td.buildingVariantNum = tobj.value("variant_num", 0);
+            td.alertFired         = tobj.value("alert_fired", false);
+            td.wasPowered         = tobj.value("was_powered", true);
+            td.wasWaterCovered    = tobj.value("was_water_covered", true);
+            int64_t key = Zoning::tileKey(tileX, tileZ);
+            m_zoning.m_tiles[key] = td;
+            if (td.isRoad) ++m_zoning.m_roadTileCount;
+        }
+    } catch (...) {
+        if (err.empty()) err = "missing or invalid tiles";
+        return false;
+    }
+
+    try {
+        for (const auto& sobj : j.at("service_buildings")) {
+            ServiceBuilding sb{};
+            sb.x = sobj.at("x").get<int>();
+            sb.z = sobj.at("z").get<int>();
+            int typeVal = sobj.at("type").get<int>();
+            if (typeVal < 0 || typeVal > 3) { err = "invalid service building type"; return false; }
+            sb.type = static_cast<ServiceBuildingType>(typeVal);
+            sb.degraded = sobj.at("degraded").get<bool>();
+            m_zoning.m_serviceBuildings.push_back(sb);
+        }
+    } catch (...) {
+        if (err.empty()) err = "missing or invalid service_buildings";
+        return false;
+    }
+
+    return true;
+}
+
+bool CitySimulation::parseTrafficSection(const nlohmann::json& j, std::string& err) {
+    // V1 save format has no explicit traffic sub-object — speed_multiplier and
+    // scenario_state are parsed here as they affect simulation flow control.
+    int speedInt = j.value("speed_multiplier", 2);
+    switch (speedInt) {
+        case 0: m_timing.setSpeed(SpeedMultiplier::Paused); break;
+        case 1: m_timing.setSpeed(SpeedMultiplier::x1);     break;
+        case 2: m_timing.setSpeed(SpeedMultiplier::x3);     break;
+        case 3: m_timing.setSpeed(SpeedMultiplier::x10);    break;
+        default:
+            err = "invalid speed_multiplier value: " + std::to_string(speedInt);
+            return false;
+    }
+
+    try { m_timing.m_totalTicks = j.at("total_ticks").get<int>(); }
+    catch (...) { err = "missing total_ticks"; return false; }
+
+    try {
+        int month = j.at("month").get<int>();
+        if (month < 1 || month > 12) {
+            err = "month out of range: " + std::to_string(month);
+            return false;
+        }
+        m_timing.m_month = month;
+    } catch (...) {
+        if (err.empty()) err = "missing month";
+        return false;
+    }
+
+    try { m_timing.m_year = j.at("year").get<int>(); }
+    catch (...) { err = "missing year"; return false; }
+
+    try {
+        const auto& ss = j.at("scenario_state");
+        m_scenarioState.win_condition_progress = ss.at("win_condition_progress").get<float>();
+        m_scenarioState.elapsed_ticks = ss.at("elapsed_ticks").get<int>();
+        m_scenarioState.scenario_id = ss.at("scenario_id").get<std::string>();
+    } catch (...) {
+        err = "missing or invalid scenario_state";
+        return false;
+    }
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // deserializeFromJson
 // ---------------------------------------------------------------------------
 bool CitySimulation::deserializeFromJson(const std::string& json, std::string& errorOut) {
@@ -862,20 +1014,6 @@ bool CitySimulation::deserializeFromJson(const std::string& json, std::string& e
 
     int newMapTilesX = m_mapWidth;
     int newMapTilesZ = m_mapHeight;
-    int64_t newTreasury = 0;
-    float   newTaxRates[3] = {0.05f, 0.05f, 0.05f};
-    int     newOutstandingBondUses = 0;
-    int     newConsecutiveDeficitMonths = 0;
-    SpeedMultiplier newSpeed = SpeedMultiplier::x3;
-    bool    newMilestoneFired[5] = {};
-    std::array<int,9> newVariantCounters{};
-    std::vector<std::pair<int64_t, TileData>> newTiles;
-    std::vector<ServiceBuilding> newServiceBuildings;
-    DensityUnlockState newDensityUnlock{};
-    int     newTotalTicks = 0;
-    int     newMonth = 1;
-    int     newYear = 1;
-    ScenarioState newScenario{};
 
     try { newMapTilesX = j.at("map_tiles_x").get<int>(); }
     catch (...) { errorOut = "missing map_tiles_x"; return false; }
@@ -883,40 +1021,19 @@ bool CitySimulation::deserializeFromJson(const std::string& json, std::string& e
     try { newMapTilesZ = j.at("map_tiles_z").get<int>(); }
     catch (...) { errorOut = "missing map_tiles_z"; return false; }
 
-    try { newTreasury = j.at("treasury_balance").get<int64_t>(); }
-    catch (...) { errorOut = "missing treasury_balance"; return false; }
+    int64_t newTreasury = 0;
+    float   newTaxRates[3] = {0.05f, 0.05f, 0.05f};
+    if (!parseEconomySection(j, newTreasury, newTaxRates, errorOut)) return false;
 
-    try {
-        const auto& taxArr = j.at("tax_rates");
-        for (int i = 0; i < 3; ++i)
-            newTaxRates[i] = taxArr.at(i).get<float>();
-    } catch (...) {
-        errorOut = "missing tax_rates";
-        return false;
-    }
-
-    try { j.at("outstanding_debt"); }
-    catch (...) { errorOut = "missing outstanding_debt"; return false; }
-
+    int newOutstandingBondUses = 0;
     try { newOutstandingBondUses = j.at("outstanding_bond_uses").get<int>(); }
     catch (...) { errorOut = "missing outstanding_bond_uses"; return false; }
 
+    int newConsecutiveDeficitMonths = 0;
     try { newConsecutiveDeficitMonths = j.at("consecutive_deficit_months").get<int>(); }
     catch (...) { errorOut = "missing consecutive_deficit_months"; return false; }
 
-    {
-        int speedInt = j.value("speed_multiplier", 2);
-        switch (speedInt) {
-            case 0: newSpeed = SpeedMultiplier::Paused; break;
-            case 1: newSpeed = SpeedMultiplier::x1;     break;
-            case 2: newSpeed = SpeedMultiplier::x3;     break;
-            case 3: newSpeed = SpeedMultiplier::x10;    break;
-            default:
-                errorOut = "invalid speed_multiplier value: " + std::to_string(speedInt);
-                return false;
-        }
-    }
-
+    bool newMilestoneFired[5] = {};
     try {
         if (j.contains("population_milestone_fired")) {
             const auto& arr = j["population_milestone_fired"];
@@ -928,6 +1045,7 @@ bool CitySimulation::deserializeFromJson(const std::string& json, std::string& e
         return false;
     }
 
+    std::array<int,9> newVariantCounters{};
     try {
         if (j.contains("building_variant_counters")) {
             const auto& arr = j["building_variant_counters"];
@@ -939,51 +1057,7 @@ bool CitySimulation::deserializeFromJson(const std::string& json, std::string& e
         return false;
     }
 
-    try {
-        for (const auto& tobj : j.at("tiles")) {
-            int tileX = tobj.at("x").get<int>();
-            int tileZ = tobj.at("z").get<int>();
-            TileData td{};
-            int zoneVal = tobj.at("zone").get<int>();
-            if (zoneVal < 0 || zoneVal > 2) { errorOut = "invalid zone value"; return false; }
-            td.zone = static_cast<ZoneType>(zoneVal);
-            int tierVal = tobj.at("tier").get<int>();
-            if (tierVal < 0 || tierVal > 2) { errorOut = "invalid tier value"; return false; }
-            td.density = static_cast<DensityTier>(tierVal);
-            td.isZoned = tobj.at("is_zoned").get<bool>();
-            td.isRoad  = tobj.at("is_road").get<bool>();
-            td.population = tobj.at("population").get<float>();
-            td.footprintOriginX   = tobj.value("fp_origin_x", -1);
-            td.footprintOriginZ   = tobj.value("fp_origin_z", -1);
-            td.isAbandoned        = tobj.value("is_abandoned", false);
-            td.underConstruction  = tobj.value("under_construction", false);
-            td.buildingVariantNum = tobj.value("variant_num", 0);
-            td.alertFired         = tobj.value("alert_fired", false);
-            td.wasPowered         = tobj.value("was_powered", true);
-            td.wasWaterCovered    = tobj.value("was_water_covered", true);
-            newTiles.emplace_back(Zoning::tileKey(tileX, tileZ), td);
-        }
-    } catch (...) {
-        if (errorOut.empty()) errorOut = "missing or invalid tiles";
-        return false;
-    }
-
-    try {
-        for (const auto& sobj : j.at("service_buildings")) {
-            ServiceBuilding sb{};
-            sb.x = sobj.at("x").get<int>();
-            sb.z = sobj.at("z").get<int>();
-            int typeVal = sobj.at("type").get<int>();
-            if (typeVal < 0 || typeVal > 3) { errorOut = "invalid service building type"; return false; }
-            sb.type = static_cast<ServiceBuildingType>(typeVal);
-            sb.degraded = sobj.at("degraded").get<bool>();
-            newServiceBuildings.push_back(sb);
-        }
-    } catch (...) {
-        if (errorOut.empty()) errorOut = "missing or invalid service_buildings";
-        return false;
-    }
-
+    DensityUnlockState newDensityUnlock{};
     try {
         if (j.contains("density_unlock_flags")) {
             const auto& arr = j["density_unlock_flags"];
@@ -1006,33 +1080,6 @@ bool CitySimulation::deserializeFromJson(const std::string& json, std::string& e
         return false;
     }
 
-    try { newTotalTicks = j.at("total_ticks").get<int>(); }
-    catch (...) { errorOut = "missing total_ticks"; return false; }
-
-    try {
-        newMonth = j.at("month").get<int>();
-        if (newMonth < 1 || newMonth > 12) {
-            errorOut = "month out of range: " + std::to_string(newMonth);
-            return false;
-        }
-    } catch (...) {
-        if (errorOut.empty()) errorOut = "missing month";
-        return false;
-    }
-
-    try { newYear = j.at("year").get<int>(); }
-    catch (...) { errorOut = "missing year"; return false; }
-
-    try {
-        const auto& ss = j.at("scenario_state");
-        newScenario.win_condition_progress = ss.at("win_condition_progress").get<float>();
-        newScenario.elapsed_ticks = ss.at("elapsed_ticks").get<int>();
-        newScenario.scenario_id = ss.at("scenario_id").get<std::string>();
-    } catch (...) {
-        errorOut = "missing or invalid scenario_state";
-        return false;
-    }
-
     // ---- Atomically apply the deserialized state ----
     m_mapWidth               = newMapTilesX;
     m_mapHeight              = newMapTilesZ;
@@ -1042,23 +1089,17 @@ bool CitySimulation::deserializeFromJson(const std::string& json, std::string& e
     m_economy.m_taxRates[2]  = newTaxRates[2];
     m_economy.m_outstandingBondUses = newOutstandingBondUses;
     m_population.m_consecutiveDeficitMonths = newConsecutiveDeficitMonths;
-    m_timing.setSpeed(newSpeed);
     for (int i = 0; i < 5; ++i) m_population.m_milestoneFired[i] = newMilestoneFired[i];
     m_zoning.m_buildingVariantCounters = newVariantCounters;
 
     m_zoning.m_tiles.clear();
     m_zoning.m_roadTileCount = 0;
-    for (auto& [k, td] : newTiles) {
-        m_zoning.m_tiles[k] = td;
-        if (td.isRoad) ++m_zoning.m_roadTileCount;
-    }
+    m_zoning.m_serviceBuildings.clear();
+    if (!parseZoningSection(j, errorOut)) return false;
 
-    m_zoning.m_serviceBuildings = std::move(newServiceBuildings);
+    if (!parseTrafficSection(j, errorOut)) return false;
+
     m_population.m_densityUnlockState = newDensityUnlock;
-    m_timing.m_totalTicks     = newTotalTicks;
-    m_timing.m_month          = newMonth;
-    m_timing.m_year           = newYear;
-    m_scenarioState           = std::move(newScenario);
 
     m_economy.m_loans.clear();
     m_economy.m_loanCooldownTicks = 0;

@@ -277,54 +277,17 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
     file->drop();
 
     // ----- Parse DDS header -----
-    uint32_t magic = 0;
-    memcpy(&magic, fileData.data(), sizeof(uint32_t));
-    if (magic != kDDS_MAGIC) {
-        std::string magicMsg = "TextureCache::loadSRGB: invalid DDS magic in ";
-        magicMsg += effectivePath;
+    uint32_t width = 0, height = 0, mipCount = 0, fourCC = 0;
+    std::string headerError;
+    if (!parseDDSHeader(fileData, fileSize, width, height, mipCount, fourCC, headerError)) {
+        std::string msg = headerError + effectivePath;
         if (m_logger) {
-            m_logger->log(magicMsg.c_str(), irr::ELL_ERROR);
+            m_logger->log(msg.c_str(), irr::ELL_ERROR);
         } else {
-            fprintf(stderr, "[TextureCache ERROR] %s\n", magicMsg.c_str());
+            fprintf(stderr, "[TextureCache ERROR] %s\n", msg.c_str());
         }
         return GLuint{0};
     }
-
-    DDSHeader header;
-    memcpy(&header, fileData.data() + sizeof(uint32_t), sizeof(DDSHeader));
-
-    uint32_t width     = header.dwWidth;
-    uint32_t height    = header.dwHeight;
-    uint32_t mipCount  = (header.dwMipMapCount > 0) ? header.dwMipMapCount : 1;
-    uint32_t fourCC    = header.ddspf.dwFourCC;
-
-    // Validate FourCC matches expected format.
-    if (fourCC != kFOURCC_DXT1 && fourCC != kFOURCC_DXT5) {
-        char buf[256];
-        std::snprintf(buf, sizeof(buf),
-            "TextureCache::loadSRGB: unsupported DDS format (fourCC 0x%08X) in %s",
-            fourCC, effectivePath.c_str());
-        if (m_logger) {
-            m_logger->log(buf, irr::ELL_ERROR);
-        } else {
-            fprintf(stderr, "[TextureCache ERROR] %s\n", buf);
-        }
-        return GLuint{0};
-    }
-
-    // ----- Determine internal sRGB GL format from actual DDS FourCC -----
-    // Derive from the file's own fourCC — NOT from the path suffix.
-    // Path-suffix detection was incorrect for DXT5 textures that don't end in _billboard
-    // (e.g., road_asphalt_tileable.dds which is DXT5 but not a billboard).
-    // Using the path suffix would upload DXT5 data with a DXT1 internal format, causing
-    // GL_INVALID_OPERATION or garbled output.
-    //
-    // Mapping:
-    //   kFOURCC_DXT1 → GL_COMPRESSED_SRGB_S3TC_DXT1_EXT  (opaque, 4 bpp)
-    //   kFOURCC_DXT5 → GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT  (alpha, 8 bpp)
-    GLenum internalFormat = (fourCC == kFOURCC_DXT5)
-                                ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
-                                : GL_COMPRESSED_SRGB_S3TC_DXT1_EXT;
 
     // Clamp mip chain to maxMipLevel + 1.
     if (mipCount > static_cast<uint32_t>(maxMipLevel + 1)) {
@@ -332,6 +295,84 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
     }
 
     // ----- Upload texture via raw GL -----
+    GLuint texId = uploadDXTCompressed(fileData, fileSize, width, height,
+                                       mipCount, fourCC, maxMipLevel, isBillboard);
+
+    // ----- Track in sRGB pool -----
+    SRGBEntry entry;
+    entry.glHandle             = texId;
+    entry.ref_count            = 1;
+    entry.lastAccessTimestamp  = ++m_accessCounter;
+    entry.vramBytes            = estimateDXTVRAM(width, height, fourCC);
+    m_srgbTextures[effectivePath] = entry;
+
+    return texId;
+}
+
+// ---------------------------------------------------------------------------
+// parseDDSHeader — Phase 11q3 helper (Section 7a).
+// Validates DDS magic and header, extracts width/height/mipCount/fourCC.
+// On failure, populates `error` with a diagnostic prefix (caller appends path).
+// ---------------------------------------------------------------------------
+bool TextureCache::parseDDSHeader(const std::vector<uint8_t>& fileData, long fileSize,
+                                   uint32_t& width, uint32_t& height,
+                                   uint32_t& mipCount, uint32_t& fourCC,
+                                   std::string& error) {
+    // Validate DDS magic ("DDS ").
+    uint32_t magic = 0;
+    memcpy(&magic, fileData.data(), sizeof(uint32_t));
+    if (magic != kDDS_MAGIC) {
+        error = "TextureCache::loadSRGB: invalid DDS magic in ";
+        return false;
+    }
+
+    // Read the DDS header (124 bytes after the 4-byte magic).
+    DDSHeader header;
+    memcpy(&header, fileData.data() + sizeof(uint32_t), sizeof(DDSHeader));
+
+    width    = header.dwWidth;
+    height   = header.dwHeight;
+    mipCount = (header.dwMipMapCount > 0) ? header.dwMipMapCount : 1;
+    fourCC   = header.ddspf.dwFourCC;
+
+    // Validate FourCC — only DXT1 and DXT5 are supported.
+    if (fourCC != kFOURCC_DXT1 && fourCC != kFOURCC_DXT5) {
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+            "TextureCache::loadSRGB: unsupported DDS format (fourCC 0x%08X) in ",
+            fourCC);
+        error = buf;
+        return false;
+    }
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// uploadDXTCompressed — Phase 11q3 helper (Section 7a).
+// Performs the raw-GL glCompressedTexImage2D mip-level upload loop.
+// Returns the GLuint texture handle (0 is never returned in practice — glGenTextures
+// always succeeds if a valid GL context exists, which is guaranteed by the EDT_NULL
+// guard in loadSRGB before this function is reached).
+// ---------------------------------------------------------------------------
+GLuint TextureCache::uploadDXTCompressed(const std::vector<uint8_t>& fileData, long fileSize,
+                                          uint32_t width, uint32_t height,
+                                          uint32_t mipCount, uint32_t fourCC,
+                                          int maxMipLevel, bool isBillboard) {
+    // Determine internal sRGB GL format from actual DDS FourCC.
+    // Derive from the file's own fourCC — NOT from the path suffix.
+    // Path-suffix detection was incorrect for DXT5 textures that don't end in _billboard
+    // (e.g., road_asphalt_tileable.dds which is DXT5 but not a billboard).
+    // Using the path suffix would upload DXT5 data with a DXT1 internal format, causing
+    // GL_INVALID_OPERATION or garbled output.
+    //
+    // Mapping:
+    //   kFOURCC_DXT1 -> GL_COMPRESSED_SRGB_S3TC_DXT1_EXT  (opaque, 4 bpp)
+    //   kFOURCC_DXT5 -> GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT  (alpha, 8 bpp)
+    GLenum internalFormat = (fourCC == kFOURCC_DXT5)
+                                ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
+                                : GL_COMPRESSED_SRGB_S3TC_DXT1_EXT;
+
     GLuint texId = 0;
     glGenTextures(1, &texId);
     glBindTexture(GL_TEXTURE_2D, texId);
@@ -341,21 +382,21 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     // GL_TEXTURE_MAX_LEVEL dispatch per architecture/graphics-architecture/texture-cache.md
-    // §GL_TEXTURE_MAX_LEVEL Dispatch Table:
-    //   buildings_atlas_d.dds (primary, 4096×4096) → 4  (5 mip levels: 0–4)
-    //   buildings_atlas_d_2k.dds (fallback, 2048×2048) → 3  (4 mip levels: 0–3)
-    //   _billboard and all other _d textures → 3  (4-level mip chain mandatory)
+    // GL_TEXTURE_MAX_LEVEL Dispatch Table:
+    //   buildings_atlas_d.dds (primary, 4096x4096) -> 4  (5 mip levels: 0-4)
+    //   buildings_atlas_d_2k.dds (fallback, 2048x2048) -> 3  (4 mip levels: 0-3)
+    //   _billboard and all other _d textures -> 3  (4-level mip chain mandatory)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, maxMipLevel);
 
     // Wrap mode:
-    //   _billboard → GL_CLAMP_TO_EDGE (prevents ghost-frame artifacts at 1×8 strip boundary)
-    //   others     → GL_REPEAT (default road markings, building facade)
+    //   _billboard -> GL_CLAMP_TO_EDGE (prevents ghost-frame artifacts at 1x8 strip boundary)
+    //   others     -> GL_REPEAT (default road markings, building facade)
     if (isBillboard) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
 
-    // Anisotropy (8×) — apply if GL_EXT_texture_filter_anisotropic is available.
+    // Anisotropy (8x) — apply if GL_EXT_texture_filter_anisotropic is available.
     if (glewIsExtensionSupported("GL_EXT_texture_filter_anisotropic")) {
         GLfloat maxAniso = 1.0f;
         glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAniso);
@@ -365,7 +406,7 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
 
     // Upload each mip level.
     // DDS data starts at offset: sizeof(magic) + sizeof(DDSHeader) = 4 + 124 = 128 bytes.
-    // VRAM tracking uses estimateDXTVRAM() (width × height × bpp × 1.33 mip overhead),
+    // VRAM tracking uses estimateDXTVRAM() (width x height x bpp x 1.33 mip overhead),
     // not a per-mip accumulator — the accumulator was removed (A-15).
     size_t dataOffset = sizeof(uint32_t) + sizeof(DDSHeader);
     uint32_t mipW = width;
@@ -377,8 +418,8 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
         if (dataOffset + mipDataSize > static_cast<size_t>(fileSize)) {
             char buf[256];
             std::snprintf(buf, sizeof(buf),
-                "TextureCache::loadSRGB: DDS data truncated at mip %u in %s",
-                mip, effectivePath.c_str());
+                "TextureCache: DDS data truncated at mip %u (%ux%u)",
+                mip, mipW, mipH);
             if (m_logger) {
                 m_logger->log(buf, irr::ELL_WARNING);
             } else {
@@ -402,14 +443,6 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
     }
 
     glBindTexture(GL_TEXTURE_2D, 0);
-
-    // ----- Track in sRGB pool -----
-    SRGBEntry entry;
-    entry.glHandle             = texId;
-    entry.ref_count            = 1;
-    entry.lastAccessTimestamp  = ++m_accessCounter;
-    entry.vramBytes            = estimateDXTVRAM(width, height, fourCC);
-    m_srgbTextures[effectivePath] = entry;
 
     return texId;
 }

@@ -18,6 +18,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include <cstdint>
 
 // GL types — needed for GLuint and GLenum in method signatures.
@@ -229,4 +230,21 @@ private:
 
     // Reverse lookup: ITexture* → path string for releaseLinear(ITexture*).
     std::unordered_map<irr::video::ITexture*, std::string> m_linearTexturesByPtr;
+
+    // --- Phase 11q3 refactoring helpers (Section 7a) ---
+
+    // parseDDSHeader: validates magic + header fields from raw DDS file data.
+    // On success, populates width/height/mipCount/fourCC and returns true.
+    // On failure, populates error with a diagnostic message and returns false.
+    bool parseDDSHeader(const std::vector<uint8_t>& fileData, long fileSize,
+                        uint32_t& width, uint32_t& height,
+                        uint32_t& mipCount, uint32_t& fourCC,
+                        std::string& error);
+
+    // uploadDXTCompressed: performs the raw-GL glCompressedTexImage2D mip-level upload loop.
+    // Returns the GLuint texture handle (0 on failure).
+    GLuint uploadDXTCompressed(const std::vector<uint8_t>& fileData, long fileSize,
+                               uint32_t width, uint32_t height,
+                               uint32_t mipCount, uint32_t fourCC,
+                               int maxMipLevel, bool isBillboard);
 };

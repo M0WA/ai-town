@@ -141,4 +141,10 @@ private:
     void  tryDegradeService(ServiceBuilding& sb, ISimulationRNG& rng,
                             IAudioSystem* audio,
                             std::queue<SimulationNotification>& notifications);
+
+    // Phase 11q3 — extracted per-tile desirability scoring from applyDesirabilityScores (S3776 + S134)
+    float computeTileDesirability(TileData& tile, int tileX, int tileZ,
+                                 bool hasFireStation, bool hasPolice,
+                                 bool hasWaterTower, bool hasPowerPlant,
+                                 IAudioSystem* audio);
 };
