@@ -240,6 +240,86 @@ Population::scanUnlockCandidates(const Zoning& zoning, ZoneType targetZone,
     return candidates;
 }
 
+// ---------------------------------------------------------------------------
+// applyDensityUpgrade — extracted helpers (Phase 11q3)
+// ---------------------------------------------------------------------------
+
+bool Population::validateUpgradeFootprint(Zoning& zoning, int tx, int tz,
+                                          DensityTier targetDensity, int newN) const {
+    int64_t candKey = Zoning::tileKey(tx, tz);
+    bool hasBlocker = false;
+
+    for (int dx = 0; dx < newN && !hasBlocker; ++dx) {
+        for (int dz = 0; dz < newN && !hasBlocker; ++dz) {
+            int fx = tx + dx, fz = tz + dz;
+            if (fx < 0 || fz < 0) { hasBlocker = true; break; }
+            int64_t fkey = Zoning::tileKey(fx, fz);
+            if (fkey == candKey) continue;
+
+            auto fit = zoning.m_tiles.find(fkey);
+            if (fit == zoning.m_tiles.end()) { hasBlocker = true; break; }
+
+            const TileData& ft = fit->second;
+            if (ft.isRoad) { hasBlocker = true; break; }
+        }
+    }
+
+    return !hasBlocker;
+}
+
+void Population::applyUpgradeFootprint(Zoning& zoning, int tx, int tz,
+                                       ZoneType zone, DensityTier targetDensity, int newN) {
+    int64_t candKey = Zoning::tileKey(tx, tz);
+
+    TileData& originTile = zoning.m_tiles[candKey];
+    originTile.isZoned    = true;
+    originTile.density    = targetDensity;
+    originTile.population = 0.0f;
+    originTile.footprintOriginX = -1;
+    originTile.footprintOriginZ = -1;
+
+    for (int dx = 0; dx < newN; ++dx) {
+        for (int dz = 0; dz < newN; ++dz) {
+            if (dx == 0 && dz == 0) continue;
+            int64_t fkey = Zoning::tileKey(tx + dx, tz + dz);
+            TileData& ftile = zoning.m_tiles[fkey];
+            ftile.isZoned    = true;
+            ftile.isRoad     = false;
+            ftile.zone       = zone;
+            ftile.density    = targetDensity;
+            ftile.population = 0.0f;
+            ftile.desirability = static_cast<float>(SimulationConstants::desirability_base_value);
+            ftile.isAbandoned  = false;
+            ftile.footprintOriginX = tx;
+            ftile.footprintOriginZ = tz;
+        }
+    }
+}
+
+void Population::notifyUpgradeResult(int tx, int tz, ZoneType zone, DensityTier targetDensity,
+                                     IRenderer* renderer, IAudioSystem* audio,
+                                     std::queue<SimulationNotification>& notifications,
+                                     int& sfxCalls) {
+    if (renderer) {
+        renderer->removeBuildingMesh(tx, tz);
+        // (Variant counter update and mesh placement are handled by the caller
+        //  via the outer-tile loop and the main placement block below.)
+    }
+
+    if (audio && sfxCalls < SimulationConstants::sfx_zone_upgrade_per_tick_cap) {
+        audio->playSound(SFX_ZONE_UPGRADE, SoundPriority::NORMAL, 1.0f);
+        ++sfxCalls;
+    }
+
+    (void)zone;
+    (void)targetDensity;
+    (void)notifications;
+}
+
+// ---------------------------------------------------------------------------
+// applyDensityUpgrade
+// ---------------------------------------------------------------------------
+
 bool Population::applyDensityUpgrade(Zoning& zoning, int tx, int tz, int64_t candKey,
                                       ZoneType targetZone, DensityTier targetDensity,
                                       DensityTier currentRequired, int& sfxCallsThisTick,
@@ -259,6 +339,13 @@ bool Population::applyDensityUpgrade(Zoning& zoning, int tx, int tz, int64_t can
         return false;
     }
 
+    // Check for hard blockers (roads, out-of-bounds, missing tiles).
+    if (!validateUpgradeFootprint(zoning, tx, tz, targetDensity, newN)) {
+        retryCount++;
+        return false;
+    }
+
+    // Check for soft blockers (zoned neighbours that can be demolished).
     bool hasBlocker = false;
     std::vector<DemoEntry> toDemo;
 
@@ -321,32 +408,13 @@ bool Population::applyDensityUpgrade(Zoning& zoning, int tx, int tz, int64_t can
 
     zoning.m_upgradeRetryCount.erase(candKey);
 
-    TileData& originTile = zoning.m_tiles[candKey];
-    originTile.isZoned    = true;
-    originTile.density    = targetDensity;
-    originTile.population = 0.0f;
-    originTile.footprintOriginX = -1;
-    originTile.footprintOriginZ = -1;
+    applyUpgradeFootprint(zoning, tx, tz, targetZone, targetDensity, newN);
 
-    for (int dx = 0; dx < newN; ++dx) {
-        for (int dz = 0; dz < newN; ++dz) {
-            if (dx == 0 && dz == 0) continue;
-            int64_t fkey = Zoning::tileKey(tx + dx, tz + dz);
-            TileData& ftile = zoning.m_tiles[fkey];
-            ftile.isZoned    = true;
-            ftile.isRoad     = false;
-            ftile.zone       = targetZone;
-            ftile.density    = targetDensity;
-            ftile.population = 0.0f;
-            ftile.desirability = static_cast<float>(SimulationConstants::desirability_base_value);
-            ftile.isAbandoned  = false;
-            ftile.footprintOriginX = tx;
-            ftile.footprintOriginZ = tz;
-        }
-    }
+    notifyUpgradeResult(tx, tz, targetZone, targetDensity, renderer, audio,
+                        notifications, sfxCallsThisTick);
 
+    // Place upgraded building mesh (after notifyUpgradeResult removes the old one).
     if (renderer) {
-        renderer->removeBuildingMesh(tx, tz);
         int zoneIdx2 = static_cast<int>(targetZone);
         int tierIdx2 = static_cast<int>(targetDensity);
         int idx2     = zoneIdx2 * 3 + tierIdx2;
@@ -358,11 +426,6 @@ bool Population::applyDensityUpgrade(Zoning& zoning, int tx, int tz, int64_t can
             baseName[baseName.size() - 1] = static_cast<char>('0' + variantNum);
         }
         renderer->placeBuildingMesh(tx, tz, baseName);
-    }
-
-    if (audio && sfxCallsThisTick < SimulationConstants::sfx_zone_upgrade_per_tick_cap) {
-        audio->playSound(SFX_ZONE_UPGRADE, SoundPriority::NORMAL, 1.0f);
-        ++sfxCallsThisTick;
     }
 
     return true;

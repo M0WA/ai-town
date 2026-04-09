@@ -148,7 +148,7 @@ loops so all errors surface in one execution.
   NOT run ctest — it uploads the build directory as an artifact (`build-linux-${{ github.sha }}`,
   `retention-days: 1`), which `test-linux` downloads and runs. There is no `apt-get install` step
   — all system packages are pre-installed in the container image. The compile job also uploads
-  `compile-commands-linux-${{ github.sha }}` (normalized `compile_commands.json` for SonarCloud,
+  `compile-commands-linux-${{ github.run_id }}` (normalized `compile_commands.json` for SonarCloud,
   `retention-days: 14`) and, on push to main/develop, `aitown-staging-linux-${{ github.sha }}`
   (binary + HRTF, `retention-days: 30`).
 
@@ -162,8 +162,9 @@ loops so all errors surface in one execution.
   - "Normalize compile_commands.json for SonarCloud": calls
     `python3 .github/scripts/normalize_compile_commands.py` to strip container-internal path
     prefixes before uploading.
-  - "Upload compile_commands.json": uploads `compile-commands-linux-${{ github.sha }}` for use by
-    `sonarcloud.yml`.
+  - "Upload compile_commands.json": uploads `compile-commands-linux-${{ github.run_id }}` for use by
+    `sonarcloud.yml` (uses `run_id`, not `sha` — `sonarcloud.yml` downloads via
+    `github.event.workflow_run.id`, which matches the build job's `run_id` context).
 
   The `_test-linux.yml` reusable workflow inputs: `build_artifact_name`, `build_dir`,
   `reporter_name`, `test_artifact_name`. The `test-linux` job uses `BUILD_DIR` as a job-level
@@ -512,7 +513,7 @@ loops so all errors surface in one execution.
   - `build/aitown-*.exe` — CPack generates the full `.exe` installer filename at packaging time.
   - `release-assets/**` — release artifact filenames contain the computed version string.
 
-  **Artifact name uniqueness requirement**: All `upload-artifact` `name:` values MUST include `${{ github.sha }}` as a suffix. Without it, concurrent workflow runs (e.g., two PRs merging in rapid succession) upload artifacts with identical names — GitHub Actions silently overwrites the first with the second, destroying post-mortem data for the earlier run. The `${{ github.sha }}` suffix guarantees globally unique artifact names for the lifetime of the artifact retention window.
+  **Artifact name uniqueness requirement**: All `upload-artifact` `name:` values MUST include `${{ github.sha }}` as a suffix — with one exception: `compile-commands-linux-${{ github.run_id }}` uses `run_id` instead of `sha` because `sonarcloud.yml` downloads it via the `workflow_run` event context where `github.event.workflow_run.id` (not `head_sha`) is the stable lookup key. Without a unique suffix, concurrent workflow runs (e.g., two PRs merging in rapid succession) upload artifacts with identical names — GitHub Actions silently overwrites the first with the second, destroying post-mortem data for the earlier run.
 
   ```yaml
   # After tests (build-linux job):
@@ -1403,6 +1404,46 @@ if(NOT CPACK_PACKAGE_VERSION)
   set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 endif()
 ```
+
+### Secure input handling in reusable workflows
+
+`workflow_call` inputs interpolated directly into `run:` shell blocks are a script-injection
+vector (SonarCloud `githubactions:S7630`). The caller controls input values; malicious or
+malformed strings can inject arbitrary shell commands.
+
+**Rule**: never use `${{ inputs.<name> }}` directly inside a `run:` block. Instead, assign the
+input to a step-level `env:` variable and reference it from the shell.
+
+**Bash pattern** (Linux steps in `_package-linux-deb.yml`):
+
+```yaml
+- name: Set up vcpkg
+  env:
+    VCPKG_COMMIT_ID: ${{ inputs.vcpkg_commit_id }}
+  run: |
+    git -C /opt/vcpkg fetch --depth=1 origin "$VCPKG_COMMIT_ID"
+
+- name: Resolve package version
+  id: pkgver
+  env:
+    PKG_VERSION: ${{ inputs.pkg_version }}
+  run: echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+```
+
+**PowerShell pattern** (Windows steps in `_package-windows.yml`):
+
+```yaml
+- name: Resolve package version
+  id: pkgver
+  shell: pwsh
+  env:
+    PKG_VERSION: ${{ inputs.pkg_version }}
+  run: echo "version=$env:PKG_VERSION" >> $env:GITHUB_OUTPUT
+```
+
+This pattern applies to **every** `workflow_call` input used in a `run:` block across all
+reusable packaging workflows. `${{ inputs.* }}` expressions ARE safe in non-`run:` fields
+(e.g., `with:`, `cache key`, `container:`) because those fields do not invoke a shell interpreter.
 
 ### No-rebuild principle
 

@@ -69,6 +69,8 @@ jobs:
             vcpkg-deb-${{ matrix.codename }}-
 
       - name: Set up vcpkg
+        env:
+          VCPKG_COMMIT_ID: ${{ inputs.vcpkg_commit_id }}
         run: |
           # Use init+fetch instead of clone so this works whether /opt/vcpkg
           # is absent, empty, or already populated by the cache restore step
@@ -79,7 +81,7 @@ jobs:
             git -C /opt/vcpkg init
             git -C /opt/vcpkg remote add origin https://github.com/microsoft/vcpkg.git
           fi
-          git -C /opt/vcpkg fetch --depth=1 origin ${{ inputs.vcpkg_commit_id }}
+          git -C /opt/vcpkg fetch --depth=1 origin "$VCPKG_COMMIT_ID"
           git -C /opt/vcpkg checkout FETCH_HEAD
           # Prebuilt vcpkg-tool binary from GitHub Releases fails with 404 in bare
           # containers (CDN returns 404 for the vcpkg-glibc asset and bootstrap-vcpkg.sh
@@ -106,7 +108,9 @@ jobs:
 
       - name: Resolve package version
         id: pkgver
-        run: echo "version=${{ inputs.pkg_version }}" >> "$GITHUB_OUTPUT"
+        env:
+          PKG_VERSION: ${{ inputs.pkg_version }}
+        run: echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: CMake configure
         run: |

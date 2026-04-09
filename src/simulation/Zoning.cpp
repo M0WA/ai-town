@@ -575,6 +575,41 @@ void Zoning::fireDesirabilityAlert(TileData& tile, int x, int z,
     }
 }
 
+float Zoning::computeTileDesirability(TileData& tile, int tileX, int tileZ,
+                                      bool hasFireStation, bool hasPolice,
+                                      bool hasWaterTower, bool hasPowerPlant,
+                                      IAudioSystem* audio) {
+    float desirability = tile.desirability;
+
+    if (tile.zone == ZoneType::Residential) {
+        desirability += computeNeighborDesirabilityDelta(tileX, tileZ);
+
+        bool anyUncovered = false;
+
+        if (!hasFireStation && !hasPolice && !hasWaterTower && !hasPowerPlant) {
+            anyUncovered = true;
+        } else {
+            if (computeFirePoliceCoverageGap(tileX, tileZ, hasFireStation, hasPolice)) {
+                anyUncovered = true;
+            }
+            updateWaterState(tile, tileX, tileZ, hasWaterTower, anyUncovered, audio);
+            updatePowerState(tile, tileX, tileZ, hasPowerPlant, anyUncovered, audio);
+        }
+
+        if (anyUncovered) {
+            if (!tile.firstDesirabilityTick) {
+                desirability -= static_cast<float>(SimulationConstants::service_uncovered_desirability_penalty_per_tick);
+            }
+        } else if (hasFireStation || hasPolice || hasWaterTower || hasPowerPlant) {
+            desirability += static_cast<float>(SimulationConstants::service_recovery_desirability_per_tick);
+        }
+    }
+
+    tile.firstDesirabilityTick = false;
+
+    return std::min(100.0f, std::max(0.0f, desirability));
+}
+
 void Zoning::applyDesirabilityScores(bool hasFireStation, bool hasPolice,
                                       bool hasWater, bool hasPower,
                                       const Economy& /*economy*/, IAudioSystem* audio,
@@ -585,35 +620,9 @@ void Zoning::applyDesirabilityScores(bool hasFireStation, bool hasPolice,
         int x = static_cast<int>(key >> 32);
         int z = static_cast<int>(static_cast<uint32_t>(key));
 
-        float desirability = tile.desirability;
-
-        if (tile.zone == ZoneType::Residential) {
-            desirability += computeNeighborDesirabilityDelta(x, z);
-
-            bool anyUncovered = false;
-
-            if (!hasFireStation && !hasPolice && !hasWater && !hasPower) {
-                anyUncovered = true;
-            } else {
-                if (computeFirePoliceCoverageGap(x, z, hasFireStation, hasPolice)) {
-                    anyUncovered = true;
-                }
-                updateWaterState(tile, x, z, hasWater, anyUncovered, audio);
-                updatePowerState(tile, x, z, hasPower, anyUncovered, audio);
-            }
-
-            if (anyUncovered) {
-                if (!tile.firstDesirabilityTick) {
-                    desirability -= static_cast<float>(SimulationConstants::service_uncovered_desirability_penalty_per_tick);
-                }
-            } else if (hasFireStation || hasPolice || hasWater || hasPower) {
-                desirability += static_cast<float>(SimulationConstants::service_recovery_desirability_per_tick);
-            }
-        }
-
-        tile.firstDesirabilityTick = false;
-
-        tile.desirability = std::min(100.0f, std::max(0.0f, desirability));
+        tile.desirability = computeTileDesirability(tile, x, z,
+                                                    hasFireStation, hasPolice,
+                                                    hasWater, hasPower, audio);
 
         if (tile.isZoned && tile.zone == ZoneType::Residential && audio) {
             if (tile.desirability <= static_cast<float>(SimulationConstants::service_alert_desirability_threshold)) {

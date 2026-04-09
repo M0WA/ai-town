@@ -11,6 +11,8 @@
 #include "Population.h"
 #include "SimTiming.h"
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <string>
 #include <queue>
 #include <optional>
@@ -204,4 +206,19 @@ private:
 
     void doBudgetTick();
     void recordUndoAction(const UndoAction& action);
+
+    // Phase 11q3 — extracted helpers for placeZone (S3776 + S134)
+    bool checkZoneFootprintClear(int tileX, int tileZ, int N) const;
+    void applyZoneFootprint(int tileX, int tileZ, ZoneType type, DensityTier tier, int N);
+
+    // Phase 11q3 — extracted helper for demolishTile (S3776)
+    void removeTileFromScene(int tileX, int tileZ, bool wasRoad, bool hadServiceBuilding, const TileData& prev);
+
+    // Phase 11q3 — extracted helper for placeServiceBuilding (S3776 + S134)
+    bool checkServiceFootprintClear(int tileX, int tileZ, int sN) const;
+
+    // Phase 11q3 — extracted helpers for deserializeFromJson (S3776)
+    bool parseZoningSection(const nlohmann::json& j, std::string& err);
+    bool parseTrafficSection(const nlohmann::json& j, std::string& err);
+    bool parseEconomySection(const nlohmann::json& j, int64_t& treasury, float taxRates[3], std::string& err);
 };

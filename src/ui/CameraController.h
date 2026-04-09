@@ -109,4 +109,8 @@ private:
 
     // Sensitivity (Phase 8 slider multiplier — applies to MMB drag and edge-scroll only)
     float m_sensitivityMultiplier{1.0f};
+
+    // Phase 11q3 — extracted helpers for OnInputEvent (S3776)
+    void applyMouseDrag(float dx, float dy);
+    void applyScrollZoom(float delta);
 };

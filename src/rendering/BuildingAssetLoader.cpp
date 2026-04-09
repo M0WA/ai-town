@@ -187,30 +187,7 @@ std::unique_ptr<LODNode> BuildingAssetLoader::load(const std::string& basePath)
     // which is correct placeholder behavior.
     // ------------------------------------------------------------------
     if (m_driver) {
-        // Build the atlas path relative to the asset base directory.
-        // basePath is e.g. "assets/3d/buildings/res_low_01"; strip back to the
-        // assets root and append the texture sub-path.
-        // The atlas always lives at assets/textures/buildings/buildings_atlas_d.dds
-        // relative to AITOWN_ASSETS_DIR (defined in CMakeLists.txt as the absolute
-        // path to the assets/ directory).
-        //
-        // We derive the assets root from basePath by finding the last occurrence
-        // of "/3d/buildings/" and trimming everything from that point onward.
-        // This avoids a hard dependency on AITOWN_ASSETS_DIR being available here
-        // (it is only defined in IrrlichtRenderer.cpp as a compile-time macro via
-        // CMakeLists.txt).  BuildingAssetLoader receives basePath from
-        // IrrlichtRenderer which already has AITOWN_ASSETS_DIR prepended — so we
-        // can reliably strip the known suffix.
-        std::string atlasPath;
-        const auto buildingPos = basePath.rfind("/3d/buildings/");
-        const auto vehiclePos  = basePath.rfind("/3d/vehicles/");
-        if (buildingPos != std::string::npos) {
-            atlasPath = basePath.substr(0, buildingPos)
-                        + "/textures/buildings/buildings_atlas_d.png";
-        } else if (vehiclePos != std::string::npos) {
-            atlasPath = basePath.substr(0, vehiclePos)
-                        + "/textures/vehicles/vehicles_diffuse_atlas_d.png";
-        }
+        std::string atlasPath = resolveAtlasPath(basePath);
 
         if (!atlasPath.empty()) {
             ITexture* atlas = m_driver->getTexture(atlasPath.c_str());
@@ -237,25 +214,96 @@ std::unique_ptr<LODNode> BuildingAssetLoader::load(const std::string& basePath)
 }
 
 // ---------------------------------------------------------------------------
-// parseMeta() — minimal hand-written JSON parser
+// resolveAtlasPath — Phase 11q3 helper (5a).
+// Determines the atlas texture path from the asset base path.
 // ---------------------------------------------------------------------------
-//
-// Expected .meta format (subset parsed here):
-//   {
-//     "height_floors": 3,
-//     "category": "residential",
-//     "atlas_cell": { "row": 0, "col": 0 },
-//     "lod_distances": [30.0, 100.0, 300.0]
-//   }
-//
-// Parser strategy:
-//   - Read the entire file into a string.
-//   - Use strstr() to locate "height_floors" key.
-//   - Use sscanf() to extract the integer value.
-//   - Use strstr() to locate "lod_distances" key.
-//   - Scan forward for '[', then parse three floats separated by commas.
-//   - Use strstr() to locate "atlas_cell" key, then locate "row" and "col"
-//     within the braces that follow.  Both default to 0 if not found.
+std::string BuildingAssetLoader::resolveAtlasPath(const std::string& basePath) const {
+    // Build the atlas path relative to the asset base directory.
+    // basePath is e.g. "assets/3d/buildings/res_low_01"; strip back to the
+    // assets root and append the texture sub-path.
+    // The atlas always lives at assets/textures/buildings/buildings_atlas_d.dds
+    // relative to AITOWN_ASSETS_DIR (defined in CMakeLists.txt as the absolute
+    // path to the assets/ directory).
+    //
+    // We derive the assets root from basePath by finding the last occurrence
+    // of "/3d/buildings/" and trimming everything from that point onward.
+    // This avoids a hard dependency on AITOWN_ASSETS_DIR being available here
+    // (it is only defined in IrrlichtRenderer.cpp as a compile-time macro via
+    // CMakeLists.txt).  BuildingAssetLoader receives basePath from
+    // IrrlichtRenderer which already has AITOWN_ASSETS_DIR prepended — so we
+    // can reliably strip the known suffix.
+    const auto buildingPos = basePath.rfind("/3d/buildings/");
+    const auto vehiclePos  = basePath.rfind("/3d/vehicles/");
+    if (buildingPos != std::string::npos) {
+        return basePath.substr(0, buildingPos)
+               + "/textures/buildings/buildings_atlas_d.png";
+    }
+    if (vehiclePos != std::string::npos) {
+        return basePath.substr(0, vehiclePos)
+               + "/textures/vehicles/vehicles_diffuse_atlas_d.png";
+    }
+    return {};
+}
+
+// ---------------------------------------------------------------------------
+// parseLodDistances — Phase 11q3 helper (5b, static).
+// Extracts lod_distances [a, b, c] from .meta content string.
+// ---------------------------------------------------------------------------
+bool BuildingAssetLoader::parseLodDistances(const std::string& content,
+                                             float& lod0, float& lod1, float& cull) {
+    const char* data = content.c_str();
+    const char* ldKey = std::strstr(data, "lod_distances");
+    if (!ldKey) return false;
+
+    const char* lBracket = std::strchr(ldKey, '[');
+    if (!lBracket) return false;
+
+    return (std::sscanf(lBracket + 1, " %f , %f , %f", &lod0, &lod1, &cull) == 3);
+}
+
+// ---------------------------------------------------------------------------
+// parseAtlasCell — Phase 11q3 helper (5b, static).
+// Extracts atlas_cell row/col from .meta content string.
+// Optional — defaults row/col to 0 if the key is absent.
+// ---------------------------------------------------------------------------
+bool BuildingAssetLoader::parseAtlasCell(const std::string& content,
+                                          int& row, int& col) {
+    row = 0;
+    col = 0;
+
+    const char* data = content.c_str();
+    const char* acKey = std::strstr(data, "atlas_cell");
+    if (!acKey) return false;
+
+    const char* acBrace = std::strchr(acKey, '{');
+    if (!acBrace) return false;
+
+    const char* acEnd = std::strchr(acBrace, '}');
+    if (!acEnd) return false;
+
+    // Parse "row": R within [acBrace, acEnd].
+    const char* rowKey = std::strstr(acBrace, "\"row\"");
+    if (rowKey && rowKey < acEnd) {
+        const char* rowColon = std::strchr(rowKey, ':');
+        if (rowColon && rowColon < acEnd) {
+            std::sscanf(rowColon + 1, " %d", &row);
+        }
+    }
+    // Parse "col": C within [acBrace, acEnd].
+    const char* colKey = std::strstr(acBrace, "\"col\"");
+    if (colKey && colKey < acEnd) {
+        const char* colColon = std::strchr(colKey, ':');
+        if (colColon && colColon < acEnd) {
+            std::sscanf(colColon + 1, " %d", &col);
+        }
+    }
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// parseMeta() — minimal hand-written JSON parser
+// Refactored in Phase 11q3 to call parseLodDistances and parseAtlasCell helpers.
 // ---------------------------------------------------------------------------
 
 bool BuildingAssetLoader::parseMeta(const std::string& metaPath,
@@ -290,53 +338,13 @@ bool BuildingAssetLoader::parseMeta(const std::string& metaPath,
     // ------------------------------------------------------------------
     // Parse "lod_distances": [a, b, c]
     // ------------------------------------------------------------------
-    const char* ldKey = std::strstr(data, "lod_distances");
-    if (!ldKey) return false;
-
-    const char* lBracket = std::strchr(ldKey, '[');
-    if (!lBracket) return false;
-
-    if (std::sscanf(lBracket + 1, " %f , %f , %f",
-                    &lod0dist, &lod1dist, &cullDist) != 3) {
-        return false;
-    }
+    if (!parseLodDistances(content, lod0dist, lod1dist, cullDist)) return false;
 
     // ------------------------------------------------------------------
     // Parse "atlas_cell": { "row": R, "col": C }
-    //
     // Optional — default to (0,0) if the key is absent (safe fallback).
-    // Search within the "atlas_cell" object only to avoid accidentally
-    // matching a "row" or "col" key from a different object.
     // ------------------------------------------------------------------
-    atlasRow = 0;
-    atlasCol = 0;
-
-    const char* acKey = std::strstr(data, "atlas_cell");
-    if (acKey) {
-        // Advance to the opening brace of the atlas_cell object.
-        const char* acBrace = std::strchr(acKey, '{');
-        if (acBrace) {
-            const char* acEnd = std::strchr(acBrace, '}');
-            if (acEnd) {
-                // Parse "row": R within [acBrace, acEnd].
-                const char* rowKey = std::strstr(acBrace, "\"row\"");
-                if (rowKey && rowKey < acEnd) {
-                    const char* rowColon = std::strchr(rowKey, ':');
-                    if (rowColon && rowColon < acEnd) {
-                        std::sscanf(rowColon + 1, " %d", &atlasRow);
-                    }
-                }
-                // Parse "col": C within [acBrace, acEnd].
-                const char* colKey = std::strstr(acBrace, "\"col\"");
-                if (colKey && colKey < acEnd) {
-                    const char* colColon = std::strchr(colKey, ':');
-                    if (colColon && colColon < acEnd) {
-                        std::sscanf(colColon + 1, " %d", &atlasCol);
-                    }
-                }
-            }
-        }
-    }
+    parseAtlasCell(content, atlasRow, atlasCol);
 
     return true;
 }

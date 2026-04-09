@@ -114,8 +114,7 @@ jobs:
 
       # Step 8: Build and push the CI image.
       # Tags:
-      #   :vcpkg-<short-sha>  — content-addressed by vcpkg commit; used in ci.yml and .devcontainer
-      #   :latest             — convenience alias; never pinned in code
+      #   :vcpkg-<short-sha>  — push handle (vcpkg commit version); never consumed in code
       # build-args:
       #   VCPKG_COMMIT        — supplied from VCPKG_COMMIT_ID extracted in step 2
       # cache-from/cache-to:  GHA layer cache so re-runs after small changes skip the multi-hour
@@ -127,9 +126,7 @@ jobs:
           context: .
           file: docker/ci-linux/Dockerfile
           push: true
-          tags: |
-            ghcr.io/m0wa/aitown-ci-linux:vcpkg-${{ env.VCPKG_SHORT_SHA }}
-            ghcr.io/m0wa/aitown-ci-linux:latest
+          tags: ghcr.io/m0wa/aitown-ci-linux:vcpkg-${{ env.VCPKG_SHORT_SHA }}
           build-args: VCPKG_COMMIT=${{ env.VCPKG_COMMIT_ID }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

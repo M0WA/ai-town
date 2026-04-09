@@ -259,6 +259,47 @@ private:
     // converting to a chunk ID, so boundary and corner cases collapse to fewer IDs.
     std::vector<uint64_t> affectedChunkIds(int tileX, int tileZ) const;
 
+    // --- Phase 11q3 refactoring helpers (Section 1a–1e) ---
+
+    // 1a: generate() helpers — extracted from the monolithic generate() body.
+    // buildHeightmapBuffer: fills hmap with procedural height values using rng.
+    void buildHeightmapBuffer(std::vector<float>& hmap, int vertX, int vertZ, ITerrainRNG* rng);
+
+    // countFlatTiles: counts tiles whose slope is below slopeThreshold degrees.
+    int countFlatTiles(const std::vector<float>& hmap, int mapTilesX, int mapTilesZ,
+                       float cellSize, float slopeThreshold) const;
+
+    // largestContiguousFlatRegion: BFS to find the largest connected flat region's
+    // bounding-box minimum dimension.
+    int largestContiguousFlatRegion(const std::vector<float>& hmap, int mapTilesX,
+                                    int mapTilesZ, float cellSize,
+                                    float slopeThreshold) const;
+
+    // 1b: processOneRebuild() helper.
+    // downsampleAndRebuild: downsamples the LOD0 heightmap for a chunk to the target
+    // LOD resolution, constructs TerrainChunkRebuildParams, and calls
+    // m_renderer->rebuildTerrainChunk(). Extracted from processOneRebuild to reduce
+    // nesting depth (the stride-downsample double loop was at depth 4).
+    void downsampleAndRebuild(uint64_t chunkId, int targetLOD);
+
+    // 1c: setTileHeight() helpers.
+    // writeHeightAndSyncChunks: writes height to global heightmap and syncs
+    // all chunk heightmaps that contain the vertex at (tx, tz).
+    void writeHeightAndSyncChunks(int tx, int tz, float h);
+
+    // propagateHeightRipple: applies cardinal/diagonal neighbour blending
+    // around (tileX, tileZ) using the stored height at that tile.
+    void propagateHeightRipple(int tileX, int tileZ);
+
+    // 1d: buildAllChunks() helper.
+    // buildOneChunk: extracts the chunk's heightmap, registers it, and enqueues rebuild.
+    void buildOneChunk(int cx, int cz, int chunkTiles, float cellSize);
+
+    // 1e: enqueueAllChunks() helper.
+    // enqueueOneChunk: extracts chunk heightmap, registers it, and enqueues rebuild.
+    // Body is identical to buildOneChunk — enqueueAllChunks delegates to buildOneChunk.
+    void enqueueOneChunk(int cx, int cz, int chunkTiles, float cellSize);
+
     IRenderer* m_renderer;  // may be null in EDT_NULL test context
     IClock*    m_clock;     // injected for deterministic timing in tests
 
