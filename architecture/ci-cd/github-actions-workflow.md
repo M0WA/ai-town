@@ -1404,6 +1404,46 @@ if(NOT CPACK_PACKAGE_VERSION)
 endif()
 ```
 
+### Secure input handling in reusable workflows
+
+`workflow_call` inputs interpolated directly into `run:` shell blocks are a script-injection
+vector (SonarCloud `githubactions:S7630`). The caller controls input values; malicious or
+malformed strings can inject arbitrary shell commands.
+
+**Rule**: never use `${{ inputs.<name> }}` directly inside a `run:` block. Instead, assign the
+input to a step-level `env:` variable and reference it from the shell.
+
+**Bash pattern** (Linux steps in `_package-linux-deb.yml`):
+
+```yaml
+- name: Set up vcpkg
+  env:
+    VCPKG_COMMIT_ID: ${{ inputs.vcpkg_commit_id }}
+  run: |
+    git -C /opt/vcpkg fetch --depth=1 origin "$VCPKG_COMMIT_ID"
+
+- name: Resolve package version
+  id: pkgver
+  env:
+    PKG_VERSION: ${{ inputs.pkg_version }}
+  run: echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+```
+
+**PowerShell pattern** (Windows steps in `_package-windows.yml`):
+
+```yaml
+- name: Resolve package version
+  id: pkgver
+  shell: pwsh
+  env:
+    PKG_VERSION: ${{ inputs.pkg_version }}
+  run: echo "version=$env:PKG_VERSION" >> $env:GITHUB_OUTPUT
+```
+
+This pattern applies to **every** `workflow_call` input used in a `run:` block across all
+reusable packaging workflows. `${{ inputs.* }}` expressions ARE safe in non-`run:` fields
+(e.g., `with:`, `cache key`, `container:`) because those fields do not invoke a shell interpreter.
+
 ### No-rebuild principle
 
 `package-windows` **must not recompile** — it downloads the pre-built staging artifact
