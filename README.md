@@ -56,7 +56,13 @@ Keys can be rebound in **Settings > Controls**. WASD camera pan is available as 
 
 ## Build from source
 
-**Prerequisites**
+**Recommended: Dev Container**
+
+The canonical development environment is the dev container defined in `.devcontainer/`.
+Open the repo in VS Code with the Dev Containers extension (or any compatible tool) and all
+dependencies — GCC 13, CMake, Ninja, vcpkg, and all ports — are pre-installed.
+
+**Prerequisites** (if not using the dev container)
 
 | Tool         | Linux                        | Windows                      |
 | ------------ | ---------------------------- | ---------------------------- |
@@ -70,10 +76,12 @@ Keys can be rebound in **Settings > Controls**. WASD camera pan is available as 
 ```bash
 git clone https://github.com/M0WA/aitown.git
 cd aitown
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
-cmake --build build
+make build        # configures + compiles (requires VCPKG_ROOT to be set)
 ./build/aitown
 ```
+
+Run `make test` to build with coverage and execute the full test suite.
+See the `Makefile` at the repo root for all available targets.
 
 **Windows**
 
