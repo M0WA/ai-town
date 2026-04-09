@@ -180,10 +180,13 @@ Y component if perceptible mispositioning is observed with real terrain heights.
 
 ## Phase 10 Audio Callbacks for Service Events
 
-All audio calls below are made from within `Zoning::doServiceDegradationTick()` (called from
-`CitySimulation::doBudgetTick()`) and are guarded by `m_audio != nullptr`. Building world-space
+Audio calls in this section are guarded by `m_audio != nullptr`. Building world-space
 positions use `vec3{static_cast<float>(bldg.tileX), 0.0f, static_cast<float>(bldg.tileZ)}`
-(Y = 0.0f as per the Y-position note above).
+(Y = 0.0f as per the Y-position note above). Call sites vary by event type:
+`SFX_SERVICE_DEGRADE` is fired from `Zoning::doServiceDegradationTick()`;
+`SFX_POWER_OUT` and `SFX_WATER_OUT` are fired from `Zoning::applyDesirabilityScores()`
+(called by `Zoning::doDesirabilityTick()`). Both tick functions are called from
+`CitySimulation::doBudgetTick()`.
 
 ### `sfx_service_degrade` — Service building enters reduced-coverage state
 
@@ -221,19 +224,20 @@ per-building RNG roll and the once-per-tick-per-building gate are sufficient thr
 ### `sfx_power_out` — Zone tile loses power coverage
 
 **Trigger**: When a zone tile transitions from powered to unpowered for the first time in a
-coverage cycle — specifically, when `Zoning::doServiceDegradationTick()` evaluates the power grid BFS and
+coverage cycle — specifically, when `Zoning::applyDesirabilityScores()` evaluates the power grid BFS and
 finds a tile that was covered in the previous tick is now uncovered (either due to a brownout
 BFS-depth reduction or a full power plant loss). Fires once per coverage-loss event, not once
 per tick the tile remains unpowered. A per-tile `wasPowered` flag (toggled from
 `wasPowered=true` to `wasPowered=false`) gates the call to prevent re-fire on subsequent ticks
 while the tile is already unpowered.
 
-**Call site**: `Zoning::doServiceDegradationTick()` (called from
-`CitySimulation::doBudgetTick()`), inside the power coverage evaluation pass, when a
-tile's power coverage state transitions from covered to uncovered.
+**Call site**: `Zoning::applyDesirabilityScores()` (called from
+`Zoning::doDesirabilityTick()`, which is called from `CitySimulation::doBudgetTick()`),
+inside the power coverage evaluation pass, when a tile's power coverage state transitions
+from covered to uncovered.
 
 ```cpp
-// In Zoning::doServiceDegradationTick(), power coverage evaluation:
+// In Zoning::applyDesirabilityScores(), power coverage evaluation:
 if (tile.wasPowered && !currentlyCovered) {
     tile.wasPowered = false;
     if (m_audio) {
@@ -255,12 +259,13 @@ zone tile that was previously covered by a Water Tower's coverage radius becomes
 (either because the Water Tower degraded and halved its radius, or because the tower was
 demolished). A per-tile `wasWaterCovered` flag gates the call.
 
-**Call site**: `Zoning::doServiceDegradationTick()` (called from
-`CitySimulation::doBudgetTick()`), inside the water coverage evaluation pass, when a
-tile's water coverage state transitions from covered to uncovered.
+**Call site**: `Zoning::applyDesirabilityScores()` (called from
+`Zoning::doDesirabilityTick()`, which is called from `CitySimulation::doBudgetTick()`),
+inside the water coverage evaluation pass, when a tile's water coverage state transitions
+from covered to uncovered.
 
 ```cpp
-// In Zoning::doServiceDegradationTick(), water coverage evaluation:
+// In Zoning::applyDesirabilityScores(), water coverage evaluation:
 if (tile.wasWaterCovered && !currentlyWaterCovered) {
     tile.wasWaterCovered = false;
     if (m_audio) {

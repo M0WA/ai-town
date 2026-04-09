@@ -53,7 +53,7 @@
 
 ## Linux System Package Requirements
 
-Linux CI jobs (`_build-linux.yml`, `_test-linux.yml`, `_coverage-linux.yml`) run in a pre-baked GHCR container image: `ghcr.io/m0wa/aitown-ci-linux:vcpkg-<short-sha>@sha256:<digest>`. All system packages are installed into this image at image-build time via `docker/ci-linux/Dockerfile`. CI jobs use `container: image:` to pull this image — **no runtime `apt-get install` step is needed or present in any Linux CI job**.
+Linux CI jobs (`_build-linux.yml`, `_test-linux.yml`, `_coverage-linux.yml`) run in a pre-baked GHCR container image: `ghcr.io/m0wa/aitown-ci-linux@sha256:<digest>` (digest-only — the `:tag@sha256:digest` double-separator format breaks Docker layer caching). All system packages are installed into this image at image-build time via `docker/ci-linux/Dockerfile`. CI jobs use `container: image:` to pull this image — **no runtime `apt-get install` step is needed or present in any Linux CI job**.
 
 The `docker-ci-image.yml` workflow manages building and pushing the container image (see `## docker-ci-image.yml` section in `github-actions-workflow.md`).
 
@@ -88,7 +88,7 @@ A 200 response confirms the port exists. A 404 means the port was removed — tr
 2. `ci.yml` — `VCPKG_COMMIT_ID` env var updated to the same commit
 3. `msvc.yml` — `VCPKG_COMMIT_ID` env var updated to the same commit
 4. `docker/ci-linux/Dockerfile` — `ARG VCPKG_COMMIT` build-arg updated to the same value
-5. `.devcontainer/Dockerfile` — `FROM` line updated with new image tag and sha256 digest
+5. `.devcontainer/Dockerfile` — `FROM` line updated to `ghcr.io/m0wa/aitown-ci-linux@sha256:<digest>` (digest-only — the `:tag@sha256:digest` double-separator format breaks Docker layer caching)
 6. `ci.yml` AND `.devcontainer/Dockerfile` — image digest pin updated to the `sha256:` output of the `docker-ci-image.yml` push step
 
 ### CMake Dependencies
