@@ -275,7 +275,7 @@ MIT licence, cross-platform Linux/Windows, CMake target
 `nlohmann_json::nlohmann_json`). Already present at the current vcpkg baseline
 `b2f068faf45a3f04145bec0f52a66526ad590227`.
 
-- [ ] Add `"nlohmann-json"` to the `dependencies` array in `vcpkg.json`.
+- [x] Add `"nlohmann-json"` to the `dependencies` array in `vcpkg.json`.
 - [ ] Add to `CMakeLists.txt` (near the other `find_package` calls):
 
   ```cmake
@@ -297,7 +297,7 @@ MIT licence, cross-platform Linux/Windows, CMake target
   PRIVATE ...)` example (added as part of Phase 11q2 spec preparation); if it is
   already present, no spec change is needed; if absent, add it with a comment
   noting Phase 11q2+ programmatic JSON manipulation.
-- [ ] Rebuild the CI Docker image with `nlohmann-json` baked in. Linux CI runs with
+- [x] Rebuild the CI Docker image with `nlohmann-json` baked in. Linux CI runs with
   `VCPKG_MANIFEST_INSTALL=OFF` and relies on packages installed at image build
   time; without a rebuilt image, `find_package(nlohmann_json)` will fail in the
   `build-linux`, `test-linux`, and `coverage-linux` jobs. Because
@@ -403,7 +403,7 @@ MIT licence, cross-platform Linux/Windows, CMake target
   (`serializeToJson` has no SonarCloud violations today but the manual string building
   is equally fragile — replacing both sides is the cleaner delta.)
   - Note: the nlohmann `serializeToJson` rewrite MUST add `"was_powered"` and `"was_water_covered"` to the per-tile output alongside the existing `"alert_fired"` field — the hand-rolled serializer omits these two fields, making this a net-new addition that brings the serializer into compliance with `architecture/game-design/service-coverage.md` (Per-Tile Audio Transition Fields: "All three must be serialised in the save file to prevent spurious SFX re-fire on load"). These fields are written for **every tile** in the tiles array (not filtered by zone type), because `TileData` defines `wasPowered` and `wasWaterCovered` for all zone types in `Zoning.h`. Corresponding deserialization must use `j.value("was_powered", true)`, `j.value("was_water_covered", true)`, and `j.value("alert_fired", false)` (backward-compatible defaults — `alertFired` defaults to `false` per the Per-Tile Audio Transition Fields table in `architecture/game-design/service-coverage.md`, ensuring the first-alert SFX is not suppressed on tiles loaded from pre-Phase-10 saves).
-- [ ] Update `.devcontainer/Dockerfile` to ensure `nlohmann-json` is available in
+- [x] Update `.devcontainer/Dockerfile` to ensure `nlohmann-json` is available in
   the dev container (it is installed via vcpkg during the container build, so no
   extra system package is needed — verify the container build still passes).
 - [ ] No header change to `CitySimulation.h` required; the JSON functions keep the
