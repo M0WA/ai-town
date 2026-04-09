@@ -3,10 +3,13 @@
     "sonarqube": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@sonarqube/mcp-server@latest"],
+      "args": [
+        "-y",
+        "sonarqube-mcp-server@latest"
+      ],
       "env": {
-        "SONAR_TOKEN": "${SONAR_TOKEN}",
-        "SONAR_HOST_URL": "${SONAR_HOST_URL}"
+        "SONARQUBE_TOKEN": "${SONAR_TOKEN}",
+        "SONARQUBE_URL": "${SONAR_HOST_URL}"
       }
     },
     "github": {
@@ -17,8 +20,8 @@
         "@modelcontextprotocol/server-github@latest"
       ],
       "env": {
-        "GITHUB_TOKEN": "${env:GITHUB_PERSONAL_ACCESS_TOKEN}",
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "${env:GITHUB_PERSONAL_ACCESS_TOKEN}"
+        "GITHUB_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}",
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
       }
     }
   }
