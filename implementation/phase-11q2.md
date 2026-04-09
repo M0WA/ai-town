@@ -126,6 +126,12 @@ neighbour scan, service coverage checks, water/power state updates, and alert fi
   `architecture/game-design/service-coverage.md` specifies per-tile radial
   coverage for alert SFX — is a pre-existing deviation that is out of scope
   here and should be tracked as future work.)
+  Similarly, the spec (`architecture/game-design/service-coverage.md`) attributes
+  `SFX_POWER_OUT` and `SFX_WATER_OUT` playback to `Zoning::doServiceDegradationTick()`,
+  but these calls actually reside in `Zoning::applyDesirabilityScores()`. This phase
+  correctly wraps them into the `updateWaterState` and `updatePowerState` helpers (both
+  called from `applyDesirabilityScores`); the spec-side attribution error was corrected
+  separately and is not a deliverable of this phase.
   No nesting beyond L1. ✓
 - [ ] Refactor `applyDesirabilityScores` to call these helpers. Final shape:
   - Outer for-tile loop (L1) → if Residential (L2) → helper calls (no nesting) ✓
@@ -334,7 +340,7 @@ MIT licence, cross-platform Linux/Windows, CMake target
   `CMakeLists.txt` `find_package`/`target_link_libraries` update, test updates,
   helper extractions) in the main phase PR. This PR must also update the
   container digest pins:
-  - `.devcontainer/Dockerfile` `FROM` line (tag + `sha256:` digest)
+  - `.devcontainer/Dockerfile` `FROM` line (digest-only — no tag; see CLAUDE.md atomicity item 4)
   - `.github/workflows/_build-linux.yml` `container: image:` digest (line 25)
   - `.github/workflows/_coverage-linux.yml` `container: image:` digest (line 22)
   - `.github/workflows/_test-linux.yml` `container: image:` digest (line 40)
@@ -352,8 +358,9 @@ MIT licence, cross-platform Linux/Windows, CMake target
 
   (`ci.yml` itself contains no `container: image:` lines — the digest pins
   live exclusively in the reusable workflows above.)
-  Use tag for human readability + `sha256:` digest for immutability, following
-  the same procedure as prior baseline updates.
+  Use digest-only format (`ghcr.io/m0wa/aitown-ci-linux@sha256:<digest>`) per
+  CLAUDE.md atomicity item 4 (the `:tag@sha256:digest` double-separator breaks
+  Docker layer caching).
 - [ ] Add `#include <nlohmann/json.hpp>` in `CitySimulation.cpp`; remove the entire
   hand-rolled anonymous namespace (`skipWs`, `expect`, `parseString`, `parseInt64`,
   `parseFloat`, `parseBool`, `parseKey` plus any helpers).
