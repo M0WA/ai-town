@@ -78,7 +78,81 @@ void CameraController::applyScrollZoom(float delta) {
 }
 
 // ---------------------------------------------------------------------------
-// OnInputEvent
+// Phase 11q5 — per-case helpers for OnInputEvent (extracted from MouseButtonDown/Up/Move)
+// ---------------------------------------------------------------------------
+
+bool CameraController::handleRMBDown(const InputEvent& e) {
+    // RMB down: start rotate/pan drag
+    m_rmbDragActive = true;
+    m_prevPhysX = e.physX;
+    m_prevPhysY = e.physY;
+    return true;
+}
+
+bool CameraController::handleMMBDown(const InputEvent& e) {
+    // MMB down: start pan drag
+    m_mmbDragActive = true;
+    m_prevPhysX = e.physX;
+    m_prevPhysY = e.physY;
+    return true;
+}
+
+bool CameraController::handleRMBUp(const InputEvent& /*e*/) {
+    m_rmbDragActive = false;
+    return true;
+}
+
+bool CameraController::handleMMBUp(const InputEvent& /*e*/) {
+    m_mmbDragActive = false;
+    return true;
+}
+
+bool CameraController::handleMouseMoved(const InputEvent& e) {
+    const float dx = static_cast<float>(e.physX - m_prevPhysX);
+    const float dy = static_cast<float>(e.physY - m_prevPhysY);
+    bool consumed = false;
+
+    if (m_rmbDragActive || m_mmbDragActive) {
+        applyMouseDrag(dx, dy);
+        consumed = true;
+    }
+
+    // Edge scroll (virtual coordinate space — InputEvent.x)
+    // Only active when m_appHasFocus AND m_edgeScrollEnabled
+    if (m_appHasFocus && m_edgeScrollEnabled) {
+        // Edge-scroll activation band: 20 px from each edge in 1920x1080 virtual space
+        const float panSpeed = kBasePanSpeed * (m_zoomDistance / kDefaultZoomDistance)
+                             * m_sensitivityMultiplier;
+        const float scale = panSpeed * 0.01f;
+        const float yaw_rad = m_yaw * static_cast<float>(M_PI / 180.0);
+        const float rightX =  std::cos(yaw_rad);
+        const float rightZ = -std::sin(yaw_rad);
+        const float fwdX   = std::sin(yaw_rad);
+        const float fwdZ   = std::cos(yaw_rad);
+
+        if (e.x < kEdgeScrollBand) {
+            m_targetX -= rightX * scale;
+            m_targetZ -= rightZ * scale;
+        } else if (e.x > (1920 - kEdgeScrollBand)) {
+            m_targetX += rightX * scale;
+            m_targetZ += rightZ * scale;
+        }
+        if (e.y < kEdgeScrollBand) {
+            m_targetX += fwdX * scale;
+            m_targetZ += fwdZ * scale;
+        } else if (e.y > (1080 - kEdgeScrollBand)) {
+            m_targetX -= fwdX * scale;
+            m_targetZ -= fwdZ * scale;
+        }
+    }
+
+    m_prevPhysX = e.physX;
+    m_prevPhysY = e.physY;
+    return consumed;
+}
+
+// ---------------------------------------------------------------------------
+// OnInputEvent — Phase 11q5: simplified dispatch to helpers (CC ≤ 15)
 // ---------------------------------------------------------------------------
 
 bool CameraController::OnInputEvent(const InputEvent& event) {
@@ -86,129 +160,45 @@ bool CameraController::OnInputEvent(const InputEvent& event) {
 
     switch (event.type) {
     case Type::WindowFocusGained:
-        // Restore focus: enable edge-scroll processing if m_edgeScrollEnabled is true.
-        // Does NOT modify m_edgeScrollEnabled — that is the player's explicit preference.
         m_appHasFocus = true;
-        return false; // never consumed by CameraController
+        return false;
 
     case Type::WindowFocusLost:
-        // Suppress edge-scroll processing. Does NOT change m_edgeScrollEnabled.
         m_appHasFocus = false;
-        // Also reset drag state on focus loss to avoid stuck drag
         m_rmbDragActive = false;
         m_mmbDragActive = false;
-        return false; // never consumed by CameraController
+        return false;
 
     case Type::MouseButtonDown:
-        if (event.button == 1) {
-            // RMB down: start rotate/pan drag
-            m_rmbDragActive = true;
-            m_prevPhysX = event.physX;
-            m_prevPhysY = event.physY;
-            return true;
-        } else if (event.button == 2) {
-            // MMB down: start pan drag
-            m_mmbDragActive = true;
-            m_prevPhysX = event.physX;
-            m_prevPhysY = event.physY;
-            return true;
-        }
+        if (event.button == 1) return handleRMBDown(event);
+        if (event.button == 2) return handleMMBDown(event);
         return false;
 
     case Type::MouseButtonUp:
-        if (event.button == 1) {
-            m_rmbDragActive = false;
-            return true;
-        } else if (event.button == 2) {
-            m_mmbDragActive = false;
-            return true;
-        }
+        if (event.button == 1) return handleRMBUp(event);
+        if (event.button == 2) return handleMMBUp(event);
         return false;
 
     case Type::MouseMove:
-        {
-            const float dx = static_cast<float>(event.physX - m_prevPhysX);
-            const float dy = static_cast<float>(event.physY - m_prevPhysY);
-            bool consumed = false;
-
-            if (m_rmbDragActive || m_mmbDragActive) {
-                applyMouseDrag(dx, dy);
-                consumed = (m_rmbDragActive || m_mmbDragActive);
-            }
-
-            // Edge scroll (virtual coordinate space — InputEvent.x)
-            // Only active when m_appHasFocus AND m_edgeScrollEnabled
-            if (m_appHasFocus && m_edgeScrollEnabled) {
-                // Edge-scroll activation band: 20 px from each edge in 1920x1080 virtual space
-                const float panSpeed = kBasePanSpeed * (m_zoomDistance / kDefaultZoomDistance)
-                                     * m_sensitivityMultiplier;
-                const float scale = panSpeed * 0.01f;
-                const float yaw_rad = m_yaw * static_cast<float>(M_PI / 180.0);
-                const float rightX =  std::cos(yaw_rad);
-                const float rightZ = -std::sin(yaw_rad);
-                const float fwdX   = std::sin(yaw_rad);
-                const float fwdZ   = std::cos(yaw_rad);
-
-                if (event.x < kEdgeScrollBand) {
-                    // Left edge: pan left (negative right direction)
-                    m_targetX -= rightX * scale;
-                    m_targetZ -= rightZ * scale;
-                } else if (event.x > (1920 - kEdgeScrollBand)) {
-                    // Right edge: pan right
-                    m_targetX += rightX * scale;
-                    m_targetZ += rightZ * scale;
-                }
-                if (event.y < kEdgeScrollBand) {
-                    // Top edge: pan forward
-                    m_targetX += fwdX * scale;
-                    m_targetZ += fwdZ * scale;
-                } else if (event.y > (1080 - kEdgeScrollBand)) {
-                    // Bottom edge: pan backward
-                    m_targetX -= fwdX * scale;
-                    m_targetZ -= fwdZ * scale;
-                }
-            }
-
-            m_prevPhysX = event.physX;
-            m_prevPhysY = event.physY;
-            return consumed;
-        }
+        return handleMouseMoved(event);
 
     case Type::MouseWheel:
         applyScrollZoom(event.wheelDelta);
         return true;
 
     case Type::KeyDown:
-        {
-            bool consumed = true;
-            // Irrlicht key codes — set held-state flags for continuous pan in update(dt)
-            if (event.keyCode == irr::KEY_LEFT) {
-                m_panLeft = true;
-            } else if (event.keyCode == irr::KEY_RIGHT) {
-                m_panRight = true;
-            } else if (event.keyCode == irr::KEY_UP) {
-                m_panForward = true;
-            } else if (event.keyCode == irr::KEY_DOWN) {
-                m_panBackward = true;
-            } else {
-                consumed = false;
-            }
-            return consumed;
-        }
+        if (event.keyCode == irr::KEY_LEFT)  { m_panLeft = true;     return true; }
+        if (event.keyCode == irr::KEY_RIGHT) { m_panRight = true;    return true; }
+        if (event.keyCode == irr::KEY_UP)    { m_panForward = true;  return true; }
+        if (event.keyCode == irr::KEY_DOWN)  { m_panBackward = true; return true; }
+        return false;
 
     case Type::KeyUp:
-        {
-            if (event.keyCode == irr::KEY_LEFT) {
-                m_panLeft = false;
-            } else if (event.keyCode == irr::KEY_RIGHT) {
-                m_panRight = false;
-            } else if (event.keyCode == irr::KEY_UP) {
-                m_panForward = false;
-            } else if (event.keyCode == irr::KEY_DOWN) {
-                m_panBackward = false;
-            }
-            return false;
-        }
+        if (event.keyCode == irr::KEY_LEFT)  { m_panLeft = false; }
+        if (event.keyCode == irr::KEY_RIGHT) { m_panRight = false; }
+        if (event.keyCode == irr::KEY_UP)    { m_panForward = false; }
+        if (event.keyCode == irr::KEY_DOWN)  { m_panBackward = false; }
+        return false;
 
     default:
         return false;

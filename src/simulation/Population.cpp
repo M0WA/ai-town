@@ -19,14 +19,13 @@
 
 namespace {
 
-struct DemoEntry { int x; int z; int64_t originKey; };
 struct OuterTile { int x; int z; ZoneType zone; };
 
 static bool checkZonedNeighbor(std::unordered_map<int64_t, TileData>& tiles,
                                const TileData& ft, int fx, int fz,
                                int64_t candKey, ZoneType targetZone,
                                DensityTier targetDensity,
-                               std::vector<DemoEntry>& toDemo) {
+                               std::vector<Population::DemoEntry>& toDemo) {
     int originX = (ft.footprintOriginX == -1) ? fx : ft.footprintOriginX;
     int originZ = (ft.footprintOriginZ == -1) ? fz : ft.footprintOriginZ;
     int64_t ftOriginKey = Zoning::tileKey(originX, originZ);
@@ -317,6 +316,36 @@ void Population::notifyUpgradeResult(int tx, int tz, ZoneType zone, DensityTier 
 }
 
 // ---------------------------------------------------------------------------
+// collectDemoTargets — Phase 11q5 extracted soft-blocker loop (S3776)
+// ---------------------------------------------------------------------------
+
+bool Population::collectDemoTargets(Zoning& zoning, int tx, int tz, int newN,
+                                     ZoneType targetZone, DensityTier targetDensity,
+                                     int64_t candKey,
+                                     std::vector<Population::DemoEntry>& toDemo) const {
+    for (int dx = 0; dx < newN; ++dx) {
+        for (int dz = 0; dz < newN; ++dz) {
+            int fx = tx + dx, fz = tz + dz;
+            if (fx < 0 || fz < 0) return true;
+            int64_t fkey = Zoning::tileKey(fx, fz);
+            if (fkey == candKey) continue;
+
+            auto fit = zoning.m_tiles.find(fkey);
+            if (fit == zoning.m_tiles.end()) return true;
+
+            const TileData& ft = fit->second;
+            if (ft.isRoad) return true;
+            if (ft.isZoned) {
+                bool blocked = checkZonedNeighbor(zoning.m_tiles, ft, fx, fz,
+                                                   candKey, targetZone, targetDensity, toDemo);
+                if (blocked) return true;
+            }
+        }
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 // applyDensityUpgrade
 // ---------------------------------------------------------------------------
 
@@ -346,28 +375,10 @@ bool Population::applyDensityUpgrade(Zoning& zoning, int tx, int tz, int64_t can
     }
 
     // Check for soft blockers (zoned neighbours that can be demolished).
-    bool hasBlocker = false;
     std::vector<DemoEntry> toDemo;
-
-    for (int dx = 0; dx < newN && !hasBlocker; ++dx) {
-        for (int dz = 0; dz < newN && !hasBlocker; ++dz) {
-            int fx = tx + dx, fz = tz + dz;
-            if (fx < 0 || fz < 0) { hasBlocker = true; break; }
-            int64_t fkey = Zoning::tileKey(fx, fz);
-            if (fkey == candKey) continue;
-
-            auto fit = zoning.m_tiles.find(fkey);
-            if (fit == zoning.m_tiles.end()) { hasBlocker = true; break; }
-
-            const TileData& ft = fit->second;
-            if (ft.isRoad) { hasBlocker = true; break; }
-            if (ft.isZoned) {
-                hasBlocker = checkZonedNeighbor(zoning.m_tiles, ft, fx, fz,
-                                                candKey, targetZone, targetDensity, toDemo);
-            }
-        }
-    }
-
+    bool hasBlocker = collectDemoTargets(zoning, tx, tz, newN,
+                                         targetZone, targetDensity,
+                                         candKey, toDemo);
     if (hasBlocker) {
         retryCount++;
         return false;

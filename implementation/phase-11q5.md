@@ -127,12 +127,12 @@ The `unique_ptr` members in `AppSystems` are destroyed in reverse declaration or
 `renderSystem` (RAII value, first member) → destroyed after all `unique_ptr` members.
 No reordering of struct member declarations is required.
 
-- [ ] `AppSystems` raw-pointer members converted to `std::unique_ptr<T>`.
-- [ ] All `sys.X = new X(...)` lines use `std::make_unique<X>(...)`.
-- [ ] All pass-through sites use `.get()` where a raw pointer is required.
-- [ ] Manual delete block (lines 568–578) removed from `main()`.
-- [ ] No `new` expression paired with a matching `delete` remains in `main.cpp`.
-- [ ] Build succeeds and no unit/integration tests regress.
+- [x] `AppSystems` raw-pointer members converted to `std::unique_ptr<T>`.
+- [x] All `sys.X = new X(...)` lines use `std::make_unique<X>(...)`.
+- [x] All pass-through sites use `.get()` where a raw pointer is required.
+- [x] Manual delete block (lines 568–578) removed from `main()`.
+- [x] No `new` expression paired with a matching `delete` remains in `main.cpp`.
+- [x] Build succeeds and no unit/integration tests regress.
 
 ---
 
@@ -157,10 +157,10 @@ Target CC ≤ 10 for `handleMouseEvent` after extraction.
 
 Add all 8 declarations to the `private:` section of `EventReceiver.h`.
 
-- [ ] 8 private helper methods extracted; bodies moved verbatim from switch cases.
-- [ ] `handleMouseEvent` body is a pure dispatch switch (one call per case).
-- [ ] SonarCloud S3776 on `EventReceiver.cpp:72` resolves (CC ≤ 25).
-- [ ] All existing `EventReceiver` unit and integration tests pass unchanged.
+- [x] 8 private helper methods extracted; bodies moved verbatim from switch cases.
+- [x] `handleMouseEvent` body is a pure dispatch switch (one call per case).
+- [x] SonarCloud S3776 on `EventReceiver.cpp:72` resolves (CC ≤ 25).
+- [x] All existing `EventReceiver` unit and integration tests pass unchanged.
 
 ---
 
@@ -181,9 +181,9 @@ several cases. Extract the complex cases into private helpers:
 
 Add all 5 declarations to the `private:` section of `CameraController.h`.
 
-- [ ] 5 private helpers extracted; `OnInputEvent` CC ≤ 25.
-- [ ] SonarCloud S3776 on `CameraController.cpp:84` resolves.
-- [ ] All 9 existing `CameraController` unit tests pass unchanged.
+- [x] 5 private helpers extracted; `OnInputEvent` CC ≤ 25.
+- [x] SonarCloud S3776 on `CameraController.cpp:84` resolves.
+- [x] All 9 existing `CameraController` unit tests pass unchanged.
 
 ---
 
@@ -336,13 +336,13 @@ bool CitySimulation::hasRoadAdjacent(int tileX, int tileZ, int sN) const;
 
 Move the triple-loop into this helper and replace the inline block with a single call.
 
-- [ ] `checkServiceBuildingOverlap` extracted; `checkZoneFootprintClear` CC ≤ 25.
-- [ ] `flattenBorderRing` extracted; `applyZoneFootprint` CC ≤ 25.
-- [ ] `parseJsonField` template + `parseOptionalBoolArray` + `parseOptionalIntArray` + `parseDensityUnlockSection` added; `deserializeFromJson` CC ≤ 25.
-- [ ] `checkServiceFootprintClear` S134 resolved via `std::any_of` or extracted lambda.
-- [ ] `hasRoadAdjacent` extracted; S134 at line 658 resolved.
-- [ ] SonarCloud S3776 on `CitySimulation.cpp:285`, `320`, `997` and S134 on `306`, `359`, `361`, `626`, `658` resolve.
-- [ ] All existing `CitySimulation` and `simulation_tests` pass unchanged.
+- [x] `checkServiceBuildingOverlap` extracted; `checkZoneFootprintClear` CC ≤ 25.
+- [x] `flattenBorderRing` extracted; `applyZoneFootprint` CC ≤ 25.
+- [x] `parseJsonField` template + `parseOptionalBoolArray` + `parseOptionalIntArray` + `parseDensityUnlockSection` added; `deserializeFromJson` CC ≤ 25.
+- [x] `checkServiceFootprintClear` S134 resolved via `std::any_of` or extracted lambda.
+- [x] `hasRoadAdjacent` extracted; S134 at line 658 resolved.
+- [x] SonarCloud S3776 on `CitySimulation.cpp:285`, `320`, `997` and S134 on `306`, `359`, `361`, `626`, `658` resolve.
+- [x] All existing `CitySimulation` and `simulation_tests` pass unchanged.
 
 ---
 
@@ -408,10 +408,10 @@ if (hasBlocker) { retryCount++; return false; }
 
 Target CC ≤ 20 for `applyDensityUpgrade`.
 
-- [ ] `DemoEntry` struct moved from anonymous namespace in `Population.cpp` to `private` section of `Population` class in `Population.h`; `OuterTile`, `checkZonedNeighbor`, `clearFootprintCell` remain file-local in the anonymous namespace.
-- [ ] `collectDemoTargets` extracted; `applyDensityUpgrade` CC ≤ 25.
-- [ ] SonarCloud S3776 on `Population.cpp:323` resolves.
-- [ ] All `Population`-related simulation tests pass unchanged.
+- [x] `DemoEntry` struct moved from anonymous namespace in `Population.cpp` to `private` section of `Population` class in `Population.h`; `OuterTile`, `checkZonedNeighbor`, `clearFootprintCell` remain file-local in the anonymous namespace.
+- [x] `collectDemoTargets` extracted; `applyDensityUpgrade` CC ≤ 25.
+- [x] SonarCloud S3776 on `Population.cpp:323` resolves.
+- [x] All `Population`-related simulation tests pass unchanged.
 
 ---
 
@@ -475,11 +475,11 @@ for (uint64_t cid : affectedChunkIds(modifiedTiles[i].tx, modifiedTiles[i].tz)) 
 
 Include `<algorithm>` if not already present.
 
-- [ ] `expandBfsComponent` extracted; `largestContiguousFlatRegion` CC ≤ 25.
-- [ ] S134 at lines 475–478, 483 resolved by extraction.
-- [ ] Chunk deduplication loop simplified with `std::find`; S134 at line 855 resolved.
-- [ ] SonarCloud S3776 on `TerrainSystem.cpp:426` and S134 on `475–478`, `483`, `855` resolve.
-- [ ] All `TerrainSystem` tests pass unchanged.
+- [x] `expandBfsComponent` extracted; `largestContiguousFlatRegion` CC ≤ 25.
+- [x] S134 at lines 475–478, 483 resolved by extraction.
+- [x] Chunk deduplication loop simplified with `std::find`; S134 at line 855 resolved.
+- [x] SonarCloud S3776 on `TerrainSystem.cpp:426` and S134 on `475–478`, `483`, `855` resolve.
+- [x] All `TerrainSystem` tests pass unchanged.
 
 ---
 
@@ -517,10 +517,10 @@ if (m_camera->getAnimators().size() > 0)
 #endif
 ```
 
-- [ ] `clearOverlayNodeTextures()` extracted; `setZoneOverlay` CC ≤ 25.
-- [ ] `logUnexpectedAnimators()` extracted; S134 at line 439 resolved.
-- [ ] SonarCloud S3776 on `IrrlichtRenderer.cpp:1150` and S134 on `439` resolve.
-- [ ] All existing renderer tests pass unchanged.
+- [x] `clearOverlayNodeTextures()` extracted; `setZoneOverlay` CC ≤ 25.
+- [x] `logUnexpectedAnimators()` extracted; S134 at line 439 resolved.
+- [x] SonarCloud S3776 on `IrrlichtRenderer.cpp:1150` and S134 on `439` resolve.
+- [x] All existing renderer tests pass unchanged.
 
 ---
 
@@ -546,9 +546,9 @@ std::string effectivePath = resolveEffectiveSRGBPath(path, basename);
 
 Target CC ≤ 22 for `loadSRGB`.
 
-- [ ] `resolveEffectiveSRGBPath` extracted; `loadSRGB` CC ≤ 25.
-- [ ] SonarCloud S3776 on `TextureCache.cpp:155` resolves.
-- [ ] All `TextureCache` tests pass unchanged.
+- [x] `resolveEffectiveSRGBPath` extracted; `loadSRGB` CC ≤ 25.
+- [x] SonarCloud S3776 on `TextureCache.cpp:155` resolves.
+- [x] All `TextureCache` tests pass unchanged.
 
 ---
 
@@ -569,9 +569,9 @@ replace with:
 applyAtlasTexture(node, basePath);
 ```
 
-- [ ] `applyAtlasTexture` extracted; S134 at line 196 resolved.
-- [ ] SonarCloud S134 on `BuildingAssetLoader.cpp:196` resolves.
-- [ ] All `BuildingAssetLoader` tests pass unchanged.
+- [x] `applyAtlasTexture` extracted; S134 at line 196 resolved.
+- [x] SonarCloud S134 on `BuildingAssetLoader.cpp:196` resolves.
+- [x] All `BuildingAssetLoader` tests pass unchanged.
 
 ---
 

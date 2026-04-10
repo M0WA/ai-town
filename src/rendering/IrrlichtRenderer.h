@@ -599,7 +599,12 @@ private:
     irr::scene::SMesh* buildCoverageMesh(const std::vector<irr::core::vector2di>& tiles,
                                           irr::video::SColor color, float kTileSize);
 
-    // 2b: setZoneOverlay() helper.
+    // 2b: setZoneOverlay() helpers.
+    // clearOverlayNodeTextures: eviction sequence for the overlay node — clears all
+    // texture slots on all materials and flushes the driver material state.
+    // Called from setZoneOverlay() before removing the overlay node.
+    void clearOverlayNodeTextures();
+
     // flushZoneOverlayBuffer: flush current buffer to mesh when index limit is reached.
     void flushZoneOverlayBuffer(irr::scene::SMeshBuffer*& cur,
                                 irr::scene::SMesh* mesh, irr::u32& quadsInCur);
@@ -615,7 +620,11 @@ private:
     // evictOneLODNode: runs the eviction sequence on a single LODNode entry.
     void evictOneLODNode(LODNode* lodNode);
 
-    // 2e: setCamera() helper.
+    // 2e: setCamera() helpers.
+    // logUnexpectedAnimators: emits a warning when addCameraSceneNode() returns
+    // a camera with unexpected animators attached (debug builds only).
+    void logUnexpectedAnimators(size_t count) const;
+
     // updateCameraFrustum: updates clip distances on the camera.
     void updateCameraFrustum(const CameraParams& p);
 

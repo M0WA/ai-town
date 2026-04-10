@@ -420,6 +420,46 @@ int TerrainSystem::countFlatTiles(const std::vector<float>& hmap, int mapTilesX,
 }
 
 // ---------------------------------------------------------------------------
+// expandBfsComponent — BFS flood-fill from startIdx (Phase 11q5 helper 6a).
+// Populates out.size, out.minX/maxX, out.minZ/maxZ for the connected component.
+// ---------------------------------------------------------------------------
+void TerrainSystem::expandBfsComponent(int startIdx, int mapTilesX, int mapTilesZ,
+                                        const std::vector<bool>& isFlat,
+                                        std::vector<bool>& visited,
+                                        BfsComponent& out) const {
+    std::queue<int> q;
+    q.push(startIdx);
+    visited[startIdx] = true;
+    out.size = 0;
+
+    while (!q.empty()) {
+        int idx = q.front(); q.pop();
+        ++out.size;
+
+        int cx = idx % mapTilesX;
+        int cz = idx / mapTilesX;
+        if (cx < out.minX) out.minX = cx;
+        if (cx > out.maxX) out.maxX = cx;
+        if (cz < out.minZ) out.minZ = cz;
+        if (cz > out.maxZ) out.maxZ = cz;
+
+        // 4-connected neighbours.
+        const int dx4[4] = {1, -1, 0,  0};
+        const int dz4[4] = {0,  0, 1, -1};
+        for (int d = 0; d < 4; ++d) {
+            int nx = cx + dx4[d];
+            int nz = cz + dz4[d];
+            if (nx < 0 || nx >= mapTilesX) continue;
+            if (nz < 0 || nz >= mapTilesZ) continue;
+            int nIdx = nz * mapTilesX + nx;
+            if (!isFlat[nIdx] || visited[nIdx]) continue;
+            visited[nIdx] = true;
+            q.push(nIdx);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // largestContiguousFlatRegion — Phase 11q3 helper (1a).
 // BFS to find the largest connected flat region's bounding-box minimum dimension.
 // ---------------------------------------------------------------------------
@@ -456,48 +496,17 @@ int TerrainSystem::largestContiguousFlatRegion(const std::vector<float>& hmap, i
             int startIdx = startZ * mapTilesX + startX;
             if (!isFlat[startIdx] || visited[startIdx]) continue;
 
-            // BFS from this tile.
-            std::queue<int> q;
-            q.push(startIdx);
-            visited[startIdx] = true;
-            int componentSize = 0;
-
-            // Track the bounding box of the BFS component.
-            int minX = startX, maxX = startX;
-            int minZ = startZ, maxZ = startZ;
-
-            while (!q.empty()) {
-                int idx = q.front(); q.pop();
-                ++componentSize;
-
-                int cx = idx % mapTilesX;
-                int cz = idx / mapTilesX;
-                if (cx < minX) minX = cx;
-                if (cx > maxX) maxX = cx;
-                if (cz < minZ) minZ = cz;
-                if (cz > maxZ) maxZ = cz;
-
-                // 4-connected neighbours.
-                const int dx4[4] = {1, -1, 0,  0};
-                const int dz4[4] = {0,  0, 1, -1};
-                for (int d = 0; d < 4; ++d) {
-                    int nx = cx + dx4[d];
-                    int nz = cz + dz4[d];
-                    if (nx < 0 || nx >= mapTilesX) continue;
-                    if (nz < 0 || nz >= mapTilesZ) continue;
-                    int nIdx = nz * mapTilesX + nx;
-                    if (!isFlat[nIdx] || visited[nIdx]) continue;
-                    visited[nIdx] = true;
-                    q.push(nIdx);
-                }
-            }
+            BfsComponent comp;
+            comp.minX = startX; comp.maxX = startX;
+            comp.minZ = startZ; comp.maxZ = startZ;
+            expandBfsComponent(startIdx, mapTilesX, mapTilesZ, isFlat, visited, comp);
 
             // Use the bounding-box area as a conservative proxy for the
             // "does a 50x50 region fit" check.  A tighter check would require
             // a maximum-rectangle-in-histogram algorithm; for V1 the bounding
             // box approximation is sufficient.
-            int bbW = (maxX - minX + 1);
-            int bbH = (maxZ - minZ + 1);
+            int bbW = (comp.maxX - comp.minX + 1);
+            int bbH = (comp.maxZ - comp.minZ + 1);
             int bbMin = (bbW < bbH) ? bbW : bbH;
             if (bbMin > largestBFSSize) {
                 largestBFSSize = bbMin;
@@ -850,11 +859,10 @@ void TerrainSystem::setTileHeight(int tileX, int tileZ, float height)
     chunksToRebuild.reserve(16); // upper bound: 9 tiles * 4 candidates each
     for (int i = 0; i < modifiedCount; ++i) {
         for (uint64_t cid : affectedChunkIds(modifiedTiles[i].tx, modifiedTiles[i].tz)) {
-            bool already = false;
-            for (uint64_t existing : chunksToRebuild) {
-                if (existing == cid) { already = true; break; }
+            if (std::find(chunksToRebuild.begin(), chunksToRebuild.end(), cid)
+                    == chunksToRebuild.end()) {
+                chunksToRebuild.push_back(cid);
             }
-            if (!already) chunksToRebuild.push_back(cid);
         }
     }
 

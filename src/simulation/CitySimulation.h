@@ -217,8 +217,33 @@ private:
     // Phase 11q3 — extracted helper for placeServiceBuilding (S3776 + S134)
     bool checkServiceFootprintClear(int tileX, int tileZ, int sN) const;
 
+    // Phase 11q5 — AABB overlap test for service buildings (S3776 + S134)
+    bool checkServiceBuildingOverlap(int tileX, int tileZ, int N) const;
+
+    // Phase 11q5 — border-ring terrain flattening helper (S3776 + S134)
+    void flattenBorderRing(int tileX, int tileZ, int N, float flatHeight);
+
+    // Phase 11q5 — road-adjacency helper for placeServiceBuilding (S134)
+    bool hasRoadAdjacent(int tileX, int tileZ, int sN) const;
+
     // Phase 11q3 — extracted helpers for deserializeFromJson (S3776)
     bool parseZoningSection(const nlohmann::json& j, std::string& err);
     bool parseTrafficSection(const nlohmann::json& j, std::string& err);
     bool parseEconomySection(const nlohmann::json& j, int64_t& treasury, float taxRates[3], std::string& err);
+
+    // Phase 11q5 — scalar try-catch helper for deserializeFromJson (S3776)
+    template<typename T>
+    bool parseJsonField(const nlohmann::json& j, const char* key,
+                        T& out, std::string& errorOut) const;
+
+    // Phase 11q5 — optional array helpers for deserializeFromJson (S3776)
+    bool parseOptionalBoolArray(const nlohmann::json& j, const char* key,
+                                bool* out, int maxCount, std::string& errorOut) const;
+    bool parseOptionalIntArray(const nlohmann::json& j, const char* key,
+                               int* out, int maxCount, std::string& errorOut) const;
+
+    // Phase 11q5 — density unlock section helper for deserializeFromJson (S3776)
+    bool parseDensityUnlockSection(const nlohmann::json& j,
+                                    DensityUnlockState& out,
+                                    std::string& errorOut) const;
 };
