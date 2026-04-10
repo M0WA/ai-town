@@ -83,6 +83,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN echo "ci ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ci && \
     chmod 0440 /etc/sudoers.d/ci
 
+# Allow unlimited core dumps for the ci user (permanent — applied via PAM limits).
+RUN echo "ci soft core unlimited" >> /etc/security/limits.conf && \
+    echo "ci hard core unlimited" >> /etc/security/limits.conf
+
 # Ensure ci user has access to /usr/local/share
 RUN mkdir -p /usr/local/share/npm-global && \
   chown -R ci:ci /usr/local/share

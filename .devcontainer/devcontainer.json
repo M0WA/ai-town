@@ -12,6 +12,8 @@
   "runArgs": [
     "--cap-add=NET_ADMIN",
     "--cap-add=NET_RAW",
+    "--cap-add=SYS_PTRACE",
+    "--security-opt=seccomp=unconfined",
     "--env=DISPLAY=${localEnv:DISPLAY}",
     "--volume=/tmp/.X11-unix:/tmp/.X11-unix",
     "--device=/dev/snd",
