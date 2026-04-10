@@ -1,17 +1,21 @@
 # CI base image — extends ghcr.io/m0wa/aitown-ci-linux.
 # Both this file and ci.yml MUST pin identical digests (Atomicity Contract item 5).
-FROM ghcr.io/m0wa/aitown-ci-linux@sha256:52f7ddf4d4130144f41f72466ffe4a3b85c662f73c509aa415b58f067fb3dc74
+FROM ghcr.io/m0wa/aitown-ci-linux@sha256:fdf5a354a1a16166aad2448bdf157ae711aad11f83815e3d3792100caae4cdf1
+# The CI base image ends with USER ci. Switch to root for all build-time
+# installs below; switch back to ci (with NOPASSWD sudo) at the end.
+USER root
 
+ARG TARGETARCH
 ARG TZ
 ENV TZ="$TZ"
 
 ARG CLAUDE_CODE_VERSION=latest
 
-# Create node user (uid/gid 1000) to match the node:20 image convention
-RUN groupadd --gid 1000 node \
-  && useradd --uid 1000 --gid node --shell /bin/bash --create-home node
-
-# Install Node.js 20 via NodeSource (nodistro works on any Debian/Ubuntu variant)
+# Install Node.js 20 via NodeSource, then install all dev-ergonomics packages in one layer.
+# Excluded (already in CI image): git, curl, ca-certificates, jq, pkg-config,
+#   build-essential, ccache, ninja-build, gcc-13, g++-13, xvfb, libgl1-mesa-dev,
+#   libglu1-mesa-dev, libxxf86vm-dev, libx11-dev, libxext-dev, libglew-dev,
+#   libasound2-dev, libpulse-dev, lcov, ffmpeg, sox, python3, python3-pip, vorbis-tools.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg \
   && mkdir -p /etc/apt/keyrings \
@@ -19,72 +23,73 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
      | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
   && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
      > /etc/apt/sources.list.d/nodesource.list \
-  && apt-get update && apt-get install -y --no-install-recommends nodejs \
-  && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install developer-ergonomics packages not present in the CI base image.
-# Excluded (already in CI image): git, curl, ca-certificates, jq, pkg-config,
-#   build-essential, ccache, ninja-build, gcc-13, g++-13, xvfb, libgl1-mesa-dev,
-#   libglu1-mesa-dev, libxxf86vm-dev, libx11-dev, libxext-dev, libglew-dev,
-#   libasound2-dev, libpulse-dev, lcov, ffmpeg, sox, python3, python3-pip, vorbis-tools.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-  less \
-  procps \
-  sudo \
-  fzf \
-  zsh \
-  man-db \
-  unzip \
-  zip \
-  gnupg2 \
-  gh \
-  iptables \
-  ipset \
-  iproute2 \
-  dnsutils \
+  && apt-get update && apt-get install -y --no-install-recommends \
   aggregate \
-  nano \
-  vim \
+  assimp-utils \
   autoconf \
   automake \
-  libtool \
-  openssh-client \
-  valgrind \
-  binutils \
-  xauth \
-  libnvtt-bin \
-  mediainfo \
-  scrot \
-  htop \
-  tree \
-  ripgrep \
-  fd-find \
   bat \
-  imagemagick \
-  libimage-exiftool-perl \
-  libmagickwand-dev \
-  gdb \
-  lldb \
-  linux-perf \
-  heaptrack \
+  bear \
+  binutils \
   clang-format \
   clang-tidy \
   clangd \
-  bear \
+  dnsutils \
+  fd-find \
+  fzf \
+  gdb \
+  gh \
+  gnupg2 \
+  heaptrack \
+  htop \
+  imagemagick \
+  iproute2 \
+  ipset \
+  iptables \
+  less \
+  libimage-exiftool-perl \
+  libmagickwand-dev \
+  libnvtt-bin \
+  libtool \
+  linux-perf \
+  lldb \
+  man-db \
+  mediainfo \
+  nano \
+  nodejs \
+  openssh-client \
   pandoc \
-  assimp-utils \
   pngcheck \
+  procps \
   python3-opencv \
+  ripgrep \
+  scrot \
+  sudo \
+  tree \
+  unzip \
+  valgrind \
+  vim \
+  xauth \
   xxd \
+  zip \
+  zsh \
   && apt-get clean && rm -rf /var/lib/apt/lists/* \
   && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
   && (test -f /usr/bin/batcat && ln -sf /usr/bin/batcat /usr/local/bin/bat || true)
 
-# Ensure default node user has access to /usr/local/share
-RUN mkdir -p /usr/local/share/npm-global && \
-  chown -R node:node /usr/local/share
+# Grant ci user passwordless sudo (devcontainer only — not present in the CI image).
+RUN echo "ci ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ci && \
+    chmod 0440 /etc/sudoers.d/ci
 
-ARG USERNAME=node
+# Allow unlimited core dumps for the ci user (permanent — applied via PAM limits).
+RUN echo "ci soft core unlimited" >> /etc/security/limits.conf && \
+    echo "ci hard core unlimited" >> /etc/security/limits.conf
+
+# Ensure ci user has access to /usr/local/share
+RUN mkdir -p /usr/local/share/npm-global && \
+  chown -R ci:ci /usr/local/share
+
+ARG USERNAME=ci
 
 # Persist bash history.
 RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
@@ -99,46 +104,42 @@ ENV DEVCONTAINER=true
 ENV LIBGL_ALWAYS_SOFTWARE=1
 
 # Create workspace and config directories and set permissions
-RUN mkdir -p /workspace /home/node/.claude && \
-  chown -R node:node /workspace /home/node/.claude
+RUN mkdir -p /workspace /home/ci/.claude && \
+  chown -R ci:ci /workspace /home/ci/.claude
 
 WORKDIR /workspace
 
 ARG GIT_DELTA_VERSION=0.18.2
-RUN ARCH=$(dpkg --print-architecture) && \
-  curl --proto '=https' --tlsv1.2 --fail --location \
-    --output "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" \
-    "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
-  dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
-  rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
+RUN curl --proto '=https' --tlsv1.2 --fail --location \
+    --output "git-delta_${GIT_DELTA_VERSION}_${TARGETARCH}.deb" \
+    "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${TARGETARCH}.deb" && \
+  dpkg -i "git-delta_${GIT_DELTA_VERSION}_${TARGETARCH}.deb" && \
+  rm "git-delta_${GIT_DELTA_VERSION}_${TARGETARCH}.deb"
 
 # AMD Compressonator CLI (amd64 only — no GPU required for CPU-based DXT compression)
 ARG COMPRESSONATOR_VERSION=4.5.52
-RUN ARCH=$(dpkg --print-architecture) && \
-  if [ "$ARCH" = "amd64" ]; then \
+RUN if [ "${TARGETARCH}" = "amd64" ]; then \
     curl --proto '=https' --tlsv1.2 --fail --silent --location \
       --output "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" \
       "https://github.com/GPUOpen-Tools/compressonator/releases/download/V${COMPRESSONATOR_VERSION}/compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" && \
     dpkg -i "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" && \
     rm "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb"; \
   else \
-    echo "Skipping compressonatorcli: only amd64 binaries available (arch=$ARCH)"; \
+    echo "Skipping compressonatorcli: only amd64 binaries available (arch=${TARGETARCH})"; \
   fi
 
 # actionlint — GitHub Actions workflow linter
 ARG ACTIONLINT_VERSION=1.7.11
-RUN ARCH=$(dpkg --print-architecture) && \
-  curl --proto '=https' --tlsv1.2 --fail --silent --location \
-    --output "actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" \
-    "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" && \
-  tar -xzf "actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" actionlint && \
+RUN curl --proto '=https' --tlsv1.2 --fail --silent --location \
+    --output "actionlint_${ACTIONLINT_VERSION}_linux_${TARGETARCH}.tar.gz" \
+    "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${TARGETARCH}.tar.gz" && \
+  tar -xzf "actionlint_${ACTIONLINT_VERSION}_linux_${TARGETARCH}.tar.gz" actionlint && \
   mv actionlint /usr/local/bin/actionlint && \
-  rm "actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz"
+  rm "actionlint_${ACTIONLINT_VERSION}_linux_${TARGETARCH}.tar.gz"
 
 # Blender headless (amd64 only — no GPU required for background Python export scripts)
 ARG BLENDER_VERSION=4.3.2
-RUN ARCH=$(dpkg --print-architecture) && \
-  if [ "$ARCH" = "amd64" ]; then \
+RUN if [ "${TARGETARCH}" = "amd64" ]; then \
     BLENDER_MINOR="${BLENDER_VERSION%.*}" && \
     curl --proto '=https' --tlsv1.2 --fail --silent --location \
       --output "blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
@@ -148,7 +149,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
     ln -sf /opt/blender/blender /usr/local/bin/blender && \
     rm "blender-${BLENDER_VERSION}-linux-x64.tar.xz"; \
   else \
-    echo "Skipping Blender: only amd64 binaries available (arch=$ARCH)"; \
+    echo "Skipping Blender: only amd64 binaries available (arch=${TARGETARCH})"; \
   fi
 
 # NOTE: texdiag (DirectXTex DDS inspector) is Windows-only (links ole32/version).
@@ -156,14 +157,12 @@ RUN ARCH=$(dpkg --print-architecture) && \
 
 # CMake is pre-installed in the CI base image at /opt/cmake/bin — PATH already set.
 
-# Transfer ownership of vcpkg directories to the non-root user so that
-# cmake --preset ci-linux can take vcpkg's write lock during configure.
-# Both /opt/vcpkg (the toolchain) and /opt/vcpkg_installed (pre-built packages)
-# are baked into the CI base image as root-owned; the node user needs write access.
-RUN chown -R node:node /opt/vcpkg /opt/vcpkg_installed
+# Transfer ownership of /opt/vcpkg to ci so cmake --preset ci-linux can take
+# vcpkg's write lock during configure. /opt/vcpkg_installed is already ci-owned
+# (baked into the CI base image).
+RUN chown -R ci:ci /opt/vcpkg
 
-# Set up non-root user
-USER node
+USER ci
 
 # Install global packages
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
@@ -198,4 +197,4 @@ RUN pip3 install --break-system-packages numpy Pillow trimesh Wand scipy pypng
 # Install Claude
 RUN npm install -g --ignore-scripts @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
-USER node
+USER ci

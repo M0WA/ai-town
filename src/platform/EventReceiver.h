@@ -72,4 +72,14 @@ private:
     bool handleGuiEvent(const irr::SEvent::SGUIEvent& guiEvt, InputEvent& out);
     bool handleKeyboardEvent(const irr::SEvent::SKeyInput& key, InputEvent& out);
     bool handleMouseEvent(const irr::SEvent::SMouseInput& mouse, InputEvent& out);
+
+    // Phase 11q5 — extracted per-case helpers for handleMouseEvent (S3776 CC=42 → ≤10)
+    bool handleLMBDown(InputEvent& out);
+    bool handleRMBDown(InputEvent& out);
+    bool handleMMBDown(InputEvent& out);
+    bool handleLMBUp(InputEvent& out);
+    bool handleRMBUp(InputEvent& out);
+    bool handleMMBUp(InputEvent& out);
+    bool handleMouseMoved(InputEvent& out);
+    bool handleMouseWheel(InputEvent& out);
 };

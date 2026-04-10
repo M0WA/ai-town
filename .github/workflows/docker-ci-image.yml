@@ -66,18 +66,7 @@ jobs:
           fi
           echo "VCPKG_COMMIT will be supplied as build-arg: ${{ env.VCPKG_COMMIT_ID }}"
 
-      # Step 4: Compute VCPKG_SHORT_SHA (first 7 chars of VCPKG_COMMIT_ID).
-      # MUST be a SEPARATE step that writes to $GITHUB_ENV BEFORE any step that reads
-      # env.VCPKG_SHORT_SHA.
-      - name: Compute VCPKG_SHORT_SHA
-        shell: bash
-        run: |
-          FULL="${{ env.VCPKG_COMMIT_ID }}"
-          SHORT="${FULL:0:7}"
-          echo "VCPKG_SHORT_SHA=${SHORT}" >> $GITHUB_ENV
-          echo "VCPKG_SHORT_SHA=${SHORT}"
-
-      # Step 5: Supply-chain lint — validate that all uses: lines in this workflow
+      # Step 4: Supply-chain lint — validate that all uses: lines in this workflow
       # have full 40-character hex SHAs, and that any container: image: lines have
       # @sha256:[0-9a-f]{64} digest pins.
       - name: Supply-chain lint (workflow self-check)
@@ -100,7 +89,7 @@ jobs:
           fi
           echo "Container image digest lint passed (no container: image: lines present or all pinned)."
 
-      # Step 6: Log in to GitHub Container Registry.
+      # Step 5: Log in to GitHub Container Registry.
       - name: Log in to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4.1.0
         with:
@@ -108,13 +97,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 7: Set up Docker Buildx (required for GHA layer cache support).
+      # Step 6: Set up Docker Buildx (required for GHA layer cache support).
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
 
-      # Step 8: Build and push the CI image.
-      # Tags:
-      #   :vcpkg-<short-sha>  — push handle (vcpkg commit version); never consumed in code
+      # Step 7: Build and push the CI image.
+      # tags:       :latest — push handle only; consumers pin by sha256 digest
       # build-args:
       #   VCPKG_COMMIT        — supplied from VCPKG_COMMIT_ID extracted in step 2
       # cache-from/cache-to:  GHA layer cache so re-runs after small changes skip the multi-hour
@@ -126,19 +114,18 @@ jobs:
           context: .
           file: docker/ci-linux/Dockerfile
           push: true
-          tags: ghcr.io/m0wa/aitown-ci-linux:vcpkg-${{ env.VCPKG_SHORT_SHA }}
+          tags: ghcr.io/m0wa/aitown-ci-linux:latest
           build-args: VCPKG_COMMIT=${{ env.VCPKG_COMMIT_ID }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Step 9: Print digest and update instructions.
+      # Step 8: Print digest and update instructions.
       # The sha256 digest output by this step must be pinned in BOTH ci.yml and
       # .devcontainer/Dockerfile (Atomicity Contract items 4 and 5).
       - name: Print image digest and update instructions
         shell: bash
         env:
           IMAGE_DIGEST: ${{ steps.docker_build.outputs.digest }}
-          SHORT_SHA: ${{ env.VCPKG_SHORT_SHA }}
         run: |
           echo "============================================================"
           echo "Image digest: ${IMAGE_DIGEST}"

@@ -139,6 +139,13 @@ jobs:
     permissions:
       contents: read
 
+  asan-linux:
+    needs: [supply-chain-lint, validate-assets, prepare]
+    uses: ./.github/workflows/_asan-linux.yml
+    permissions:
+      packages: read
+      contents: read
+
   # ============================================================================
   # all-checks-pass — gate job required by branch protection
   # Must run with if: always() so it executes even when dependency jobs fail.
@@ -156,6 +163,7 @@ jobs:
       - build-windows
       - coverage-linux
       - markdown-lint
+      - asan-linux
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -172,6 +180,7 @@ jobs:
             "${{ needs.build-windows.result }}"
             "${{ needs.coverage-linux.result }}"
             "${{ needs.markdown-lint.result }}"
+            "${{ needs.asan-linux.result }}"
           )
           failed=0
           for result in "${results[@]}"; do

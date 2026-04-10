@@ -40,6 +40,19 @@
       }
     },
     {
+      "name": "ci-linux-asan",
+      "displayName": "CI Linux (ASAN + UBSAN, no coverage)",
+      "description": "Linux CI ASAN build: Ninja, no ccache (ASAN objects must not share ccache with non-ASAN builds).",
+      "inherits": "ci-linux",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined",
+        "ENABLE_COVERAGE": "OFF",
+        "CMAKE_C_COMPILER_LAUNCHER": "",
+        "CMAKE_CXX_COMPILER_LAUNCHER": ""
+      }
+    },
+    {
       "name": "local",
       "displayName": "Local build (auto-detect generator, no ccache)",
       "description": "For building outside the devcontainer. No Ninja or ccache required.",

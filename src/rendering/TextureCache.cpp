@@ -150,6 +150,29 @@ TextureCache::TextureCache(irr::video::E_DRIVER_TYPE driverType,
 }
 
 // ---------------------------------------------------------------------------
+// resolveEffectiveSRGBPath — Phase 11q5 helper (Deliverable 8).
+// Returns the effective load path for an sRGB texture. On constrained hardware
+// (GL_MAX_TEXTURE_SIZE < 4096), redirects buildings_atlas_d.dds to the 2k fallback.
+// ---------------------------------------------------------------------------
+std::string TextureCache::resolveEffectiveSRGBPath(const std::string& path,
+                                                    const std::string& basename) const {
+    if (basename == "buildings_atlas_d.dds" && m_maxTextureSize < 4096) {
+        // Replace the filename portion only — preserve the directory prefix.
+        std::string fallback = extractDirectory(path) + "buildings_atlas_d_2k.dds";
+        if (m_logger) {
+            m_logger->log("TextureCache: GL_MAX_TEXTURE_SIZE < 4096; "
+                          "loading fallback atlas buildings_atlas_d_2k.dds",
+                          irr::ELL_WARNING);
+        } else {
+            fprintf(stderr, "[TextureCache WARNING] TextureCache: GL_MAX_TEXTURE_SIZE < 4096; "
+                    "loading fallback atlas buildings_atlas_d_2k.dds\n");
+        }
+        return fallback;
+    }
+    return path;
+}
+
+// ---------------------------------------------------------------------------
 // loadSRGB — sRGB raw-GL upload path (DXT1/DXT5 compressed)
 // ---------------------------------------------------------------------------
 GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
@@ -173,19 +196,7 @@ GLuint TextureCache::loadSRGB(const std::string& path, GLenum /*format*/) {
     // Redirect to the 2048×2048 fallback atlas and emit a diagnostic warning.
     // effectivePath is the path actually loaded and used as the cache key.
     // It equals `path` for all textures except the primary atlas on constrained hardware.
-    std::string effectivePath = path;
-    if (basename == "buildings_atlas_d.dds" && m_maxTextureSize < 4096) {
-        // Replace the filename portion only — preserve the directory prefix.
-        effectivePath = extractDirectory(path) + "buildings_atlas_d_2k.dds";
-        if (m_logger) {
-            m_logger->log("TextureCache: GL_MAX_TEXTURE_SIZE < 4096; "
-                          "loading fallback atlas buildings_atlas_d_2k.dds",
-                          irr::ELL_WARNING);
-        } else {
-            fprintf(stderr, "[TextureCache WARNING] TextureCache: GL_MAX_TEXTURE_SIZE < 4096; "
-                    "loading fallback atlas buildings_atlas_d_2k.dds\n");
-        }
-    }
+    std::string effectivePath = resolveEffectiveSRGBPath(path, basename);
 
     // Derive the effective basename for mip-level dispatch below.
     const std::string effectiveBasename = extractBasename(effectivePath);

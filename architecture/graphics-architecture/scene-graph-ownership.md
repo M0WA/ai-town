@@ -179,7 +179,18 @@ For static buildings, `addMeshSceneNode(static_cast<IMesh*>(lod0))` must be used
 
 - Mesh pointers (`IAnimatedMesh*`) are **borrowed** from the Irrlicht mesh cache.
   `ISceneManager::getMesh()` returns a non-owning pointer; the cache holds
-  `ref_count == 1`. Do NOT call `grab()` or `drop()` on these pointers.
+  `ref_count == 1`. Do NOT call `grab()` or `drop()` on these pointers in the
+  normal LOD swap path.
+  **Exception — `despawnVehicleAgent` shared-mesh hold**: when despawning an agent
+  node that shares a cached `IAnimatedMesh*` with other live agent nodes (same zone
+  and variant index), `despawnVehicleAgent` performs a temporary `grab()` before
+  `node->remove()` and a matching `drop()` after. This prevents the mesh ref-count
+  from hitting zero during `remove()` while other nodes still reference the same
+  mesh — without the hold, the next `drawAll()` would access freed vertex data
+  (SIGSEGV). The `grab()`/`drop()` is scoped to the single `despawnVehicleAgent`
+  call and does not affect the scene-manager cache's long-term ownership. See
+  §Agent Vehicle Node Registry — `despawnVehicleAgent` step 2 for the full
+  sequence.
 - `CMeshSceneNode::setMesh(IMesh*)` internally drops the old mesh and grabs the new mesh.
   Cast `IAnimatedMesh*` to `IMesh*` (safe — `IAnimatedMesh` publicly inherits `IMesh`):
 
@@ -724,19 +735,37 @@ any number of manually placed vehicle nodes.
      This ensures a vehicle facing east on a north-south slope correctly rolls rather
      than pitches.
    Does nothing if handle is absent (agent was culled).
-3. `despawnVehicleAgent(handle)` → runs the following eviction sequence, then erases from
-   `m_agentNodes`:
-   1. Iterate all material slots — call `mat.setTexture(t, nullptr)` for every texture unit
-      `t` in `[0, MATERIAL_MAX_TEXTURES)` (same pattern as `destroyVehicleNode` / Phase 10).
-   2. `m_driver->setMaterial(SMaterial{})` — flush driver last-bound state.
-   3. `node->remove()` — release the scene node. Do NOT access the node pointer after this
-      line. (Agent nodes use raw `IMeshSceneNode*`, not `LODNode*` — no wrapper to delete.)
-   4. Erase the entry from `m_agentNodes`.
+3. `despawnVehicleAgent(handle)` → runs the following eviction sequence:
+   1. **Null-before-remove**: set `m_agentNodes[handle] = nullptr` then erase the entry
+      from `m_agentNodes` **before** any side-effects of `node->remove()`. This mirrors
+      the `SceneEntityManager::destroy()` invariant (line 5 of this document) and prevents
+      a transiently dangling pointer in the map if `node->remove()` triggers re-entrant
+      callbacks or assertions that inspect the registry.
+   2. **Shared-mesh lifetime hold**: call `node->getMesh()->grab()` on the `IMesh*`
+      returned by the scene node **before** `node->remove()`. Multiple agent nodes with
+      the same zone and variant index share one `IAnimatedMesh*` from the scene-manager
+      mesh cache. Without this hold, `node->remove()` may drop the mesh ref-count to zero
+      and free the mesh while other live nodes still reference it — the next `drawAll()`
+      then passes freed vertex data to the GL driver (SIGSEGV). The `grab()` keeps the
+      mesh alive through the `remove()` call; the matching `drop()` in step 6 releases
+      it. This is a **documented exception** to the "Do NOT call `grab()` or `drop()` on
+      mesh cache pointers" rule in §Phase 9 LOD swap contract — see the exception note in
+      that section.
+   3. Iterate all material slots — cache `SMaterial& mat = node->getMaterial(i)` in the
+      outer loop and call `mat.setTexture(t, nullptr)` for every texture unit `t` in
+      `[0, MATERIAL_MAX_TEXTURES)` (C-4 constraint: `getMaterial(i)` called exactly once
+      per outer iteration).
+   4. `m_driver->setMaterial(SMaterial{})` — flush driver last-bound state.
+   5. `node->remove()` — release the scene node. Do NOT access the node pointer after
+      this line. (Agent nodes use raw `IMeshSceneNode*`, not `LODNode*` — no wrapper to
+      delete.)
+   6. `sharedMesh->drop()` — release the temporary hold acquired in step 2. The mesh
+      remains alive if other agent nodes or the scene-manager cache still hold references.
 
    **TextureCache note**: vehicle atlas textures (`vehicles_diffuse_atlas_d.dds` etc.) are
    loaded **once at renderer init**, not per-agent-spawn. `spawnVehicleAgent` does NOT call
    `TextureCache::loadSRGB`; therefore `despawnVehicleAgent` does NOT call
-   `TextureCache::releaseSRGB`. Steps 1–2 above release the node's texture reference without
+   `TextureCache::releaseSRGB`. Steps 3–4 above release the node's texture reference without
    disturbing the shared atlas.
 
 **`vehicleMeshPath()` — zone-to-mesh mapping**: `spawnVehicleAgent()` calls a free function
@@ -780,7 +809,11 @@ Constraints for the invalid-index guard contract.
 
 **SMesh / drop() rules**: agent nodes use `IAnimatedMesh*` loaded via `ISceneManager::getMesh()`
 and cast to `IMesh*` for `addMeshSceneNode` — the scene manager owns the mesh;
-`IrrlichtRenderer` must NOT call `->drop()` on it.
+`IrrlichtRenderer` must NOT call `->drop()` on it in the normal spawn/move path.
+**Exception**: `despawnVehicleAgent` performs a temporary `grab()`/`drop()` hold on the
+shared mesh around `node->remove()` to prevent premature deallocation when multiple agent
+nodes share the same cached `IAnimatedMesh*`. See `despawnVehicleAgent` step 2 above and
+§Phase 9 LOD swap contract exception note for the rationale.
 
 ---
 
@@ -862,6 +895,12 @@ on a clean slate without reinitializing the renderer or device.
    (texture clear → `m_driver->setMaterial(SMaterial{})` → `node->remove()`), then
    `m_agentNodes.clear()` after the loop. Traffic vehicle scene nodes that persist from
    game 1 into game 2 would otherwise ghost in the scene.
+   **Note**: the `despawnVehicleAgent` shared-mesh `grab()`/`drop()` hold (step 2 in the
+   per-agent eviction sequence) is NOT required in the `clearCity()` bulk path because
+   every agent node is removed in the same loop — no live agent node can reference a
+   freed mesh mid-iteration. The null-before-remove invariant is likewise not required
+   because the entire map is cleared in one `m_agentNodes.clear()` call after the loop,
+   not by per-entry erase during iteration.
 4. **Evict intersection signal nodes**: iterate `m_intersectionNodes` and apply the full
    eviction sequence on each node (see §Intersection Signal Billboard Registry for the
    canonical contract):

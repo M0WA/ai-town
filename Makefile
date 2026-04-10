@@ -33,7 +33,9 @@ COVERAGE_HTML     := coverage_html
 # Target range: 95–98%. Tests must stay above 95; aim for 98.
 COVERAGE_MIN      := 95.0
 
-.PHONY: config build clean test
+DEBUG_DIR := build_debug
+
+.PHONY: config build clean test debug
 
 ## Generate the CMake build configuration.
 ## Auto-selects ci-linux (Ninja+ccache) or local preset based on available tools.
@@ -48,9 +50,19 @@ build: $(BUILD_DIR)/CMakeCache.txt
 $(BUILD_DIR)/CMakeCache.txt:
 	$(MAKE) config
 
+## Build with debug symbols (RelWithDebInfo) into build_debug/.
+## Enables core dump analysis: run with `ulimit -c unlimited` then `gdb ./build_debug/aitown core`.
+debug:
+	cmake -B $(DEBUG_DIR) -S . \
+	  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+	  -DENABLE_COVERAGE=OFF \
+	  -DCMAKE_TOOLCHAIN_FILE=$(VCPKG_ROOT)/scripts/buildsystems/vcpkg.cmake \
+	  -DVCPKG_OVERLAY_PORTS=vcpkg-overlays
+	cmake --build $(DEBUG_DIR) -- -j$$(nproc)
+
 ## Remove all build artifacts and coverage files.
 clean:
-	rm -rf $(BUILD_DIR) $(COVERAGE_INFO) $(COVERAGE_FILTERED) $(COVERAGE_HTML)
+	rm -rf $(BUILD_DIR) $(DEBUG_DIR) $(COVERAGE_INFO) $(COVERAGE_FILTERED) $(COVERAGE_HTML)
 
 ## Build with coverage, run unit + integration + OpenGL tests, generate lcov report,
 ## and enforce the $(COVERAGE_MIN)% total line coverage gate.

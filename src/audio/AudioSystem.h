@@ -118,6 +118,12 @@ public:
     // Returns true once transitionToMainMenu() completes its final sentinel store.
     bool isMainMenuMusicLooping() const { return m_mainMenuMusicLooping; }
 
+#ifdef AITOWN_TESTING_ENABLED
+    // Test-only accessor: returns the AL source handle at pool index poolIdx.
+    // Used by VehicleReleaseTest to poll AL source state directly.
+    unsigned int testGetSourceHandle(int poolIdx) const;
+#endif  // AITOWN_TESTING_ENABLED
+
     void update(float realDeltaSeconds) override;
     void setMasterVolume(float gain) override;
     void setMusicVolume(float gain) override;
@@ -364,6 +370,14 @@ private:
     float              m_masterVolume{1.0f};
     std::atomic<float> m_musicVolume{0.8f};
     std::atomic<float> m_sfxVolume{0.8f};
+
+    // -----------------------------------------------------------------------
+    // Listener world-space position — updated each frame by syncListenerToCamera.
+    // Used by updateVehicleAudio to compute distSq for eviction heuristic.
+    // Main thread only (no atomic needed — both writer and reader are main thread).
+    // -----------------------------------------------------------------------
+    float m_listenerX{0.f};
+    float m_listenerZ{0.f};
 
     // -----------------------------------------------------------------------
     // Time-of-day state.

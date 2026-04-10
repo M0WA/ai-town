@@ -688,3 +688,113 @@ TEST_F(QueryPanelIntegrationTest, GetBounds_ReturnsValidRect)
     EXPECT_EQ(bounds.w, 340);
     EXPECT_EQ(bounds.h, 280);
 }
+
+// ============================================================================
+// Phase 11q6: Service building inspection — populate() with a service building
+// tile must display the building type name (e.g. "Fire Station"), NOT "Unzoned".
+// Exercises the serviceType != ServiceBuildingType::None branch in QueryPanel.cpp.
+// ============================================================================
+TEST_F(QueryPanelIntegrationTest, ServiceBuilding_ShowsTypeName_NotUnzoned)
+{
+    QueryResult qr;
+    qr.tileX   = 4;
+    qr.tileZ   = 8;
+    qr.isZoned = false;
+    qr.isRoad  = false;
+    qr.serviceType = ServiceBuildingType::FireStation;
+    qr.coverage.fire = 95.0f;
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    // Must show "Fire Station", NOT "Unzoned".
+    EXPECT_CALL(backend_, setElementText(_, std::string("Fire Station"))).Times(AtLeast(1));
+    // Coverage line must show fire coverage.
+    EXPECT_CALL(backend_, setElementText(_, HasSubstr("Fire: 95%"))).Times(AtLeast(1));
+
+    panel_->populate(qr, 4, 8, 500, 500, tileBounds);
+
+    EXPECT_TRUE(panel_->isOpen());
+}
+
+// ============================================================================
+// Phase 11q6: Service building type name for each ServiceBuildingType variant.
+// ============================================================================
+TEST_F(QueryPanelIntegrationTest, ServiceBuilding_PoliceStation_ShowsTypeName)
+{
+    QueryResult qr;
+    qr.tileX   = 2;
+    qr.tileZ   = 3;
+    qr.isZoned = false;
+    qr.isRoad  = false;
+    qr.serviceType = ServiceBuildingType::PoliceStation;
+    qr.coverage.police = 70.0f;
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, std::string("Police Station"))).Times(AtLeast(1));
+
+    panel_->populate(qr, 2, 3, 500, 500, tileBounds);
+}
+
+TEST_F(QueryPanelIntegrationTest, ServiceBuilding_PowerPlant_ShowsTypeName)
+{
+    QueryResult qr;
+    qr.tileX   = 1;
+    qr.tileZ   = 1;
+    qr.isZoned = false;
+    qr.isRoad  = false;
+    qr.serviceType = ServiceBuildingType::PowerPlant;
+    qr.coverage.power = 100.0f;
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, std::string("Power Plant"))).Times(AtLeast(1));
+
+    panel_->populate(qr, 1, 1, 500, 500, tileBounds);
+}
+
+TEST_F(QueryPanelIntegrationTest, ServiceBuilding_WaterTower_ShowsTypeName)
+{
+    QueryResult qr;
+    qr.tileX   = 9;
+    qr.tileZ   = 9;
+    qr.isZoned = false;
+    qr.isRoad  = false;
+    qr.serviceType = ServiceBuildingType::WaterTower;
+    qr.coverage.water = 85.0f;
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementText(_, std::string("Water Tower"))).Times(AtLeast(1));
+
+    panel_->populate(qr, 9, 9, 500, 500, tileBounds);
+}
+
+// Phase 11q6: draw() after populate() with service building type exercises the
+// serviceType != None branch inside the kEconomyRefreshFrames refresh block in
+// draw(). populate() resets m_drawFrame=0 / m_lastEconomyFrame=0, so the
+// refresh fires on draw() call 120 (120-0 >= 120).
+TEST_F(QueryPanelIntegrationTest, Draw_AfterPopulateServiceBuilding_RefreshesServiceData)
+{
+    QueryResult qr;
+    qr.tileX       = 4;
+    qr.tileZ       = 8;
+    qr.isZoned     = false;
+    qr.isRoad      = false;
+    qr.serviceType = ServiceBuildingType::FireStation;
+    qr.coverage.fire = 95.0f;
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    ON_CALL(sim_, queryTile(_, _)).WillByDefault(Return(qr));
+
+    panel_->populate(qr, 4, 8, 500, 500, tileBounds);
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementVisible(_, _)).Times(AnyNumber());
+
+    for (int i = 0; i < 122; ++i) {
+        panel_->draw();
+    }
+
+    EXPECT_TRUE(panel_->isOpen());
+}

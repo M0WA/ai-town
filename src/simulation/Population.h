@@ -56,6 +56,9 @@ public:
     void checkCityRatingTransition(std::queue<SimulationNotification>& notifications);
     void updateMusicIntensity(const Economy& economy, IAudioSystem* audio);
 
+    // Phase 11q5 — promoted from anonymous namespace; used by collectDemoTargets
+    struct DemoEntry { int x; int z; int64_t originKey; };
+
 #ifdef AITOWN_TESTING_ENABLED
     void testForceUnlockDensityTier(ZoneType zone, DensityTier tier);
 #endif
@@ -85,6 +88,12 @@ private:
                             IRenderer* renderer, IAudioSystem* audio,
                             int& sfxCallsThisTick,
                             std::queue<SimulationNotification>& notifications);
+
+    // Phase 11q5 — soft-blocker collection helper for applyDensityUpgrade (S3776)
+    bool collectDemoTargets(Zoning& zoning, int tx, int tz, int newN,
+                            ZoneType targetZone, DensityTier targetDensity,
+                            int64_t candKey,
+                            std::vector<DemoEntry>& toDemo) const;
 
     // Phase 11q3 — extracted helpers for applyDensityUpgrade (S3776)
     bool validateUpgradeFootprint(Zoning& zoning, int tx, int tz,

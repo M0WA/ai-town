@@ -231,6 +231,13 @@ private:
     // Reverse lookup: ITexture* → path string for releaseLinear(ITexture*).
     std::unordered_map<irr::video::ITexture*, std::string> m_linearTexturesByPtr;
 
+    // resolveEffectiveSRGBPath: returns the effective load path for an sRGB texture.
+    // For buildings_atlas_d.dds on constrained hardware (GL_MAX_TEXTURE_SIZE < 4096),
+    // redirects to the 2048×2048 fallback atlas and emits a diagnostic warning.
+    // All other textures return `path` unchanged.
+    std::string resolveEffectiveSRGBPath(const std::string& path,
+                                         const std::string& basename) const;
+
     // --- Phase 11q3 refactoring helpers (Section 7a) ---
 
     // parseDDSHeader: validates magic + header fields from raw DDS file data.
