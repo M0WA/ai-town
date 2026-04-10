@@ -102,6 +102,7 @@ jobs:
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
 
       # Step 7: Build and push the CI image.
+      # tags:       :latest — push handle only; consumers pin by sha256 digest
       # build-args:
       #   VCPKG_COMMIT        — supplied from VCPKG_COMMIT_ID extracted in step 2
       # cache-from/cache-to:  GHA layer cache so re-runs after small changes skip the multi-hour
@@ -113,6 +114,7 @@ jobs:
           context: .
           file: docker/ci-linux/Dockerfile
           push: true
+          tags: ghcr.io/m0wa/aitown-ci-linux:latest
           build-args: VCPKG_COMMIT=${{ env.VCPKG_COMMIT_ID }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
