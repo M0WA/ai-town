@@ -261,6 +261,19 @@ private:
 
     // --- Phase 11q3 refactoring helpers (Section 1a–1e) ---
 
+    // BFS component result — returned by expandBfsComponent.
+    struct BfsComponent {
+        int size{0};
+        int minX, maxX, minZ, maxZ;
+    };
+
+    // expandBfsComponent: BFS flood-fill from startIdx; populates out with
+    // component size and bounding box. Called by largestContiguousFlatRegion.
+    void expandBfsComponent(int startIdx, int mapTilesX, int mapTilesZ,
+                            const std::vector<bool>& isFlat,
+                            std::vector<bool>& visited,
+                            BfsComponent& out) const;
+
     // 1a: generate() helpers — extracted from the monolithic generate() body.
     // buildHeightmapBuffer: fills hmap with procedural height values using rng.
     void buildHeightmapBuffer(std::vector<float>& hmap, int vertX, int vertZ, ITerrainRNG* rng);

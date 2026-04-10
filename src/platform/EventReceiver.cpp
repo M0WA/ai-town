@@ -87,94 +87,114 @@ bool EventReceiver::handleMouseEvent(const irr::SEvent::SMouseInput& mouse, Inpu
     out.x     = virtX;
     out.y     = virtY;
 
+    // Phase 11q5: pure dispatch switch — one helper call per case (S3776 CC ≤ 10).
     switch (mouse.Event) {
-    case irr::EMIE_LMOUSE_PRESSED_DOWN:
-        out.type   = InputEvent::Type::MouseButtonDown;
-        out.button = 0;  // LMB
-        // UIManager first; if consumed, do not forward to CameraController.
-        if (m_uiManager && m_uiManager->onEvent(out)) return true;
-        if (m_camera) m_camera->OnInputEvent(out);
-        return false;
-
-    case irr::EMIE_RMOUSE_PRESSED_DOWN:
-        out.type   = InputEvent::Type::MouseButtonDown;
-        out.button = 1;  // RMB
-        // Suppress camera drag when not in gameplay or paused (e.g., main menu).
-        if (!m_uiManager || !m_uiManager->isGameplayOrPaused()) {
-            return false;
-        }
-        // Always start camera drag immediately — tool cancel is deferred to RMB up
-        // (only when no movement occurred, i.e. a short click, not a drag).
-        // UIManager is NOT called on RMB down; it sees RMB up only for click-cancel.
-        m_rmbDragActive = true;
-        m_rmbMoved = false;
-        if (m_camera) m_camera->OnInputEvent(out);
-        return false;
-
-    case irr::EMIE_MMOUSE_PRESSED_DOWN:
-        out.type   = InputEvent::Type::MouseButtonDown;
-        out.button = 2;  // MMB — camera pass-through, no UIManager call
-        m_mmbDragActive = true;
-        if (m_camera) m_camera->OnInputEvent(out);
-        return false;
-
-    case irr::EMIE_LMOUSE_LEFT_UP:
-        out.type   = InputEvent::Type::MouseButtonUp;
-        out.button = 0;
-        if (m_uiManager && m_uiManager->onEvent(out)) return true;
-        if (m_camera) m_camera->OnInputEvent(out);
-        return false;
-
-    case irr::EMIE_RMOUSE_LEFT_UP:
-        out.type   = InputEvent::Type::MouseButtonUp;
-        out.button = 1;
-        m_rmbDragActive = false;
-        {
-            // Only notify UIManager on RMB click (no movement during press).
-            // If m_rmbMoved is true the user was dragging the camera — do not cancel tool.
-            bool consumed = false;
-            if (!m_rmbMoved && m_uiManager) {
-                consumed = m_uiManager->onEvent(out);
-            }
-            // Always forward to CameraController — it MUST receive RMB up to clear
-            // its own m_rmbDragActive. Without this, a short RMB click (UIManager
-            // consumes the up event) leaves CameraController in drag state and
-            // subsequent mouse moves rotate the camera with no button held.
-            if (m_camera) m_camera->OnInputEvent(out);
-            return consumed;
-        }
-
-    case irr::EMIE_MMOUSE_LEFT_UP:
-        out.type   = InputEvent::Type::MouseButtonUp;
-        out.button = 2;
-        m_mmbDragActive = false;
-        // MMB pass-through — no UIManager call.
-        if (m_camera) m_camera->OnInputEvent(out);
-        return false;
-
-    case irr::EMIE_MOUSE_MOVED:
-        out.type = InputEvent::Type::MouseMove;
-        // Camera pass-through during MMB or RMB drag (Priority 1 — bypasses UIManager).
-        if (m_mmbDragActive || m_rmbDragActive) {
-            if (m_rmbDragActive) m_rmbMoved = true;
-            if (m_camera) m_camera->OnInputEvent(out);
-            return false;
-        }
-        // Normal mouse move: UIManager first, then CameraController if not consumed.
-        if (m_uiManager && m_uiManager->onEvent(out)) return true;
-        if (m_camera) m_camera->OnInputEvent(out);
-        return false;
-
+    case irr::EMIE_LMOUSE_PRESSED_DOWN: return handleLMBDown(out);
+    case irr::EMIE_RMOUSE_PRESSED_DOWN: return handleRMBDown(out);
+    case irr::EMIE_MMOUSE_PRESSED_DOWN: return handleMMBDown(out);
+    case irr::EMIE_LMOUSE_LEFT_UP:     return handleLMBUp(out);
+    case irr::EMIE_RMOUSE_LEFT_UP:     return handleRMBUp(out);
+    case irr::EMIE_MMOUSE_LEFT_UP:     return handleMMBUp(out);
+    case irr::EMIE_MOUSE_MOVED:        return handleMouseMoved(out);
     case irr::EMIE_MOUSE_WHEEL:
-        out.type       = InputEvent::Type::MouseWheel;
         out.wheelDelta = mouse.Wheel;
-        // Scroll wheel: camera pass-through, UIManager NOT called.
-        if (m_camera) m_camera->OnInputEvent(out);
-        return false;
-
+        return handleMouseWheel(out);
     default:
         return false;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 11q5 — per-case mouse-event helpers (extracted from handleMouseEvent)
+// ---------------------------------------------------------------------------
+
+bool EventReceiver::handleLMBDown(InputEvent& out) {
+    out.type   = InputEvent::Type::MouseButtonDown;
+    out.button = 0;  // LMB
+    // UIManager first; if consumed, do not forward to CameraController.
+    if (m_uiManager && m_uiManager->onEvent(out)) return true;
+    if (m_camera) m_camera->OnInputEvent(out);
+    return false;
+}
+
+bool EventReceiver::handleRMBDown(InputEvent& out) {
+    out.type   = InputEvent::Type::MouseButtonDown;
+    out.button = 1;  // RMB
+    // Suppress camera drag when not in gameplay or paused (e.g., main menu).
+    if (!m_uiManager || !m_uiManager->isGameplayOrPaused()) {
+        return false;
+    }
+    // Always start camera drag immediately — tool cancel is deferred to RMB up
+    // (only when no movement occurred, i.e. a short click, not a drag).
+    // UIManager is NOT called on RMB down; it sees RMB up only for click-cancel.
+    m_rmbDragActive = true;
+    m_rmbMoved = false;
+    if (m_camera) m_camera->OnInputEvent(out);
+    return false;
+}
+
+bool EventReceiver::handleMMBDown(InputEvent& out) {
+    out.type   = InputEvent::Type::MouseButtonDown;
+    out.button = 2;  // MMB — camera pass-through, no UIManager call
+    m_mmbDragActive = true;
+    if (m_camera) m_camera->OnInputEvent(out);
+    return false;
+}
+
+bool EventReceiver::handleLMBUp(InputEvent& out) {
+    out.type   = InputEvent::Type::MouseButtonUp;
+    out.button = 0;
+    if (m_uiManager && m_uiManager->onEvent(out)) return true;
+    if (m_camera) m_camera->OnInputEvent(out);
+    return false;
+}
+
+bool EventReceiver::handleRMBUp(InputEvent& out) {
+    out.type   = InputEvent::Type::MouseButtonUp;
+    out.button = 1;
+    m_rmbDragActive = false;
+    // Only notify UIManager on RMB click (no movement during press).
+    // If m_rmbMoved is true the user was dragging the camera — do not cancel tool.
+    bool consumed = false;
+    if (!m_rmbMoved && m_uiManager) {
+        consumed = m_uiManager->onEvent(out);
+    }
+    // Always forward to CameraController — it MUST receive RMB up to clear
+    // its own m_rmbDragActive. Without this, a short RMB click (UIManager
+    // consumes the up event) leaves CameraController in drag state and
+    // subsequent mouse moves rotate the camera with no button held.
+    if (m_camera) m_camera->OnInputEvent(out);
+    return consumed;
+}
+
+bool EventReceiver::handleMMBUp(InputEvent& out) {
+    out.type   = InputEvent::Type::MouseButtonUp;
+    out.button = 2;
+    m_mmbDragActive = false;
+    // MMB pass-through — no UIManager call.
+    if (m_camera) m_camera->OnInputEvent(out);
+    return false;
+}
+
+bool EventReceiver::handleMouseMoved(InputEvent& out) {
+    out.type = InputEvent::Type::MouseMove;
+    // Camera pass-through during MMB or RMB drag (Priority 1 — bypasses UIManager).
+    if (m_mmbDragActive || m_rmbDragActive) {
+        if (m_rmbDragActive) m_rmbMoved = true;
+        if (m_camera) m_camera->OnInputEvent(out);
+        return false;
+    }
+    // Normal mouse move: UIManager first, then CameraController if not consumed.
+    if (m_uiManager && m_uiManager->onEvent(out)) return true;
+    if (m_camera) m_camera->OnInputEvent(out);
+    return false;
+}
+
+bool EventReceiver::handleMouseWheel(InputEvent& out) {
+    out.type = InputEvent::Type::MouseWheel;
+    // Scroll wheel: camera pass-through, UIManager NOT called.
+    if (m_camera) m_camera->OnInputEvent(out);
+    return false;
 }
 
 // ---------------------------------------------------------------------------

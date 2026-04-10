@@ -113,4 +113,11 @@ private:
     // Phase 11q3 — extracted helpers for OnInputEvent (S3776)
     void applyMouseDrag(float dx, float dy);
     void applyScrollZoom(float delta);
+
+    // Phase 11q5 — extracted per-case helpers for OnInputEvent (S3776 CC=33 → ≤15)
+    bool handleRMBDown(const InputEvent& e);
+    bool handleMMBDown(const InputEvent& e);
+    bool handleRMBUp(const InputEvent& e);
+    bool handleMMBUp(const InputEvent& e);
+    bool handleMouseMoved(const InputEvent& e);
 };

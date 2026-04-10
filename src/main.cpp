@@ -39,6 +39,7 @@
 #include <cstring>
 #include <cmath>
 #include <exception>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -60,19 +61,19 @@ struct AgentAudioState {
 // =========================================================================
 struct AppSystems {
     RenderSystem      renderSystem;
-    IrrlichtUIBackend* uiBackend{nullptr};
-    UIScaler*          uiScaler{nullptr};
+    std::unique_ptr<IrrlichtUIBackend> uiBackend;
+    std::unique_ptr<UIScaler>          uiScaler;
     irr::scene::ICameraSceneNode* cameraNode{nullptr};
-    CameraController*  cameraController{nullptr};
-    IrrlichtRenderer*  renderer{nullptr};
+    std::unique_ptr<CameraController>  cameraController;
+    std::unique_ptr<IrrlichtRenderer>  renderer;
     WallClock          wallClock;
-    AudioSystem*       audioSystem{nullptr};
+    std::unique_ptr<AudioSystem>       audioSystem;
     StdSimulationRNG   simRng;
-    TerrainSystem*     terrainSystem{nullptr};
-    CitySimulation*    citySimulation{nullptr};
-    UIManager*         uiManager{nullptr};
-    SaveSystem*        saveSystem{nullptr};
-    EventReceiver*     eventReceiver{nullptr};
+    std::unique_ptr<TerrainSystem>     terrainSystem;
+    std::unique_ptr<CitySimulation>    citySimulation;
+    std::unique_ptr<UIManager>         uiManager;
+    std::unique_ptr<SaveSystem>        saveSystem;
+    std::unique_ptr<EventReceiver>     eventReceiver;
 
     double prevTime{0.0};
     int    maxFrames{0};
@@ -110,12 +111,12 @@ static bool initSystems(AppSystems& sys, int argc, char** argv) {
     // -------------------------------------------------------------------------
     // IrrlichtUIBackend — Phase 1 compile stub (17-method stubs; Phase 8 full impl).
     // -------------------------------------------------------------------------
-    sys.uiBackend = new IrrlichtUIBackend(device);
+    sys.uiBackend = std::make_unique<IrrlichtUIBackend>(device);
 
     // -------------------------------------------------------------------------
     // UIScaler — virtual 1920x1080 coordinate space.
     // -------------------------------------------------------------------------
-    sys.uiScaler = new UIScaler(
+    sys.uiScaler = std::make_unique<UIScaler>(
         /*virtualW=*/  1920,
         /*virtualH=*/  1080,
         /*viewportW=*/ sys.uiBackend->getScreenWidth(),
@@ -151,12 +152,12 @@ static bool initSystems(AppSystems& sys, int argc, char** argv) {
     // -------------------------------------------------------------------------
     // CameraController — windowed default: startInFullscreen=false (edge-scroll OFF).
     // -------------------------------------------------------------------------
-    sys.cameraController = new CameraController(sys.cameraNode, /*startInFullscreen=*/false);
+    sys.cameraController = std::make_unique<CameraController>(sys.cameraNode, /*startInFullscreen=*/false);
 
     // -------------------------------------------------------------------------
     // IrrlichtRenderer — owns the rendering interface.
     // -------------------------------------------------------------------------
-    sys.renderer = new IrrlichtRenderer(device, /*uiManager=*/nullptr);
+    sys.renderer = std::make_unique<IrrlichtRenderer>(device, /*uiManager=*/nullptr);
     sys.renderer->setRenderSystem(&sys.renderSystem);
 
     // -------------------------------------------------------------------------
@@ -167,31 +168,32 @@ static bool initSystems(AppSystems& sys, int argc, char** argv) {
     // -------------------------------------------------------------------------
     // Phase 7: AudioSystem — full OpenAL Soft implementation.
     // -------------------------------------------------------------------------
-    sys.audioSystem = new AudioSystem(device->getLogger(), &sys.wallClock);
+    sys.audioSystem = std::make_unique<AudioSystem>(device->getLogger(), &sys.wallClock);
 
     // -------------------------------------------------------------------------
     // Phase 6: Simulation engine.
     // -------------------------------------------------------------------------
-    sys.terrainSystem = new TerrainSystem(sys.renderer, &sys.wallClock);
+    sys.terrainSystem = std::make_unique<TerrainSystem>(sys.renderer.get(), &sys.wallClock);
 
-    sys.citySimulation = new CitySimulation(
-        sys.renderer, /*audio=*/sys.audioSystem, &sys.simRng, &sys.wallClock,
-        sys.terrainSystem, Difficulty::Normal);
+    sys.citySimulation = std::make_unique<CitySimulation>(
+        sys.renderer.get(), /*audio=*/sys.audioSystem.get(), &sys.simRng, &sys.wallClock,
+        sys.terrainSystem.get(), Difficulty::Normal);
 
     // -------------------------------------------------------------------------
     // UIManager — Phase 8 full implementation.
     // -------------------------------------------------------------------------
-    sys.uiManager = new UIManager(sys.uiBackend, sys.audioSystem, sys.citySimulation, &sys.wallClock);
+    sys.uiManager = std::make_unique<UIManager>(sys.uiBackend.get(), sys.audioSystem.get(),
+                                                 sys.citySimulation.get(), &sys.wallClock);
 
     // Late-bind UIManager to renderer (breaks circular construction dependency).
-    sys.renderer->setUIManager(sys.uiManager);
-    sys.uiManager->setCameraController(sys.cameraController);
+    sys.renderer->setUIManager(sys.uiManager.get());
+    sys.uiManager->setCameraController(sys.cameraController.get());
     sys.uiManager->setLogger(device->getLogger());
 
     // -------------------------------------------------------------------------
     // Phase 9b: wire renderer terrain query with defaults (dims 0x0 at startup).
     // -------------------------------------------------------------------------
-    sys.renderer->setTerrainQuery(sys.terrainSystem);
+    sys.renderer->setTerrainQuery(sys.terrainSystem.get());
     sys.renderer->setCellSize(sys.terrainSystem->getCellSize());
     sys.renderer->setRendererMapDimensions(sys.terrainSystem->getMapTilesX(),
                                            sys.terrainSystem->getMapTilesZ());
@@ -205,9 +207,9 @@ static bool initSystems(AppSystems& sys, int argc, char** argv) {
     // -------------------------------------------------------------------------
     // Phase 9b: wire UIManager terrain/renderer/map-dimensions.
     // -------------------------------------------------------------------------
-    sys.uiManager->setRenderer(sys.renderer);
+    sys.uiManager->setRenderer(sys.renderer.get());
     sys.renderer->setSceneBackground(getAssetsDir() + "/textures/ui/loading_screen.png");
-    sys.uiManager->setTerrainQuery(sys.terrainSystem);
+    sys.uiManager->setTerrainQuery(sys.terrainSystem.get());
     sys.uiManager->setMapDimensions(sys.terrainSystem->getMapTilesX(),
                                      sys.terrainSystem->getMapTilesZ());
 
@@ -227,9 +229,9 @@ static bool initSystems(AppSystems& sys, int argc, char** argv) {
     // -------------------------------------------------------------------------
     // Phase 11: SaveSystem — auto-save and manual slot management.
     // -------------------------------------------------------------------------
-    sys.saveSystem = new SaveSystem(&sys.wallClock);
-    sys.saveSystem->setSimulation(sys.citySimulation);
-    sys.uiManager->setSaveSystem(sys.saveSystem);
+    sys.saveSystem = std::make_unique<SaveSystem>(&sys.wallClock);
+    sys.saveSystem->setSimulation(sys.citySimulation.get());
+    sys.uiManager->setSaveSystem(sys.saveSystem.get());
 
     // Show loading screen for one frame while save file state is checked.
     sys.renderer->beginFrame();
@@ -263,9 +265,10 @@ static bool initSystems(AppSystems& sys, int argc, char** argv) {
     // -------------------------------------------------------------------------
     // EventReceiver — translates SEvent → InputEvent.
     // -------------------------------------------------------------------------
-    sys.eventReceiver = new EventReceiver(sys.uiScaler, sys.uiManager,
-                                          sys.cameraController, sys.uiBackend);
-    device->setEventReceiver(sys.eventReceiver);
+    sys.eventReceiver = std::make_unique<EventReceiver>(sys.uiScaler.get(), sys.uiManager.get(),
+                                                         sys.cameraController.get(),
+                                                         sys.uiBackend.get());
+    device->setEventReceiver(sys.eventReceiver.get());
 
     return true;
 }
@@ -564,18 +567,6 @@ int main(int argc, char** argv) {
 
         runFrame(sys);
     }
-
-    // Clean up heap-allocated sub-systems (reverse construction order).
-    delete sys.eventReceiver;
-    delete sys.saveSystem;
-    delete sys.uiManager;
-    delete sys.citySimulation;
-    delete sys.terrainSystem;
-    delete sys.audioSystem;
-    delete sys.renderer;
-    delete sys.cameraController;
-    delete sys.uiScaler;
-    delete sys.uiBackend;
 
     return 0;
 }

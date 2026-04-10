@@ -186,23 +186,7 @@ std::unique_ptr<LODNode> BuildingAssetLoader::load(const std::string& basePath)
     // the whole texture is sampled at UV (0,0) — a single atlas cell is visible,
     // which is correct placeholder behavior.
     // ------------------------------------------------------------------
-    if (m_driver) {
-        std::string atlasPath = resolveAtlasPath(basePath);
-
-        if (!atlasPath.empty()) {
-            ITexture* atlas = m_driver->getTexture(atlasPath.c_str());
-            if (atlas) {
-                u32 matCount = node->getMaterialCount();
-                for (u32 m = 0; m < matCount; ++m) {
-                    node->getMaterial(m).setTexture(0, atlas);
-                }
-            } else {
-                fprintf(stderr,
-                    "[BuildingAssetLoader] WARNING: buildings atlas not found at "
-                    "'%s' — building will render white\n", atlasPath.c_str());
-            }
-        }
-    }
+    applyAtlasTexture(node, basePath);
 
     // ------------------------------------------------------------------
     // Step 7: Construct and return the LODNode.
@@ -211,6 +195,30 @@ std::unique_ptr<LODNode> BuildingAssetLoader::load(const std::string& basePath)
     // The caller (IrrlichtRenderer) owns the returned LODNode*.
     // ------------------------------------------------------------------
     return std::make_unique<LODNode>(node, lod0, lod1, lod2, lod0dist, lod1dist, cullDist);
+}
+
+// ---------------------------------------------------------------------------
+// applyAtlasTexture — Phase 11q5 helper (Deliverable 9).
+// Binds the buildings atlas texture to slot 0 of every material on the node.
+// ---------------------------------------------------------------------------
+void BuildingAssetLoader::applyAtlasTexture(irr::scene::ISceneNode* node,
+                                             const std::string& basePath) const {
+    if (!m_driver) return;
+
+    std::string atlasPath = resolveAtlasPath(basePath);
+    if (atlasPath.empty()) return;
+
+    ITexture* atlas = m_driver->getTexture(atlasPath.c_str());
+    if (atlas) {
+        u32 matCount = node->getMaterialCount();
+        for (u32 m = 0; m < matCount; ++m) {
+            node->getMaterial(m).setTexture(0, atlas);
+        }
+    } else {
+        fprintf(stderr,
+            "[BuildingAssetLoader] WARNING: buildings atlas not found at "
+            "'%s' — building will render white\n", atlasPath.c_str());
+    }
 }
 
 // ---------------------------------------------------------------------------

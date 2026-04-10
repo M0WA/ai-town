@@ -45,6 +45,7 @@
 namespace irr {
     namespace scene {
         class ISceneManager;
+        class ISceneNode;
         class SMesh;
     }
     namespace video {
@@ -111,6 +112,10 @@ private:
                    float&             cullDist,
                    int&               atlasRow,
                    int&               atlasCol);
+
+    // applyAtlasTexture: binds the buildings atlas texture to all material slots
+    // on the given scene node. Looks up the atlas path relative to basePath.
+    void applyAtlasTexture(irr::scene::ISceneNode* node, const std::string& basePath) const;
 
     // --- Phase 11q3 refactoring helpers (Section 5a–5b) ---
 

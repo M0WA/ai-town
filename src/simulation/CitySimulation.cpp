@@ -298,23 +298,18 @@ bool CitySimulation::checkZoneFootprintClear(int tileX, int tileZ, int N) const 
         }
     }
 
-    // Service building overlap guard.
-    for (const ServiceBuilding& sb : m_zoning.m_serviceBuildings) {
-        for (int sdx = 0; sdx < 2; ++sdx) {
-            for (int sdz = 0; sdz < 2; ++sdz) {
-                int sx = sb.x + sdx, sz = sb.z + sdz;
-                for (int dx = 0; dx < N; ++dx) {
-                    for (int dz = 0; dz < N; ++dz) {
-                        if (tileX + dx == sx && tileZ + dz == sz) {
-                            return false;
-                        }
-                    }
-                }
-            }
-        }
-    }
+    if (checkServiceBuildingOverlap(tileX, tileZ, N)) return false;
 
     return true;
+}
+
+bool CitySimulation::checkServiceBuildingOverlap(int tileX, int tileZ, int N) const {
+    for (const ServiceBuilding& sb : m_zoning.m_serviceBuildings) {
+        if (sb.x < tileX + N && sb.x + 2 > tileX &&
+            sb.z < tileZ + N && sb.z + 2 > tileZ)
+            return true;
+    }
+    return false;
 }
 
 void CitySimulation::applyZoneFootprint(int tileX, int tileZ, ZoneType type, DensityTier tier, int N) {
@@ -347,23 +342,25 @@ void CitySimulation::applyZoneFootprint(int tileX, int tileZ, ZoneType type, Den
         }
     }
 
-    // Border-ring terrain flattening.
-    if (m_terrain) {
-        auto flattenIfRoad = [&](int bx, int bz) {
-            auto bit = m_zoning.m_tiles.find(Zoning::tileKey(bx, bz));
-            if (bit != m_zoning.m_tiles.end() && bit->second.isRoad)
-                m_terrain->setTileHeight(bx, bz, flatHeight);
-        };
-        for (int dx = -1; dx <= N; ++dx) {
-            for (int dz = -1; dz <= N; ++dz) {
-                if (dx >= 0 && dx < N && dz >= 0 && dz < N) continue;
-                int bx = tileX + dx, bz = tileZ + dz;
-                if (bx < 0 || bx >= m_mapWidth || bz < 0 || bz >= m_mapHeight) continue;
-                flattenIfRoad(bx, bz);
-            }
+    flattenBorderRing(tileX, tileZ, N, flatHeight);
+}
+
+void CitySimulation::flattenBorderRing(int tileX, int tileZ, int N, float flatHeight) {
+    if (!m_terrain) return;
+    auto flattenIfRoad = [&](int bx, int bz) {
+        auto bit = m_zoning.m_tiles.find(Zoning::tileKey(bx, bz));
+        if (bit != m_zoning.m_tiles.end() && bit->second.isRoad)
+            m_terrain->setTileHeight(bx, bz, flatHeight);
+    };
+    for (int dx = -1; dx <= N; ++dx) {
+        for (int dz = -1; dz <= N; ++dz) {
+            if (dx >= 0 && dx < N && dz >= 0 && dz < N) continue;
+            int bx = tileX + dx, bz = tileZ + dz;
+            if (bx < 0 || bx >= m_mapWidth || bz < 0 || bz >= m_mapHeight) continue;
+            flattenIfRoad(bx, bz);
         }
-        m_terrain->flushTerrainRebuilds();
     }
+    m_terrain->flushTerrainRebuilds();
 }
 
 // ---------------------------------------------------------------------------
@@ -622,12 +619,12 @@ bool CitySimulation::checkServiceFootprintClear(int tileX, int tileZ, int sN) co
             int fx = tileX + dx, fz = tileZ + dz;
             const TileData* ft = m_zoning.findTile(fx, fz);
             if (ft) return false;
-            for (const ServiceBuilding& sb : m_zoning.m_serviceBuildings) {
-                if (fx >= sb.x && fx < sb.x + sN &&
-                    fz >= sb.z && fz < sb.z + sN) {
-                    return false;
-                }
-            }
+            bool overlapsSb = std::any_of(m_zoning.m_serviceBuildings.begin(),
+                                           m_zoning.m_serviceBuildings.end(),
+                [fx, fz, sN](const ServiceBuilding& sb) {
+                    return fx >= sb.x && fx < sb.x + sN && fz >= sb.z && fz < sb.z + sN;
+                });
+            if (overlapsSb) return false;
         }
     }
     return true;
@@ -636,6 +633,21 @@ bool CitySimulation::checkServiceFootprintClear(int tileX, int tileZ, int sN) co
 // ---------------------------------------------------------------------------
 // placeServiceBuilding
 // ---------------------------------------------------------------------------
+
+bool CitySimulation::hasRoadAdjacent(int tileX, int tileZ, int sN) const {
+    const int dirs[4][2] = {{0,-1},{0,1},{-1,0},{1,0}};
+    for (int dx = 0; dx < sN; ++dx) {
+        for (int dz = 0; dz < sN; ++dz) {
+            for (auto& d : dirs) {
+                int nx = tileX + dx + d[0];
+                int nz = tileZ + dz + d[1];
+                const TileData* nd = m_zoning.findTile(nx, nz);
+                if (nd && nd->isRoad) return true;
+            }
+        }
+    }
+    return false;
+}
 
 void CitySimulation::placeServiceBuilding(int tileX, int tileZ,
                                           ServiceBuildingType type,
@@ -646,23 +658,9 @@ void CitySimulation::placeServiceBuilding(int tileX, int tileZ,
         return;
     }
 
-    {
-        bool hasRoadAdjacent = false;
-        const int dirs[4][2] = {{0,-1},{0,1},{-1,0},{1,0}};
-        for (int dx = 0; dx < sN && !hasRoadAdjacent; ++dx) {
-            for (int dz = 0; dz < sN && !hasRoadAdjacent; ++dz) {
-                for (auto& d : dirs) {
-                    int nx = tileX + dx + d[0];
-                    int nz = tileZ + dz + d[1];
-                    const TileData* nd = m_zoning.findTile(nx, nz);
-                    if (nd && nd->isRoad) { hasRoadAdjacent = true; break; }
-                }
-            }
-        }
-        if (!hasRoadAdjacent) {
-            m_notifications.push({NotificationType::PlacementBlocked, tileX, tileZ, 0});
-            return;
-        }
+    if (!hasRoadAdjacent(tileX, tileZ, sN)) {
+        m_notifications.push({NotificationType::PlacementBlocked, tileX, tileZ, 0});
+        return;
     }
 
     int placementCost = 0;
@@ -992,6 +990,66 @@ bool CitySimulation::parseTrafficSection(const nlohmann::json& j, std::string& e
 }
 
 // ---------------------------------------------------------------------------
+// deserializeFromJson — Phase 11q5 extracted helpers (S3776)
+// ---------------------------------------------------------------------------
+
+template<typename T>
+bool CitySimulation::parseJsonField(const nlohmann::json& j, const char* key,
+                                     T& out, std::string& errorOut) const {
+    try { out = j.at(key).template get<T>(); return true; }
+    catch (...) { errorOut = std::string("missing ") + key; return false; }
+}
+
+template bool CitySimulation::parseJsonField<int>(const nlohmann::json&, const char*, int&, std::string&) const;
+template bool CitySimulation::parseJsonField<int64_t>(const nlohmann::json&, const char*, int64_t&, std::string&) const;
+
+bool CitySimulation::parseOptionalBoolArray(const nlohmann::json& j, const char* key,
+                                            bool* out, int maxCount, std::string& errorOut) const {
+    try {
+        if (j.contains(key)) {
+            const auto& arr = j[key];
+            for (int i = 0; i < maxCount && i < static_cast<int>(arr.size()); ++i)
+                out[i] = arr[i].get<bool>();
+        }
+    } catch (...) {
+        errorOut = std::string("invalid ") + key;
+        return false;
+    }
+    return true;
+}
+
+bool CitySimulation::parseOptionalIntArray(const nlohmann::json& j, const char* key,
+                                           int* out, int maxCount, std::string& errorOut) const {
+    try {
+        if (j.contains(key)) {
+            const auto& arr = j[key];
+            for (int i = 0; i < maxCount && i < static_cast<int>(arr.size()); ++i)
+                out[i] = arr[i].get<int>();
+        }
+    } catch (...) {
+        errorOut = std::string("invalid ") + key;
+        return false;
+    }
+    return true;
+}
+
+bool CitySimulation::parseDensityUnlockSection(const nlohmann::json& j,
+                                                DensityUnlockState& out,
+                                                std::string& errorOut) const {
+    bool flagsBuf[6] = {};
+    if (!parseOptionalBoolArray(j, "density_unlock_flags", flagsBuf, 6, errorOut))
+        return false;
+    for (int i = 0; i < 6; ++i) out.unlock_flags[i] = flagsBuf[i];
+
+    int counterBuf[6] = {};
+    if (!parseOptionalIntArray(j, "density_unlock_revenue_counter", counterBuf, 6, errorOut))
+        return false;
+    for (int i = 0; i < 6; ++i) out.consecutive_months_above_threshold[i] = counterBuf[i];
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // deserializeFromJson
 // ---------------------------------------------------------------------------
 bool CitySimulation::deserializeFromJson(const std::string& json, std::string& errorOut) {
@@ -1014,71 +1072,27 @@ bool CitySimulation::deserializeFromJson(const std::string& json, std::string& e
 
     int newMapTilesX = m_mapWidth;
     int newMapTilesZ = m_mapHeight;
-
-    try { newMapTilesX = j.at("map_tiles_x").get<int>(); }
-    catch (...) { errorOut = "missing map_tiles_x"; return false; }
-
-    try { newMapTilesZ = j.at("map_tiles_z").get<int>(); }
-    catch (...) { errorOut = "missing map_tiles_z"; return false; }
+    if (!parseJsonField(j, "map_tiles_x", newMapTilesX, errorOut)) return false;
+    if (!parseJsonField(j, "map_tiles_z", newMapTilesZ, errorOut)) return false;
 
     int64_t newTreasury = 0;
     float   newTaxRates[3] = {0.05f, 0.05f, 0.05f};
     if (!parseEconomySection(j, newTreasury, newTaxRates, errorOut)) return false;
 
     int newOutstandingBondUses = 0;
-    try { newOutstandingBondUses = j.at("outstanding_bond_uses").get<int>(); }
-    catch (...) { errorOut = "missing outstanding_bond_uses"; return false; }
+    if (!parseJsonField(j, "outstanding_bond_uses", newOutstandingBondUses, errorOut)) return false;
 
     int newConsecutiveDeficitMonths = 0;
-    try { newConsecutiveDeficitMonths = j.at("consecutive_deficit_months").get<int>(); }
-    catch (...) { errorOut = "missing consecutive_deficit_months"; return false; }
+    if (!parseJsonField(j, "consecutive_deficit_months", newConsecutiveDeficitMonths, errorOut)) return false;
 
     bool newMilestoneFired[5] = {};
-    try {
-        if (j.contains("population_milestone_fired")) {
-            const auto& arr = j["population_milestone_fired"];
-            for (int i = 0; i < 5 && i < static_cast<int>(arr.size()); ++i)
-                newMilestoneFired[i] = arr[i].get<bool>();
-        }
-    } catch (...) {
-        errorOut = "invalid population_milestone_fired";
-        return false;
-    }
+    if (!parseOptionalBoolArray(j, "population_milestone_fired", newMilestoneFired, 5, errorOut)) return false;
 
     std::array<int,9> newVariantCounters{};
-    try {
-        if (j.contains("building_variant_counters")) {
-            const auto& arr = j["building_variant_counters"];
-            for (int i = 0; i < 9 && i < static_cast<int>(arr.size()); ++i)
-                newVariantCounters[i] = arr[i].get<int>();
-        }
-    } catch (...) {
-        errorOut = "invalid building_variant_counters";
-        return false;
-    }
+    if (!parseOptionalIntArray(j, "building_variant_counters", newVariantCounters.data(), 9, errorOut)) return false;
 
     DensityUnlockState newDensityUnlock{};
-    try {
-        if (j.contains("density_unlock_flags")) {
-            const auto& arr = j["density_unlock_flags"];
-            for (int i = 0; i < 6 && i < static_cast<int>(arr.size()); ++i)
-                newDensityUnlock.unlock_flags[i] = arr[i].get<bool>();
-        }
-    } catch (...) {
-        errorOut = "invalid density_unlock_flags";
-        return false;
-    }
-
-    try {
-        if (j.contains("density_unlock_revenue_counter")) {
-            const auto& arr = j["density_unlock_revenue_counter"];
-            for (int i = 0; i < 6 && i < static_cast<int>(arr.size()); ++i)
-                newDensityUnlock.consecutive_months_above_threshold[i] = arr[i].get<int>();
-        }
-    } catch (...) {
-        errorOut = "invalid density_unlock_revenue_counter";
-        return false;
-    }
+    if (!parseDensityUnlockSection(j, newDensityUnlock, errorOut)) return false;
 
     // ---- Atomically apply the deserialized state ----
     m_mapWidth               = newMapTilesX;
