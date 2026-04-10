@@ -769,3 +769,32 @@ TEST_F(QueryPanelIntegrationTest, ServiceBuilding_WaterTower_ShowsTypeName)
 
     panel_->populate(qr, 9, 9, 500, 500, tileBounds);
 }
+
+// Phase 11q6: draw() after populate() with service building type exercises the
+// serviceType != None branch inside the kEconomyRefreshFrames refresh block in
+// draw(). populate() resets m_drawFrame=0 / m_lastEconomyFrame=0, so the
+// refresh fires on draw() call 120 (120-0 >= 120).
+TEST_F(QueryPanelIntegrationTest, Draw_AfterPopulateServiceBuilding_RefreshesServiceData)
+{
+    QueryResult qr;
+    qr.tileX       = 4;
+    qr.tileZ       = 8;
+    qr.isZoned     = false;
+    qr.isRoad      = false;
+    qr.serviceType = ServiceBuildingType::FireStation;
+    qr.coverage.fire = 95.0f;
+    ScreenRect tileBounds{1000, 1000, 10, 10};
+
+    ON_CALL(sim_, queryTile(_, _)).WillByDefault(Return(qr));
+
+    panel_->populate(qr, 4, 8, 500, 500, tileBounds);
+
+    EXPECT_CALL(backend_, setElementText(_, _)).Times(AnyNumber());
+    EXPECT_CALL(backend_, setElementVisible(_, _)).Times(AnyNumber());
+
+    for (int i = 0; i < 122; ++i) {
+        panel_->draw();
+    }
+
+    EXPECT_TRUE(panel_->isOpen());
+}
