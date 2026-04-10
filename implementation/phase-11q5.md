@@ -1,6 +1,6 @@
 ## Phase 11q5: Fix SonarCloud HIGH Issues (S5025 Raw Delete + Remaining S3776/S134)
 
-**Status: Planned**
+**Status: DONE**
 
 **Prerequisite**: phase-11q3 merged — the S134 + S3776 first-pass extractions in phase-11q3 created the helper structure and reduced CC in many functions; phase-11q5 targets the remaining violations in those same files.
 
