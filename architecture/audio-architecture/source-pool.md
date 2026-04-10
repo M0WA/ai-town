@@ -200,6 +200,7 @@ std::array<VehiclePairSlot, 12> m_vehiclePairs{};  // up to 12 active vehicles (
 2. If a free pair slot exists, find 2 free sources from the NORMAL-priority evictable SFX range (`sources[0..50]`) and assign them. Store the zone-based `basePitch` into the pair slot: `Residential` → `1.0f`, `Commercial` or `Industrial` → `0.85f`. Return the pair index.
 3. If NO free pair slot exists (all 12 vehicles active), select the eviction candidate: the pair with the **lowest combined priority** and, as a tiebreak, the **greatest average listener distance squared**. Evict both sources of the candidate pair:
    - Call `alSourceStop` on both source indices.
+   - Call `alSourcei(src, AL_BUFFER, 0)` on both source indices to detach static buffer bindings (matching the SFX pool cleanup pattern in audio-thread-shutdown.md step 4a).
    - Call `onSourceRecycled(i)` for each (resets occlusion state).
    - Mark both `idleSourceIdx` and `moveSourceIdx` back to free in the pool.
    - Clear the `VehiclePairSlot` entry.
@@ -211,9 +212,12 @@ std::array<VehiclePairSlot, 12> m_vehiclePairs{};  // up to 12 active vehicles (
 - **Invalid-index guard**: if `idleIdx == -1 || moveIdx == -1`, return immediately (no-op). Callers that store the result of a failed `acquireVehicleEnginePair()` call receive `{-1, -1}` and must call `releaseVehicleEnginePair(-1, -1)` without ill effect; the guard prevents double-free or out-of-bounds access.
 
 1. Locate the pair slot: scan `m_vehiclePairs` for the entry where `idleSourceIdx == idleIdx && moveSourceIdx == moveIdx`. If no matching slot is found (implementation error or already released), log a warning and return.
-2. Call `onSourceRecycled(idleIdx)` and `onSourceRecycled(moveIdx)`.
-3. Return both source indices to the free pool.
-4. Reset the matched `VehiclePairSlot`: set `idleSourceIdx` and `moveSourceIdx` to -1, `listenerDistanceSq` to 0.f, `priority` to 0; store 0.f to `speedFraction`, `worldX`, and `worldZ` atomics; store 1.0f to `basePitch`.
+2. Stop both sources and detach their static buffer bindings (matching the SFX pool cleanup pattern in audio-thread-shutdown.md step 4a):
+   - `alSourceStop(sources[idleIdx])` and `alSourceStop(sources[moveIdx])`.
+   - `alSourcei(sources[idleIdx], AL_BUFFER, 0)` and `alSourcei(sources[moveIdx], AL_BUFFER, 0)`.
+3. Call `onSourceRecycled(idleIdx)` and `onSourceRecycled(moveIdx)`.
+4. Return both source indices to the free pool.
+5. Reset the matched `VehiclePairSlot`: set `idleSourceIdx` and `moveSourceIdx` to -1, `listenerDistanceSq` to 0.f, `priority` to 0; store 0.f to `speedFraction`, `worldX`, and `worldZ` atomics; store 1.0f to `basePitch`.
 
 Releasing only one source of a pair (e.g., on LOD cull) is prohibited. The cull path must call `releaseVehicleEnginePair(idleIdx, moveIdx)` — never free individual sources from a pair via `acquireSFXSource`/release paths.
 

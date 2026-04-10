@@ -2515,3 +2515,234 @@ active (non-vacuous) and leak-free (no element accumulation).
 
 CTest filter for all Phase 11q vehicle zone and Y-bias tests:
 `-R "TrafficVehicleTest|IrrlichtRendererTest.*(VehicleY|SlopedTerrain)"`
+
+### Phase 11q6 Test Fixtures
+
+Four test fixtures cover the Phase 11q6 vehicle-agent despawn UAF fix,
+shared-mesh reference-count safety, `SceneEntityManager::destroy()` ordering
+contract, and audio source-pool release after vehicle despawn. Two fixtures
+require an OpenGL context (`opengl_tests`, label `requires-opengl`); two use
+headless backends (`integration_tests`, label `integration`).
+
+#### `AgentDespawnRenderTest` Fixture
+
+**Source file**: `tests/rendering/AgentDespawnRenderTest.cpp`
+
+**CMake target**: `opengl_tests` (added inline to `add_executable(opengl_tests ...)`
+per `framework.md` line 126 -- NOT via `target_sources()`).
+
+**Label**: `requires-opengl`.
+
+**Design rationale**: Directly reproduces the crash path from the
+`despawnVehicleAgent` UAF (production frame 15455). Uses a real 1x1 EDT_OPENGL
+device and `IrrlichtRenderer` instance (same pattern as Phase 11q
+`VehicleYBiasTest.cpp`). All `drawAll()` calls are wrapped in
+`beginScene`/`endScene` to match the production draw loop. A `GTEST_SKIP()` asset
+guard skips the test gracefully when the vehicle mesh file is not found on disk.
+
+**Fixture setup**:
+
+```cpp
+class AgentDespawnRenderTest : public ::testing::Test {
+protected:
+    irr::IrrlichtDevice*          device_   = nullptr;
+    irr::video::IVideoDriver*     driver_   = nullptr;
+    irr::scene::ISceneManager*    smgr_     = nullptr;
+    std::unique_ptr<IrrlichtRenderer> renderer_;
+
+    void SetUp() override {
+        // 1x1 EDT_OPENGL device -- minimal GL context for drawAll() validation.
+        irr::SIrrlichtCreationParameters params;
+        params.DriverType  = irr::video::EDT_OPENGL;
+        params.WindowSize  = irr::core::dimension2d<irr::u32>(1, 1);
+        params.Stencilbuffer = false;
+        params.Vsync         = false;
+        device_ = irr::createDeviceEx(params);
+        ASSERT_NE(device_, nullptr) << "EDT_OPENGL device creation failed";
+        driver_ = device_->getVideoDriver();
+        smgr_   = device_->getSceneManager();
+        renderer_ = std::make_unique<IrrlichtRenderer>(device_);
+    }
+
+    void TearDown() override {
+        renderer_.reset();  // release renderer before device drop
+        if (device_) {
+            device_->drop();
+            device_ = nullptr;
+        }
+    }
+};
+```
+
+**Asset guard pattern** (used in each test that spawns agents):
+
+```cpp
+renderer_->spawnVehicleAgent(handle, zone);
+if (!renderer_->agentNodeForTest(handle)) {
+    GTEST_SKIP() << "vehicle mesh asset not found";
+}
+```
+
+**beginScene/endScene wrapper** (used around every `drawAll()` call):
+
+```cpp
+driver_->beginScene(true, true, irr::video::SColor(255, 0, 0, 0));
+smgr_->drawAll();
+driver_->endScene();
+```
+
+#### `SharedMeshRefCountTest` Fixture
+
+**Source file**: `tests/rendering/SharedMeshRefCountTest.cpp`
+
+**CMake target**: `opengl_tests` (added inline to `add_executable(opengl_tests ...)`).
+
+**Label**: `requires-opengl`.
+
+**Design rationale**: Reproduces the shared-mesh crash where two vehicle agents
+share the same `IAnimatedMesh*` from the scene-manager cache (same zone type AND
+same `handle % 3` variant index). Handles 0 and 3 are used (both `% 3 == 0`,
+both `ZoneType::Residential` -- same `car_sedan_lod0.b3d`). A precondition
+`ASSERT_EQ` verifies both nodes share the same mesh pointer before exercising
+the despawn path. Uses the same 1x1 EDT_OPENGL device pattern and asset guard
+as `AgentDespawnRenderTest`.
+
+**Fixture setup**:
+
+```cpp
+class SharedMeshRefCountTest : public ::testing::Test {
+protected:
+    irr::IrrlichtDevice*          device_   = nullptr;
+    irr::video::IVideoDriver*     driver_   = nullptr;
+    irr::scene::ISceneManager*    smgr_     = nullptr;
+    std::unique_ptr<IrrlichtRenderer> renderer_;
+
+    void SetUp() override {
+        // 1x1 EDT_OPENGL device -- same pattern as AgentDespawnRenderTest.
+        irr::SIrrlichtCreationParameters params;
+        params.DriverType  = irr::video::EDT_OPENGL;
+        params.WindowSize  = irr::core::dimension2d<irr::u32>(1, 1);
+        params.Stencilbuffer = false;
+        params.Vsync         = false;
+        device_ = irr::createDeviceEx(params);
+        ASSERT_NE(device_, nullptr) << "EDT_OPENGL device creation failed";
+        driver_ = device_->getVideoDriver();
+        smgr_   = device_->getSceneManager();
+        renderer_ = std::make_unique<IrrlichtRenderer>(device_);
+    }
+
+    void TearDown() override {
+        renderer_.reset();
+        if (device_) {
+            device_->drop();
+            device_ = nullptr;
+        }
+    }
+};
+```
+
+**Shared-mesh precondition check** (required before exercising despawn):
+
+```cpp
+ASSERT_EQ(renderer_->agentNodeForTest(0)->getMesh(),
+          renderer_->agentNodeForTest(3)->getMesh())
+    << "precondition: both nodes must share the same IAnimatedMesh*";
+```
+
+#### `SceneEntityManagerDestroyOrderTest` Fixture
+
+**Source file**: `tests/integration/SceneEntityManagerDestroyOrderTest.cpp`
+
+**CMake target**: `integration_tests` (added via
+`target_sources(integration_tests PRIVATE tests/integration/SceneEntityManagerDestroyOrderTest.cpp)`).
+
+**Label**: `integration`.
+
+**Design rationale**: Verifies the null-before-remove ordering contract on
+`SceneEntityManager::destroy()` -- the canonical eviction pattern. Uses an
+EDT_NULL device (no GL context needed, no xvfb dependency). The observable
+postcondition is `entity.getNode() == nullptr` after `destroy()` returns.
+
+**Fixture setup**:
+
+```cpp
+class SceneEntityManagerDestroyOrderTest : public ::testing::Test {
+protected:
+    irr::IrrlichtDevice*       device_ = nullptr;
+    irr::scene::ISceneManager* smgr_   = nullptr;
+
+    void SetUp() override {
+        // EDT_NULL -- no GL context required; runs in headless CI without xvfb.
+        device_ = irr::createDevice(irr::video::EDT_NULL,
+                                    irr::core::dimension2d<irr::u32>(1, 1));
+        ASSERT_NE(device_, nullptr) << "EDT_NULL device creation failed";
+        smgr_ = device_->getSceneManager();
+    }
+
+    void TearDown() override {
+        if (device_) {
+            device_->drop();
+            device_ = nullptr;
+        }
+    }
+};
+```
+
+### Phase 11q6 Canonical Test Name Summary
+
+| Test Suite | Test Case | Source File | CMake Target | Label |
+|---|---|---|---|---|
+| `AgentDespawnRenderTest` | `DespawnThenDrawScene_Clean` | `tests/rendering/AgentDespawnRenderTest.cpp` | `opengl_tests` | `requires-opengl` |
+| `AgentDespawnRenderTest` | `DespawnNonexistentHandle_NoOp` | `tests/rendering/AgentDespawnRenderTest.cpp` | `opengl_tests` | `requires-opengl` |
+| `AgentDespawnRenderTest` | `DespawnAllAgents_DrawScene_Clean` | `tests/rendering/AgentDespawnRenderTest.cpp` | `opengl_tests` | `requires-opengl` |
+| `AgentDespawnRenderTest` | `SpawnSameHandleTwice_NoLeak` | `tests/rendering/AgentDespawnRenderTest.cpp` | `opengl_tests` | `requires-opengl` |
+| `SceneEntityManagerDestroyOrderTest` | `NullsEntityBeforeNodeRemove` | `tests/integration/SceneEntityManagerDestroyOrderTest.cpp` | `integration_tests` | `integration` |
+| `SharedMeshRefCountTest` | `LastAgentDespawn_OtherNodesUnaffected` | `tests/rendering/SharedMeshRefCountTest.cpp` | `opengl_tests` | `requires-opengl` |
+| `AudioSystemVehicleReleaseTest` | `SourceStoppedAfterRelease` | `tests/integration/VehicleReleaseTest.cpp` | `integration_tests` | `integration` |
+| `AudioSystemVehicleReleaseTest` | `SlotReacquirableAfterRelease` | `tests/integration/VehicleReleaseTest.cpp` | `integration_tests` | `integration` |
+| `QueryPanelIntegrationTest` | `Populate_ServiceBuilding_ShowsType_NotUnzoned` | `tests/ui/query_panel_test.cpp` | `ui_tests` | `unit` |
+
+**Test details**:
+
+- `DespawnThenDrawScene_Clean` -- spawns 1 agent (handle=0), despawns it, then
+  calls `drawAll()` inside `beginScene`/`endScene`. Reaching `SUCCEED()` without
+  crash confirms the UAF is fixed; ASAN clean exit provides secondary validation.
+- `DespawnNonexistentHandle_NoOp` -- calls `despawnVehicleAgent(handle=99)`
+  without any prior spawn. The early-return guard must not crash or fault.
+- `DespawnAllAgents_DrawScene_Clean` -- spawns 3 agents (handles 0, 1, 2 --
+  three distinct mesh variants), despawns all three, then calls `drawAll()`.
+  Verifies the empty-scene draw path after bulk eviction.
+- `SpawnSameHandleTwice_NoLeak` -- spawns handle=0 twice (Residential then
+  Commercial). The internal replace-guard must despawn the first before spawning
+  the second; asserts only one entry exists in the agent-node map (no leak).
+  Followed by `drawAll()` to confirm the replacement node renders cleanly.
+- `NullsEntityBeforeNodeRemove` -- creates a minimal entity with an EDT_NULL
+  scene node, calls `SceneEntityManager::destroy()`, asserts
+  `entity.getNode() == nullptr` as the postcondition. Validates the
+  null-before-remove ordering contract without requiring an OpenGL context.
+- `LastAgentDespawn_OtherNodesUnaffected` -- spawns agents with handles 0 and 3
+  (both `% 3 == 0`, both `ZoneType::Residential` -- same cached
+  `IAnimatedMesh*`). Despawns handle 0, then calls `drawAll()`. The surviving
+  agent (handle 3) must still render without fault because the shared mesh's
+  reference count was correctly maintained.
+- `SourceStoppedAfterRelease` -- acquires a vehicle engine pair via
+  `acquireVehicleEnginePair(zone)`, retrieves the underlying AL source handles
+  via `testGetSourceHandle()`, calls `releaseVehicleEnginePair()`, then asserts
+  both sources are in the `AL_STOPPED` state (not `AL_PLAYING` or
+  `AL_PAUSED`). Confirms the audio source-pool cleanup path after vehicle
+  despawn.
+- `SlotReacquirableAfterRelease` -- after releasing a vehicle engine pair,
+  calls `acquireVehicleEnginePair()` again and asserts that valid pool indices
+  are returned (>= 0). Confirms the pool slot is genuinely freed and
+  reusable, not leaked.
+- `Populate_ServiceBuilding_ShowsType_NotUnzoned` -- constructs a `QueryResult`
+  with `isZoned=false`, `isRoad=false`, and
+  `serviceType=ServiceBuildingType::FireStation` (tile inside a service building
+  footprint). Calls `InspectorPanel::populate()` via the `MockUIBackend` fixture
+  and asserts that `setElementText` is called with a string containing
+  "Fire Station" (not "Unzoned"). Verifies the
+  `else if (result.serviceType != ServiceBuildingType::None)` branch added by
+  Phase 11q6 Issue 6.
+
+**CTest filter** for all Phase 11q6 tests:
+`-R "AgentDespawnRenderTest|SharedMeshRefCountTest|SceneEntityManagerDestroyOrderTest|AudioSystemVehicleReleaseTest|QueryPanelIntegrationTest.Populate_ServiceBuilding_ShowsType_NotUnzoned"`

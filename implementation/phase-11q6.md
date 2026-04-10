@@ -581,6 +581,10 @@ After SourceStoppedAfterRelease completes:
 - [ ] `SlotReacquirableAfterRelease` implemented; confirms pool slot recycled.
 - [ ] Both tests pass under the null-driver / headless audio seam.
 
+#### Spec Update — Test Catalogue
+
+- [ ] `architecture/testing/testability-architecture.md` updated: fixture definitions for `AgentDespawnRenderTest`, `SharedMeshRefCountTest`, `SceneEntityManagerDestroyOrderTest`, and `AudioSystemVehicleReleaseTest` added; test catalogue table extended with all 9 new test cases (fixture name, canonical test name, source file, CMake target, label); the existing `query_panel_test.cpp` fixture row is extended with the Issue 6 service-building inspection test case (`InspectorPanel::populate()` shows service building type instead of "Unzoned" for tiles inside a service building footprint); CTest filter command added for Phase 11q6 tests.
+
 ---
 
 ### 6. ASAN CI Integration (Standalone Workflow)
