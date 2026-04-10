@@ -1,6 +1,6 @@
 ## Phase 11q6: Fix `despawnVehicleAgent` Use-After-Free + Service Building Inspection + Minimap Rotation + ASAN CI Integration + Audio Side-Channel Bugs
 
-**Status: TODO**
+**Status: DONE**
 
 **Prerequisite**: phase-11q5 merged.
 
