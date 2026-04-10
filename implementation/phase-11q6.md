@@ -122,12 +122,12 @@ void IrrlichtRenderer::despawnVehicleAgent(AgentHandle handle)
 }
 ```
 
-- [ ] `m_agentNodes` entry erased before `node->remove()`.
-- [ ] `sharedMesh->grab()` called before `node->remove()`; `sharedMesh->drop()` called after.
-- [ ] `getMaterial(i)` cached as `SMaterial&` in outer loop (C-4 fixed).
-- [ ] `architecture/graphics-architecture/scene-graph-ownership.md` updated to document: (a) the null-before-remove invariant for `despawnVehicleAgent` (erase map entry before `node->remove()`), and (b) the `grab()`/`drop()` exception — a temporary hold on the shared `IAnimatedMesh*` to prevent premature mesh deallocation when multiple agent nodes share the same variant's cached mesh.
-- [ ] `make build` succeeds with no new warnings.
-- [ ] All existing renderer and agent-node tests pass unchanged.
+- [x] `m_agentNodes` entry erased before `node->remove()`.
+- [x] `sharedMesh->grab()` called before `node->remove()`; `sharedMesh->drop()` called after.
+- [x] `getMaterial(i)` cached as `SMaterial&` in outer loop (C-4 fixed).
+- [x] `architecture/graphics-architecture/scene-graph-ownership.md` updated to document: (a) the null-before-remove invariant for `despawnVehicleAgent` (erase map entry before `node->remove()`), and (b) the `grab()`/`drop()` exception — a temporary hold on the shared `IAnimatedMesh*` to prevent premature mesh deallocation when multiple agent nodes share the same variant's cached mesh.
+- [x] `make build` succeeds with no new warnings.
+- [x] All existing renderer and agent-node tests pass unchanged.
 
 ---
 
@@ -145,9 +145,9 @@ entirely. Confirm whether `vehicles_diffuse_atlas_d.png` is managed by any
   document this in a comment inside `despawnVehicleAgent` and add a note to
   `architecture/graphics-architecture/texture-cache.md`.
 
-- [ ] `vehicles_diffuse_atlas_d.png` TextureCache membership confirmed (yes/no).
-- [ ] If yes: `evictUnreferenced()` added to `despawnVehicleAgent` after texture-slot clear.
-- [ ] If no: comment added explaining why Step 3 is omitted here; texture-cache.md updated.
+- [x] `vehicles_diffuse_atlas_d.png` TextureCache membership confirmed (yes/no).
+- [x] If yes: `evictUnreferenced()` added to `despawnVehicleAgent` after texture-slot clear.
+- [x] If no: comment added explaining why Step 3 is omitted here; texture-cache.md updated.
 
 ---
 
@@ -165,8 +165,8 @@ second `find` after the zone-change write block.
 it = sys.activeAgents.find(handle);   // refresh iterator
 ```
 
-- [ ] Iterator `it` refreshed via second `find` after the zone-change write block.
-- [ ] All agent-sync integration tests pass unchanged.
+- [x] Iterator `it` refreshed via second `find` after the zone-change write block.
+- [x] All agent-sync integration tests pass unchanged.
 
 ---
 
@@ -198,16 +198,16 @@ Note: `AudioSourcePool::m_sfxSlots` and `AudioSystem::m_sfxSlots` are **separate
 in the pool's `m_vehiclePairs[i]` entry — this is the field read by the vehicle-pair eviction
 heuristic in `acquireVehicleEnginePair` (see `source-pool.md §updateVehiclePairDistance`).
 
-- [ ] `m_listenerX` and `m_listenerZ` added as `float` members of `AudioSystem`;
+- [x] `m_listenerX` and `m_listenerZ` added as `float` members of `AudioSystem`;
   `syncListenerToCamera` updated to write `m_listenerX = cam.position.x;` and
   `m_listenerZ = cam.position.z` after setting `AL_POSITION` — these are the listener
   coordinates read by `updateVehicleAudio` to compute `distSq`.
-- [ ] `listenerDistanceSq` written in `updateVehicleAudio` for both idle and move slots
+- [x] `listenerDistanceSq` written in `updateVehicleAudio` for both idle and move slots
   (both `AudioSystem::m_sfxSlots` and `m_pool.updateSFXSlotDistance`).
-- [ ] `m_pool.updateVehiclePairDistance(i, distSq)` called in the same `m_vehicleAudio[i]`
+- [x] `m_pool.updateVehiclePairDistance(i, distSq)` called in the same `m_vehicleAudio[i]`
   scan loop to keep `VehiclePairSlot.listenerDistanceSq` current for vehicle-pair eviction.
-- [ ] Eviction candidate selection uses the updated distance at full pool capacity.
-- [ ] All `AudioSystem` unit tests pass unchanged.
+- [x] Eviction candidate selection uses the updated distance at full pool capacity.
+- [x] All `AudioSystem` unit tests pass unchanged.
 
 ---
 
@@ -229,10 +229,10 @@ If per-agent previous-position tracking is too invasive for this phase, at minim
 replace the hardcode with a comment and a TODO ticket; the idle/move blend will be
 addressed in a dedicated audio-polish phase. The hardcode must not stay silently.
 
-- [ ] `speedFraction = 1.0f` hardcode replaced with velocity-derived value,
+- [x] `speedFraction = 1.0f` hardcode replaced with velocity-derived value,
   OR replaced with `/* TODO phase-11q7: derive from agent velocity */` and a
   tracking issue opened.
-- [ ] If replaced with velocity: `gainIdle` audible at low agent speed in manual test.
+- [x] If replaced with velocity: `gainIdle` audible at low agent speed in manual test.
 
 ---
 
@@ -262,14 +262,14 @@ display:
 No changes to `ICitySimulation.h`, `MockCitySimulation`, or the simulation
 query path are needed — the data is already present in `QueryResult`.
 
-- [ ] `InspectorPanel::populate()` has the
+- [x] `InspectorPanel::populate()` has the
   `else if (result.serviceType != ServiceBuildingType::None)` branch
   between the `isRoad` branch and the `else` "Unzoned" fallback.
-- [ ] Querying a tile inside a service building footprint shows service
+- [x] Querying a tile inside a service building footprint shows service
   building type (not "Unzoned") in the inspector panel.
-- [ ] Querying a tile outside all service building footprints is unaffected.
-- [ ] At least one unit test in `tests/ui/query_panel_test.cpp` (target `ui_tests`, label `unit`) covers the "tile inside service building footprint → inspector shows service building type (not Unzoned)" path via a `MockUIBackend` fixture that drives `InspectorPanel::populate()`; `query_panel_test.cpp` is already registered in `ui_tests` via `target_sources` so no new CMake changes needed.
-- [ ] All existing tests pass unchanged.
+- [x] Querying a tile outside all service building footprints is unaffected.
+- [x] At least one unit test in `tests/ui/query_panel_test.cpp` (target `ui_tests`, label `unit`) covers the "tile inside service building footprint → inspector shows service building type (not Unzoned)" path via a `MockUIBackend` fixture that drives `InspectorPanel::populate()`; `query_panel_test.cpp` is already registered in `ui_tests` via `target_sources` so no new CMake changes needed.
+- [x] All existing tests pass unchanged.
 
 ---
 
@@ -342,26 +342,26 @@ m_panCallback(m_cameraState.targetX + worldOffX, m_cameraState.targetZ + worldOf
 Note: verify the rotation sign produces correct behaviour (clicking top-of-minimap
 pans toward camera-forward direction) with a manual test before finalising.
 
-- [ ] Tile-drawing loop in `drawOverlay()` (zone tiles and road tiles) updated to
+- [x] Tile-drawing loop in `drawOverlay()` (zone tiles and road tiles) updated to
   rotate around the minimap centre using `-yaw_rad`; camera target = centre pixel.
-- [ ] `cosA`/`sinA` computed once before the tile loop (not per-tile).
-- [ ] Tiles culled when their pixel position falls outside `[kMapX, kMapX+kMapW) ×
+- [x] `cosA`/`sinA` computed once before the tile loop (not per-tile).
+- [x] Tiles culled when their pixel position falls outside `[kMapX, kMapX+kMapW) ×
   [kMapY, kMapY+kMapH)`.
-- [ ] Viewport indicator remains centred at `(kMapX+100, kMapY+100)`; side-length
+- [x] Viewport indicator remains centred at `(kMapX+100, kMapY+100)`; side-length
   formula unchanged from Phase 11p; four-strip draw unchanged.
-- [ ] North indicator rendered in `drawOverlay()`: small "N" text or filled rect
+- [x] North indicator rendered in `drawOverlay()`: small "N" text or filled rect
   at `(kMapX + 100 + 90*sinf(yaw_rad), kMapY + 100 - 90*cosf(yaw_rad))`,
   white fill, drawn after zone/road tiles.
-- [ ] Service-coverage overlay loop updated with the same per-tile rotation.
-- [ ] Traffic-congestion overlay loop updated with the same per-tile rotation.
-- [ ] Click-to-pan handler in `onEvent()` updated to unrotate click offset by
+- [x] Service-coverage overlay loop updated with the same per-tile rotation.
+- [x] Traffic-congestion overlay loop updated with the same per-tile rotation.
+- [x] Click-to-pan handler in `onEvent()` updated to unrotate click offset by
   `+yaw_rad` before adding to `targetX`/`targetZ`.
 - [ ] Manual visual check: whatever direction the camera faces, that direction is
   at the top of the minimap; North indicator moves as camera rotates.
-- [ ] `architecture/ui-ux/minimap.md` updated: camera-following coordinate mapping
+- [x] `architecture/ui-ux/minimap.md` updated: camera-following coordinate mapping
   documented; camera target = centre pixel; North indicator formula; updated
   click-to-pan formula; viewport indicator centred at (100, 100).
-- [ ] All existing minimap unit tests pass; update expected pixel coordinates in
+- [x] All existing minimap unit tests pass; update expected pixel coordinates in
   any test that asserts specific pixel positions.
 
 ---
@@ -402,11 +402,11 @@ Directly reproduces the crash path: despawn one agent, then draw the scene.
 8. SUCCEED() — reaching here means no crash; ASAN clean exit confirms no UAF.
 ```
 
-- [ ] Test file `tests/rendering/AgentDespawnRenderTest.cpp` created.
-- [ ] Added inline to `add_executable(opengl_tests ...)` in `CMakeLists.txt`.
-- [ ] `GTEST_SKIP()` asset guard present.
-- [ ] `beginScene`/`endScene` wrapper present around `drawAll()`.
-- [ ] Passes on fixed code; would fault on unfixed code under ASAN.
+- [x] Test file `tests/rendering/AgentDespawnRenderTest.cpp` created.
+- [x] Added inline to `add_executable(opengl_tests ...)` in `CMakeLists.txt`.
+- [x] `GTEST_SKIP()` asset guard present.
+- [x] `beginScene`/`endScene` wrapper present around `drawAll()`.
+- [x] Passes on fixed code; would fault on unfixed code under ASAN.
 
 #### Test B — `tests/integration/SceneEntityManagerDestroyOrderTest.cpp`
 
@@ -431,10 +431,10 @@ Uses EDT_NULL device (no GL context needed). Add to `integration_tests` target, 
 4. ASSERT_EQ(entity.getNode(), nullptr).
 ```
 
-- [ ] Test file `tests/integration/SceneEntityManagerDestroyOrderTest.cpp` created.
-- [ ] Added via `target_sources(integration_tests PRIVATE tests/integration/SceneEntityManagerDestroyOrderTest.cpp)` in `CMakeLists.txt` with label `integration`.
-- [ ] Uses EDT_NULL — no xvfb dependency.
-- [ ] Passes on current `SceneEntityManager::destroy()` implementation.
+- [x] Test file `tests/integration/SceneEntityManagerDestroyOrderTest.cpp` created.
+- [x] Added via `target_sources(integration_tests PRIVATE tests/integration/SceneEntityManagerDestroyOrderTest.cpp)` in `CMakeLists.txt` with label `integration`.
+- [x] Uses EDT_NULL — no xvfb dependency.
+- [x] Passes on current `SceneEntityManager::destroy()` implementation.
 
 #### Test C — `tests/rendering/SharedMeshRefCountTest.cpp`
 
@@ -461,13 +461,13 @@ This requires same zone type AND same `handle % 3` variant index. Use `handle=0`
 10. SUCCEED() — ASAN clean exit confirms mesh still alive for node 3.
 ```
 
-- [ ] Test file `tests/rendering/SharedMeshRefCountTest.cpp` created.
-- [ ] Added inline to `add_executable(opengl_tests ...)` in `CMakeLists.txt`.
-- [ ] Handles 0 and 3 used (same `% 3` remainder, same zone).
-- [ ] `ASSERT_EQ(node0->getMesh(), node3->getMesh())` precondition check present.
-- [ ] `GTEST_SKIP()` asset guard present.
-- [ ] `beginScene`/`endScene` wrapper present.
-- [ ] Passes on fixed code; would fault on unfixed code under ASAN.
+- [x] Test file `tests/rendering/SharedMeshRefCountTest.cpp` created.
+- [x] Added inline to `add_executable(opengl_tests ...)` in `CMakeLists.txt`.
+- [x] Handles 0 and 3 used (same `% 3` remainder, same zone).
+- [x] `ASSERT_EQ(node0->getMesh(), node3->getMesh())` precondition check present.
+- [x] `GTEST_SKIP()` asset guard present.
+- [x] `beginScene`/`endScene` wrapper present.
+- [x] Passes on fixed code; would fault on unfixed code under ASAN.
 
 #### Additional Tests — `tests/rendering/AgentDespawnRenderTest.cpp` (same file as Test A)
 
@@ -501,9 +501,9 @@ This requires same zone type AND same `handle % 3` variant index. Use `handle=0`
 6. SUCCEED().
 ```
 
-- [ ] `DespawnNonexistentHandle_NoOp` implemented and passes.
-- [ ] `DespawnAllAgents_DrawScene_Clean` implemented and passes.
-- [ ] `SpawnSameHandleTwice_NoLeak` implemented and passes.
+- [x] `DespawnNonexistentHandle_NoOp` implemented and passes.
+- [x] `DespawnAllAgents_DrawScene_Clean` implemented and passes.
+- [x] `SpawnSameHandleTwice_NoLeak` implemented and passes.
 
 #### Audio regression tests — `tests/integration/VehicleReleaseTest.cpp` (new file, `integration_tests` target)
 
@@ -551,47 +551,47 @@ in `Population.h`). The accessor is `unsigned int testGetSourceHandle(int poolId
 8. (Optional) ASSERT idleIdx2 == idleIdx && moveIdx2 == moveIdx — released slots are recycled.
 ```
 
-- [ ] Test source file `tests/integration/VehicleReleaseTest.cpp` created.
-- [ ] Added via `target_sources(integration_tests PRIVATE tests/integration/VehicleReleaseTest.cpp)` in `CMakeLists.txt`.
-- [ ] `AudioSystem` exposes `unsigned int testGetSourceHandle(int poolIdx) const` under `#ifdef AITOWN_TESTING_ENABLED`
+- [x] Test source file `tests/integration/VehicleReleaseTest.cpp` created.
+- [x] Added via `target_sources(integration_tests PRIVATE tests/integration/VehicleReleaseTest.cpp)` in `CMakeLists.txt`.
+- [x] `AudioSystem` exposes `unsigned int testGetSourceHandle(int poolIdx) const` under `#ifdef AITOWN_TESTING_ENABLED`
   (returns `m_sources[poolIdx]`); declared in `AudioSystem.h` alongside `Population::testForceUnlockDensityTier`.
-- [ ] `CMakeLists.txt` adds `target_compile_definitions(aitown_audio PRIVATE AITOWN_TESTING_ENABLED=1)` and
+- [x] `CMakeLists.txt` adds `target_compile_definitions(aitown_audio PRIVATE AITOWN_TESTING_ENABLED=1)` and
   `target_compile_definitions(integration_tests PRIVATE AITOWN_TESTING_ENABLED=1)` so the `#ifdef`-guarded
   accessor is compiled into the library and visible to the test TU (same pattern as `aitown_ui`/`ui_tests`).
-- [ ] `CMakeLists.txt` adds `target_link_libraries(integration_tests PRIVATE aitown_audio)` if not already present.
-- [ ] `CMakeLists.txt` adds `target_link_libraries(integration_tests PRIVATE OpenAL::OpenAL)` so
+- [x] `CMakeLists.txt` adds `target_link_libraries(integration_tests PRIVATE aitown_audio)` if not already present.
+- [x] `CMakeLists.txt` adds `target_link_libraries(integration_tests PRIVATE OpenAL::OpenAL)` so
   `alGetSourcei()` calls in VehicleReleaseTest compile (`OpenAL::OpenAL` is `PRIVATE` on `aitown_audio`
   and its headers do not propagate to consumers).
-- [ ] `AudioSystemVehicleReleaseTest` fixture: `SetUp()` constructs `AudioSystem(nullptr, &clock_, nullptr)`
+- [x] `AudioSystemVehicleReleaseTest` fixture: `SetUp()` constructs `AudioSystem(nullptr, &clock_, nullptr)`
   — `logger=nullptr` (falls back to stderr), `clock_` is a `ManualClock` member, `alcFunctions=nullptr`
   (activates `DefaultAlcFunctions`, real ALC). `TearDown()` destructs `AudioSystem` (joins audio thread).
   `clock_` is declared as `ManualClock clock_;` in the fixture class.
-- [ ] `cmake/AitownTestHelpers.cmake`: extend the `aitown_add_tests` macro to accept an
+- [x] `cmake/AitownTestHelpers.cmake`: extend the `aitown_add_tests` macro to accept an
   optional `ENVIRONMENT` keyword (e.g. `ENVIRONMENT "ALSOFT_DRIVERS=null"`) forwarded as
   `PROPERTIES ENVIRONMENT` in the underlying `gtest_discover_tests()` call.
   `set_tests_properties()` MUST NOT be used — per the `AitownTestHelpers.cmake` header comment,
   it targets only the statically-created wrapper test, not individually-discovered test cases
   under `DISCOVERY_MODE PRE_TEST`, so the property silently fails to propagate.
-- [ ] `aitown_add_tests(integration_tests LABEL "integration")` in `CMakeLists.txt` updated to
+- [x] `aitown_add_tests(integration_tests LABEL "integration")` in `CMakeLists.txt` updated to
   `aitown_add_tests(integration_tests LABEL "integration" ENVIRONMENT "ALSOFT_DRIVERS=null")`
   so all `integration_tests` test cases inherit the null audio backend (consistent with the CI
   integration-test step `env:` block which already sets `ALSOFT_DRIVERS=null` globally for all
   integration tests).
-- [ ] `architecture/testing/framework.md` updated: (a) `aitown_add_tests()` macro definition
+- [x] `architecture/testing/framework.md` updated: (a) `aitown_add_tests()` macro definition
   extended with optional `ENVIRONMENT` keyword (parsed via `cmake_parse_arguments`, forwarded
   as `PROPERTIES ENVIRONMENT` in `gtest_discover_tests()`); (b) `integration_tests` example
   updated to `aitown_add_tests(integration_tests LABEL "integration" ENVIRONMENT "ALSOFT_DRIVERS=null")`;
   (c) Phase 11q6 test files (`AgentDespawnRenderTest.cpp`, `SharedMeshRefCountTest.cpp`) added
   as inline commented entries inside `add_executable(opengl_tests ...)`.
-- [ ] `AudioSystem` constructed with `ALSOFT_DRIVERS=null` null backend; audio background thread runs normally.
-- [ ] All AL state assertions use bounded polling (max 200 ms / 5 ms intervals); test fails on timeout.
-- [ ] `SourceStoppedAfterRelease` implemented; asserts AL_STOPPED and AL_BUFFER==0 after bounded poll.
-- [ ] `SlotReacquirableAfterRelease` implemented; confirms pool slot recycled.
-- [ ] Both tests pass under the null-driver / headless audio seam.
+- [x] `AudioSystem` constructed with `ALSOFT_DRIVERS=null` null backend; audio background thread runs normally.
+- [x] All AL state assertions use bounded polling (max 200 ms / 5 ms intervals); test fails on timeout.
+- [x] `SourceStoppedAfterRelease` implemented; asserts AL_STOPPED and AL_BUFFER==0 after bounded poll.
+- [x] `SlotReacquirableAfterRelease` implemented; confirms pool slot recycled.
+- [x] Both tests pass under the null-driver / headless audio seam.
 
 #### Spec Update — Test Catalogue
 
-- [ ] `architecture/testing/testability-architecture.md` updated: fixture definitions for `AgentDespawnRenderTest`, `SharedMeshRefCountTest`, `SceneEntityManagerDestroyOrderTest`, and `AudioSystemVehicleReleaseTest` added; test catalogue table extended with all 9 new test cases (fixture name, canonical test name, source file, CMake target, label); the existing `query_panel_test.cpp` fixture row is extended with the Issue 6 service-building inspection test case (`InspectorPanel::populate()` shows service building type instead of "Unzoned" for tiles inside a service building footprint); CTest filter command added for Phase 11q6 tests.
+- [x] `architecture/testing/testability-architecture.md` updated: fixture definitions for `AgentDespawnRenderTest`, `SharedMeshRefCountTest`, `SceneEntityManagerDestroyOrderTest`, and `AudioSystemVehicleReleaseTest` added; test catalogue table extended with all 9 new test cases (fixture name, canonical test name, source file, CMake target, label); the existing `query_panel_test.cpp` fixture row is extended with the Issue 6 service-building inspection test case (`InspectorPanel::populate()` shows service building type instead of "Unzoned" for tiles inside a service building footprint); CTest filter command added for Phase 11q6 tests.
 
 ---
 
@@ -626,8 +626,8 @@ with non-ASAN builds via the ccache key, so ccache is explicitly disabled in
 `ci-linux-asan` by clearing both launcher variables. Cold-cache compilation is accepted
 within the 45-minute timeout budget.
 
-- [ ] `ci-linux-asan` preset added to `CMakePresets.json`.
-- [ ] `ci-linux-asan` preset sets `CMAKE_C_COMPILER_LAUNCHER: ""` and
+- [x] `ci-linux-asan` preset added to `CMakePresets.json`.
+- [x] `ci-linux-asan` preset sets `CMAKE_C_COMPILER_LAUNCHER: ""` and
   `CMAKE_CXX_COMPILER_LAUNCHER: ""` to disable ccache (prevents ASAN-instrumented objects
   from cross-contaminating the shared ccache with non-ASAN builds).
 
@@ -672,13 +672,13 @@ needs its own full configure → build → test pipeline as a standalone reusabl
 5. No `lcov` or coverage report steps.
 6. `timeout-minutes: 45` (configure + compile + xvfb execution).
 
-- [ ] `_asan-linux.yml` runs in the GHCR container with `options: --user root` (same image as `_build-linux.yml`).
-- [ ] `.github/workflows/_asan-linux.yml` created with configure + build + `requires-opengl` test steps.
-- [ ] Configure step uses `ci-linux-asan` preset; VCPKG env vars set (`VCPKG_MANIFEST_INSTALL=OFF`, `-DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed`).
-- [ ] `ASAN_OPTIONS` and `LSAN_OPTIONS` set in the test step `env:`.
-- [ ] `_asan-linux.yml` declares `permissions: { packages: read, contents: read }` at the job level (required for GHCR container pull and `actions/checkout`).
-- [ ] No lcov/coverage steps.
-- [ ] `timeout-minutes: 45` set on the workflow's job.
+- [x] `_asan-linux.yml` runs in the GHCR container with `options: --user root` (same image as `_build-linux.yml`).
+- [x] `.github/workflows/_asan-linux.yml` created with configure + build + `requires-opengl` test steps.
+- [x] Configure step uses `ci-linux-asan` preset; VCPKG env vars set (`VCPKG_MANIFEST_INSTALL=OFF`, `-DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed`).
+- [x] `ASAN_OPTIONS` and `LSAN_OPTIONS` set in the test step `env:`.
+- [x] `_asan-linux.yml` declares `permissions: { packages: read, contents: read }` at the job level (required for GHCR container pull and `actions/checkout`).
+- [x] No lcov/coverage steps.
+- [x] `timeout-minutes: 45` set on the workflow's job.
 
 #### 6c. Wire `asan-linux` into `ci.yml` and `all-checks-pass`
 
@@ -690,21 +690,21 @@ detected by ASAN fails the gate.
 `asan-linux` dependencies: `needs: [supply-chain-lint, validate-assets, prepare]`
 (same upstream gates as `build-linux` — no dependency on the non-ASAN build artifacts).
 
-- [ ] `asan-linux` job added to `ci.yml`; calls `_asan-linux.yml`.
-- [ ] `asan-linux` job in `ci.yml` declares `permissions: { packages: read, contents: read }` at
+- [x] `asan-linux` job added to `ci.yml`; calls `_asan-linux.yml`.
+- [x] `asan-linux` job in `ci.yml` declares `permissions: { packages: read, contents: read }` at
   the job level (top-level `ci.yml` has `permissions: {}` which overrides the GitHub default;
   without this job-level block the GHCR container pull is denied and `actions/checkout` has no
   `contents: read` permission).
-- [ ] `asan-linux` has `needs: [supply-chain-lint, validate-assets, prepare]`.
-- [ ] `asan-linux` added to `all-checks-pass` `needs:` list.
-- [ ] `"${{ needs.asan-linux.result }}"` added to the `results=()` bash array inside the
+- [x] `asan-linux` has `needs: [supply-chain-lint, validate-assets, prepare]`.
+- [x] `asan-linux` added to `all-checks-pass` `needs:` list.
+- [x] `"${{ needs.asan-linux.result }}"` added to the `results=()` bash array inside the
   `all-checks-pass` gate step's `run:` block (matching the pattern of the existing seven
   result entries so a failing ASAN job actually fails the gate, not merely blocks it).
-- [ ] `architecture/ci-cd/github-actions-workflow.md` verified — confirm the existing `asan-linux` entries
+- [x] `architecture/ci-cd/github-actions-workflow.md` verified — confirm the existing `asan-linux` entries
   (job count 13, jobs-table row, dependency-graph node, timeout-table entry, standalone `_asan-linux.yml`
   ASAN paragraph) are consistent with the implemented workflow; update only if the implementation deviates
   from the already-documented spec.
-- [ ] `architecture/ci-cd/github-actions-workflow.md` digest update instructions updated:
+- [x] `architecture/ci-cd/github-actions-workflow.md` digest update instructions updated:
   `_asan-linux.yml` appears in both the step-9 file list and the "Known issue" paragraph
   (making five files total alongside `_build-linux.yml`, `_test-linux.yml`,
   `_coverage-linux.yml`, `.devcontainer/Dockerfile`).

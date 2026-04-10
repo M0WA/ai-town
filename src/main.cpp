@@ -364,6 +364,8 @@ static bool runFrame(AppSystems& sys) {
                 sys.activeAgents[handle].moveIdx = newAud.second;
                 sys.activeAgents[handle].zone    = a.zone;
             }
+            // Refresh iterator after zone-change writes to avoid stale reference.
+            it = sys.activeAgents.find(handle);
             if (it == sys.activeAgents.end()) {
                 sys.renderer->spawnVehicleAgent(handle, a.tileX, a.tileZ, a.zone);
                 std::pair<int,int> audioPair{-1, -1};
@@ -388,7 +390,9 @@ static bool runFrame(AppSystems& sys) {
                 : (static_cast<float>(a.tileZ) + 0.5f) * kTileSizeM;
             sys.renderer->moveVehicleAgent(handle, agentWx, agentWz, a.headingDeg);
 
-            const float speedFraction = 1.0f;
+            // TODO phase-11q7: derive speedFraction from agent velocity (prevTileX/Z diff / maxSpeed).
+            // Currently hardcoded to 0.5f as a neutral blend; gainIdle = 0.5, gainMove = 0.5.
+            const float speedFraction = 0.5f;
             if (it->second.idleIdx >= 0) {
                 sys.audioSystem->updateVehicleAudio(
                     it->second.idleIdx, it->second.moveIdx,

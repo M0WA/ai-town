@@ -954,8 +954,11 @@ target_link_libraries(integration_tests PRIVATE
     aitown_terrain
     aitown_sim
     aitown_platform
+    aitown_audio    # Phase 11q6: VehicleReleaseTest constructs real AudioSystem
     Irrlicht
     GLEW::GLEW
+    OpenAL::OpenAL  # Phase 11q6: VehicleReleaseTest calls alGetSourcei() directly;
+                    # OpenAL::OpenAL is PRIVATE on aitown_audio so headers don't propagate
     aitown_irrlicht_system_deps
     GTest::gtest_main
     GTest::gmock
@@ -975,8 +978,14 @@ target_include_directories(integration_tests PRIVATE
     src/rendering/
     src/terrain/
     src/simulation/
+    src/audio/       # Phase 11q6: VehicleReleaseTest includes AudioSystem.h
 )
-aitown_add_tests(integration_tests LABEL "integration")
+# Phase 11q6: AITOWN_TESTING_ENABLED enables testGetSourceHandle() in AudioSystem.
+# MUST be set on both aitown_audio (compiled into library) and integration_tests (test TU).
+target_compile_definitions(aitown_audio PRIVATE AITOWN_TESTING_ENABLED=1)
+target_compile_definitions(integration_tests PRIVATE AITOWN_TESTING_ENABLED=1)
+
+aitown_add_tests(integration_tests LABEL "integration" ENVIRONMENT "ALSOFT_DRIVERS=null")  # Phase 11q6+
 
 # Terrain shader wiring integration tests: TerrainShaderWiring_EDT_NULL_InitDoesNotCrash and
 # TerrainChunk_RebuildAssignsMaterialType_WhenShaderLoaded.
@@ -1009,6 +1018,17 @@ target_sources(integration_tests PRIVATE
     tests/integration/font_tier_edt_null_test.cpp
 )
 
+# Phase 11q6: SceneEntityManagerDestroyOrderTest — verifies null-before-remove ordering
+# Uses EDT_NULL device (no xvfb dependency).
+target_sources(integration_tests PRIVATE
+    tests/integration/SceneEntityManagerDestroyOrderTest.cpp
+)
+# Phase 11q6: VehicleReleaseTest — verifies AudioSystem releases AL sources on
+# releaseVehicleEnginePair(); uses real AudioSystem + null-backend thread.
+target_sources(integration_tests PRIVATE
+    tests/integration/VehicleReleaseTest.cpp
+)
+
 # ----------------------------------------------------------------------------
 # opengl_tests — sRGB upload, setMesh grab/drop smoke test, shader compilation
 # Must run under xvfb-run on Linux.
@@ -1021,6 +1041,8 @@ add_executable(opengl_tests
     tests/rendering/cloud_plane_test.cpp
     tests/rendering/texture_cache_atlas_test.cpp
     tests/rendering/VehicleYBiasTest.cpp
+    tests/rendering/AgentDespawnRenderTest.cpp   # Phase 11q6: despawnVehicleAgent UAF regression
+    tests/rendering/SharedMeshRefCountTest.cpp   # Phase 11q6: shared mesh ref-count fix
 )
 # Irrlicht and GLEW::GLEW MUST be linked directly: shader_loading_test.cpp includes
 # <irrlicht.h> and <GL/glew.h>; aitown_render links both PRIVATE so their include paths

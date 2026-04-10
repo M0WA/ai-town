@@ -172,13 +172,29 @@ void Minimap::drawOverlay() {
     const int tileW = m_tileCacheW > 0 ? std::max(1, kMapW / m_tileCacheW) : 1;
     const int tileH = m_tileCacheD > 0 ? std::max(1, kMapH / m_tileCacheD) : 1;
 
+    static constexpr float kDegToRad = 3.14159265f / 180.0f;
+    const float yawRad  = m_cameraState.yaw * kDegToRad;
+    const float cosA    = cosf(-yawRad);   // negative: counter-rotate world beneath camera
+    const float sinA    = sinf(-yawRad);
+    const float scaleX  = static_cast<float>(kMapW) / worldW;   // px/m
+    const float scaleZ  = static_cast<float>(kMapH) / worldD;
+    const float centreX = kMapX + kMapW * 0.5f;
+    const float centreZ = kMapY + kMapH * 0.5f;
+
     // Zone color coding
     for (int z = 0; z < m_tileCacheD; ++z) {
         for (int x = 0; x < m_tileCacheW; ++x) {
             const auto& tile = m_tileCache[static_cast<size_t>(z) * m_tileCacheW + x];
-            int px = kMapX + x * tileW;
-            int py = kMapY + z * tileH;
             if (!tile.isRoad && tile.isZoned) {
+                const float wx   = x * kTileSize;
+                const float wz   = z * kTileSize;
+                const float relX = wx - m_cameraState.targetX;
+                const float relZ = wz - m_cameraState.targetZ;
+                const float rotX = relX * cosA - relZ * sinA;
+                const float rotZ = relX * sinA + relZ * cosA;
+                const int   px   = static_cast<int>(centreX + rotX * scaleX);
+                const int   py   = static_cast<int>(centreZ + rotZ * scaleZ);
+                if (px < kMapX || px >= kMapX + kMapW || py < kMapY || py >= kMapY + kMapH) continue;
                 int r, g, b;
                 switch (tile.zoneType) {
                     case ZoneType::Residential: r=0x27; g=0xAE; b=0x60; break;
@@ -196,8 +212,15 @@ void Minimap::drawOverlay() {
         for (int x = 0; x < m_tileCacheW; ++x) {
             const auto& tile = m_tileCache[static_cast<size_t>(z) * m_tileCacheW + x];
             if (tile.isRoad) {
-                int px = kMapX + x * tileW;
-                int py = kMapY + z * tileH;
+                const float wx   = x * kTileSize;
+                const float wz   = z * kTileSize;
+                const float relX = wx - m_cameraState.targetX;
+                const float relZ = wz - m_cameraState.targetZ;
+                const float rotX = relX * cosA - relZ * sinA;
+                const float rotZ = relX * sinA + relZ * cosA;
+                const int   px   = static_cast<int>(centreX + rotX * scaleX);
+                const int   py   = static_cast<int>(centreZ + rotZ * scaleZ);
+                if (px < kMapX || px >= kMapX + kMapW || py < kMapY || py >= kMapY + kMapH) continue;
                 m_backend->fillColoredRect(px, py, tileW, tileH, 0x7F, 0x8C, 0x8D, 255);
             }
         }
@@ -206,8 +229,15 @@ void Minimap::drawOverlay() {
     // Service Coverage overlay (painter's algorithm, sorted ascending priority)
     if (m_overlayActive && m_overlayMode == MinimapOverlay::ServiceCoverage) {
         for (const auto& sct : m_serviceCoverageCache) {
-            int px = kMapX + (m_tileCacheW > 0 ? sct.tileX * kMapW / m_tileCacheW : 0);
-            int py = kMapY + (m_tileCacheD > 0 ? sct.tileZ * kMapH / m_tileCacheD : 0);
+            const float wx   = sct.tileX * kTileSize;
+            const float wz   = sct.tileZ * kTileSize;
+            const float relX = wx - m_cameraState.targetX;
+            const float relZ = wz - m_cameraState.targetZ;
+            const float rotX = relX * cosA - relZ * sinA;
+            const float rotZ = relX * sinA + relZ * cosA;
+            const int   px   = static_cast<int>(centreX + rotX * scaleX);
+            const int   py   = static_cast<int>(centreZ + rotZ * scaleZ);
+            if (px < kMapX || px >= kMapX + kMapW || py < kMapY || py >= kMapY + kMapH) continue;
             int r, g, b;
             switch (sct.coveredBy) {
                 case ServiceBuildingType::FireStation:   r=0xC0; g=0x39; b=0x2B; break;
@@ -223,8 +253,15 @@ void Minimap::drawOverlay() {
     // Traffic Congestion overlay
     if (m_overlayActive && m_overlayMode == MinimapOverlay::Traffic) {
         for (const auto& seg : m_roadSpeedCache) {
-            int px = kMapX + (m_tileCacheW > 0 ? seg.tileX * kMapW / m_tileCacheW : 0);
-            int py = kMapY + (m_tileCacheD > 0 ? seg.tileZ * kMapH / m_tileCacheD : 0);
+            const float wx   = seg.tileX * kTileSize;
+            const float wz   = seg.tileZ * kTileSize;
+            const float relX = wx - m_cameraState.targetX;
+            const float relZ = wz - m_cameraState.targetZ;
+            const float rotX = relX * cosA - relZ * sinA;
+            const float rotZ = relX * sinA + relZ * cosA;
+            const int   px   = static_cast<int>(centreX + rotX * scaleX);
+            const int   py   = static_cast<int>(centreZ + rotZ * scaleZ);
+            if (px < kMapX || px >= kMapX + kMapW || py < kMapY || py >= kMapY + kMapH) continue;
             int r, g, b;
             if (seg.speedFraction >= 0.4f) {
                 r=0x27; g=0xAE; b=0x60;
@@ -235,6 +272,13 @@ void Minimap::drawOverlay() {
             }
             m_backend->fillColoredRect(px, py, tileW, tileH, r, g, b, 255);
         }
+    }
+
+    // North indicator: small white rect at minimap border at yaw_rad from top.
+    {
+        const int nx = static_cast<int>(kMapX + kMapW * 0.5f + 90.f * sinf(yawRad));
+        const int ny = static_cast<int>(kMapY + kMapH * 0.5f - 90.f * cosf(yawRad));
+        m_backend->fillColoredRect(nx - 3, ny - 3, 6, 6, 255, 255, 255, 220);
     }
 
     // Legend swatches (8x8 px per row)
@@ -256,23 +300,15 @@ void Minimap::drawOverlay() {
         }
     }
 
-    // Camera viewport rectangle
+    // Camera viewport rectangle — centred at (kMapX+100, kMapY+100) since camera target = minimap centre
     if (worldW > 0.f && worldD > 0.f) {
-        float cx = (m_cameraState.targetX / worldW) * 200.f;
-        float cz = (m_cameraState.targetZ / worldD) * 200.f;
-        cx = std::max(0.f, std::min(200.f, cx));
-        cz = std::max(0.f, std::min(200.f, cz));
-
         float side = 200.f * (m_cameraState.zoomDistance / CameraController::kMaxZoomDistance);
         side = std::max(8.f, std::min(190.f, side));
 
-        int rectX = kMapX + static_cast<int>(cx - side/2.f);
-        int rectY = kMapY + static_cast<int>(cz - side/2.f);
-        int rectW = static_cast<int>(side);
-        int rectH = static_cast<int>(side);
-        // Clamp to minimap area
-        rectX = std::max(kMapX, std::min(kMapX + kMapW - 1, rectX));
-        rectY = std::max(kMapY, std::min(kMapY + kMapH - 1, rectY));
+        const int rectX = kMapX + static_cast<int>(kMapW * 0.5f - side / 2.f);
+        const int rectY = kMapY + static_cast<int>(kMapH * 0.5f - side / 2.f);
+        const int rectW = static_cast<int>(side);
+        const int rectH = static_cast<int>(side);
 
         // Four strips: top, bottom, left, right (2px thick)
         m_backend->fillColoredRect(rectX, rectY,           rectW, 2,     255, 255, 255, 200);
@@ -379,13 +415,21 @@ bool Minimap::onEvent(const InputEvent& event) {
         if (mx >= kMapX && mx <= kMapX + kMapW &&
             my >= kMapY && my <= kMapY + kMapH) {
             if (m_panCallback && m_sim) {
-                static constexpr float kTileSize = 10.0f;
-                float worldW = m_sim->getMapTilesX() * kTileSize;
-                float worldD = m_sim->getMapTilesZ() * kTileSize;
+                const float worldW = m_sim->getMapTilesX() * 10.0f;
+                const float worldD = m_sim->getMapTilesZ() * 10.0f;
                 if (worldW > 0.f && worldD > 0.f) {
-                    float fracX = static_cast<float>(mx - kMapX) / static_cast<float>(kMapW);
-                    float fracZ = static_cast<float>(my - kMapY) / static_cast<float>(kMapH);
-                    m_panCallback(fracX * worldW, fracZ * worldD);
+                    const float scaleX = static_cast<float>(kMapW) / worldW;
+                    const float scaleZ = static_cast<float>(kMapH) / worldD;
+                    static constexpr float kDegToRad = 3.14159265f / 180.0f;
+                    const float yawRad = m_cameraState.yaw * kDegToRad;
+                    const float cosYaw = cosf(yawRad);
+                    const float sinYaw = sinf(yawRad);
+                    // Offset from minimap centre
+                    const float offX = (static_cast<float>(mx) - (kMapX + kMapW * 0.5f)) / scaleX;
+                    const float offZ = (static_cast<float>(my) - (kMapY + kMapH * 0.5f)) / scaleZ;
+                    const float worldOffX = offX * cosYaw + offZ * sinYaw;
+                    const float worldOffZ = -offX * sinYaw + offZ * cosYaw;
+                    m_panCallback(m_cameraState.targetX + worldOffX, m_cameraState.targetZ + worldOffZ);
                 }
             }
             return true;

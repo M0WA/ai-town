@@ -270,6 +270,42 @@ void InspectorPanel::populate(const QueryResult& result, int tileX, int tileZ,
         m_backend->setElementText(m_coverageLabel, "");
         m_backend->setElementText(m_desirabilityLabel, "");
         m_backend->setElementText(m_demandLabel, "");
+    } else if (result.serviceType != ServiceBuildingType::None) {
+        const char* typeName = "Service Building";
+        switch (result.serviceType) {
+            case ServiceBuildingType::FireStation:   typeName = "Fire Station";   break;
+            case ServiceBuildingType::PoliceStation: typeName = "Police Station"; break;
+            case ServiceBuildingType::PowerPlant:    typeName = "Power Plant";    break;
+            case ServiceBuildingType::WaterTower:    typeName = "Water Tower";    break;
+            default: break;
+        }
+        m_backend->setElementText(m_zoneLabel, typeName);
+        m_backend->setElementText(m_popLabel, "");
+        char covBuf[64];
+        switch (result.serviceType) {
+            case ServiceBuildingType::PowerPlant:
+                std::snprintf(covBuf, sizeof(covBuf), "Power: %.0f%%",
+                              result.coverage.power >= 0.0f ? result.coverage.power : 0.0f);
+                break;
+            case ServiceBuildingType::WaterTower:
+                std::snprintf(covBuf, sizeof(covBuf), "Water: %.0f%%",
+                              result.coverage.water >= 0.0f ? result.coverage.water : 0.0f);
+                break;
+            case ServiceBuildingType::FireStation:
+                std::snprintf(covBuf, sizeof(covBuf), "Fire: %.0f%%",
+                              result.coverage.fire >= 0.0f ? result.coverage.fire : 0.0f);
+                break;
+            case ServiceBuildingType::PoliceStation:
+                std::snprintf(covBuf, sizeof(covBuf), "Police: %.0f%%",
+                              result.coverage.police >= 0.0f ? result.coverage.police : 0.0f);
+                break;
+            default:
+                std::snprintf(covBuf, sizeof(covBuf), "Coverage: N/A");
+                break;
+        }
+        m_backend->setElementText(m_coverageLabel, covBuf);
+        m_backend->setElementText(m_desirabilityLabel, "");
+        m_backend->setElementText(m_demandLabel, "");
     } else {
         m_backend->setElementText(m_zoneLabel, "Unzoned");
         m_backend->setElementText(m_popLabel, "");
@@ -355,6 +391,42 @@ void InspectorPanel::draw() {
             m_backend->setElementText(m_zoneLabel, "Road");
             m_backend->setElementText(m_popLabel, "");
             m_backend->setElementText(m_coverageLabel, "");
+            m_backend->setElementText(m_desirabilityLabel, "");
+            m_backend->setElementText(m_demandLabel, "");
+        } else if (qr.serviceType != ServiceBuildingType::None) {
+            const char* typeName = "Service Building";
+            switch (qr.serviceType) {
+                case ServiceBuildingType::FireStation:   typeName = "Fire Station";   break;
+                case ServiceBuildingType::PoliceStation: typeName = "Police Station"; break;
+                case ServiceBuildingType::PowerPlant:    typeName = "Power Plant";    break;
+                case ServiceBuildingType::WaterTower:    typeName = "Water Tower";    break;
+                default: break;
+            }
+            m_backend->setElementText(m_zoneLabel, typeName);
+            m_backend->setElementText(m_popLabel, "");
+            char covBuf[64];
+            switch (qr.serviceType) {
+                case ServiceBuildingType::PowerPlant:
+                    std::snprintf(covBuf, sizeof(covBuf), "Power: %.0f%%",
+                                  qr.coverage.power >= 0.0f ? qr.coverage.power : 0.0f);
+                    break;
+                case ServiceBuildingType::WaterTower:
+                    std::snprintf(covBuf, sizeof(covBuf), "Water: %.0f%%",
+                                  qr.coverage.water >= 0.0f ? qr.coverage.water : 0.0f);
+                    break;
+                case ServiceBuildingType::FireStation:
+                    std::snprintf(covBuf, sizeof(covBuf), "Fire: %.0f%%",
+                                  qr.coverage.fire >= 0.0f ? qr.coverage.fire : 0.0f);
+                    break;
+                case ServiceBuildingType::PoliceStation:
+                    std::snprintf(covBuf, sizeof(covBuf), "Police: %.0f%%",
+                                  qr.coverage.police >= 0.0f ? qr.coverage.police : 0.0f);
+                    break;
+                default:
+                    std::snprintf(covBuf, sizeof(covBuf), "Coverage: N/A");
+                    break;
+            }
+            m_backend->setElementText(m_coverageLabel, covBuf);
             m_backend->setElementText(m_desirabilityLabel, "");
             m_backend->setElementText(m_demandLabel, "");
         } else {
