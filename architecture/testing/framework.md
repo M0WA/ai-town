@@ -57,9 +57,13 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
 
   ```cmake
   # cmake/AitownTestHelpers.cmake
-  # Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl> [TIMEOUT <seconds>] [DISCOVERY_TIMEOUT <seconds>])
+  # Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl>
+  #        [TIMEOUT <seconds>] [DISCOVERY_TIMEOUT <seconds>] [ENVIRONMENT <VAR=value>])
+  # ENVIRONMENT: optional env var forwarded as PROPERTIES ENVIRONMENT to gtest_discover_tests().
+  #   set_tests_properties() MUST NOT be used — it targets only the statically-created wrapper
+  #   test, not individually-discovered test cases under DISCOVERY_MODE PRE_TEST.
   macro(aitown_add_tests TARGET)
-      cmake_parse_arguments(AITOWN_TEST "" "LABEL;TIMEOUT;DISCOVERY_TIMEOUT" "" ${ARGN})
+      cmake_parse_arguments(AITOWN_TEST "" "LABEL;TIMEOUT;DISCOVERY_TIMEOUT;ENVIRONMENT" "" ${ARGN})
       if(NOT AITOWN_TEST_LABEL)
           message(FATAL_ERROR "aitown_add_tests: LABEL is required (unit, integration, or requires-opengl)")
       endif()
@@ -69,11 +73,15 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
       if(NOT AITOWN_TEST_DISCOVERY_TIMEOUT)
           set(AITOWN_TEST_DISCOVERY_TIMEOUT 30)  # default discovery timeout in seconds
       endif()
+      set(_AITOWN_ENV_PROPS "")
+      if(AITOWN_TEST_ENVIRONMENT)
+          set(_AITOWN_ENV_PROPS ENVIRONMENT "${AITOWN_TEST_ENVIRONMENT}")
+      endif()
       gtest_discover_tests(${TARGET}
           WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
           DISCOVERY_MODE PRE_TEST      # required on Windows — see DISCOVERY_MODE note above
           DISCOVERY_TIMEOUT ${AITOWN_TEST_DISCOVERY_TIMEOUT}
-          PROPERTIES TIMEOUT ${AITOWN_TEST_TIMEOUT}
+          PROPERTIES TIMEOUT ${AITOWN_TEST_TIMEOUT} ${_AITOWN_ENV_PROPS}
           LABELS "${AITOWN_TEST_LABEL}"
       )
   endmacro()
@@ -86,8 +94,8 @@ target_link_libraries(my_test PRIVATE rapidcheck rapidcheck_gtest)
   # aitown_add_tests(ui_tests LABEL "unit" TIMEOUT 300)  # 300s: WorldInteraction_OverlayCap_100K_StillCalls (~225s unoptimized, coverage build)
   # aitown_add_tests(audio_tests LABEL "unit")
   #
-  # Integration tests:
-  # aitown_add_tests(integration_tests LABEL "integration")
+  # Integration tests (Phase 11q6+: ENVIRONMENT ensures null audio backend for local ctest runs):
+  # aitown_add_tests(integration_tests LABEL "integration" ENVIRONMENT "ALSOFT_DRIVERS=null")
   ```
 
   **Terrain test timeout**: Terrain generator tests (`tests/terrain/`) use a 300 s per-test timeout (overriding the default 120 s) because `TerrainGenerator_AlwaysTerminates_WithinReSeedLimit` runs up to 100 re-seed attempts for each RapidCheck shrinking iteration, and the multi-seed `TEST_F` cases (6 seeds × generation time) can exceed 120 s on coverage-instrumented CI runners. Call: `aitown_add_tests(terrain_tests LABEL "unit" TIMEOUT 300 DISCOVERY_TIMEOUT 60)`. **Discovery timeout**: The default 30 s discovery timeout (configurable via `DISCOVERY_TIMEOUT` parameter) is necessary because coverage-instrumented binaries on loaded CI runners require more time to enumerate test cases; the default CMake value (5 s) is insufficient and silently produces 0 discovered tests. Terrain tests and simulation tests override to 60 s.
@@ -240,6 +248,12 @@ add_executable(opengl_tests
     #                                             promoted to real OpenGL test in Phase 5
     # tests/rendering/cloud_plane_test.cpp   -- added INLINE here in Phase 10b;
     #                                           target_sources() PROHIBITED for opengl_tests
+    # tests/rendering/AgentDespawnRenderTest.cpp  -- added INLINE here in Phase 11q6
+    #   (despawnVehicleAgent UAF regression + additional DespawnAllAgents/SpawnSameHandle tests);
+    #   target_sources() PROHIBITED for opengl_tests
+    # tests/rendering/SharedMeshRefCountTest.cpp  -- added INLINE here in Phase 11q6
+    #   (shared-mesh ref-count UAF regression; requires OpenGL context for drawAll());
+    #   target_sources() PROHIBITED for opengl_tests
 )
 target_link_libraries(opengl_tests PRIVATE aitown_render GTest::gtest_main GTest::gmock rapidcheck rapidcheck_gtest)
 # src/rendering/ required for Phase 5 lod_swap_smoke_test.cpp (full body) which needs scene-graph and mesh buffer headers.
@@ -271,8 +285,16 @@ aitown_add_tests(opengl_tests LABEL "requires-opengl")
 add_executable(integration_tests tests/integration/irrlicht_ui_backend_compile_test.cpp)
 target_link_libraries(integration_tests PRIVATE
     aitown_render aitown_ui
+    aitown_audio  # Phase 11q6: VehicleReleaseTest constructs real AudioSystem
+    OpenAL::OpenAL  # Phase 11q6: VehicleReleaseTest calls alGetSourcei() directly;
+                    # OpenAL::OpenAL is PRIVATE on aitown_audio so headers don't propagate
     GTest::gtest_main GTest::gmock
     rapidcheck rapidcheck_gtest)
+# Phase 11q6: AITOWN_TESTING_ENABLED required on both integration_tests and aitown_audio
+# so that AudioSystem::testGetSourceHandle() (gated on #ifdef AITOWN_TESTING_ENABLED) is
+# compiled into the library and visible to VehicleReleaseTest. MUST NOT be set on aitown.
+target_compile_definitions(integration_tests PRIVATE AITOWN_TESTING_ENABLED=1)
+target_compile_definitions(aitown_audio PRIVATE AITOWN_TESTING_ENABLED=1)
 # nlohmann_json::nlohmann_json: add to integration_tests PRIVATE if any integration test
 # source file uses `#include <nlohmann/json.hpp>` for programmatic JSON manipulation
 # (e.g., nlohmann::json::parse / j.dump() in serialize/deserialize assertions). This is
@@ -281,5 +303,5 @@ target_link_libraries(integration_tests PRIVATE
 # automatically. See also simulation_tests above (Phase 11q2+).
 target_include_directories(integration_tests PRIVATE
     tests/simulation/ tests/ui/ src/interfaces/ src/ui/ src/rendering/ ${CMAKE_SOURCE_DIR})
-aitown_add_tests(integration_tests LABEL "integration")
+aitown_add_tests(integration_tests LABEL "integration" ENVIRONMENT "ALSOFT_DRIVERS=null")  # Phase 11q6+
 ```

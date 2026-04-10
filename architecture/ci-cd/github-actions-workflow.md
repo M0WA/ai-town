@@ -28,6 +28,7 @@ Create `.github/workflows/ci.yml`:
   | `validate-assets` | 10 | Python validation + asset checks |
   | `build-linux` (compile) | 30 | Compile-only container job |
   | `test-linux` | 30 | Test execution inside `_test-linux.yml`; `build-linux` pipeline path can take up to 60 min total (compile + test in sequence) |
+  | `asan-linux` | 45 | Configure + ASAN/UBSan compile + xvfb `requires-opengl` tests |
   | `build-windows` | 40 | |
   | `coverage-linux` | 60 | Full build + instrumented tests + lcov; Phase 7 AudioSystem instrumented build + streaming tests + three-tier ctest exceeds Phase 0 estimate; 60 min confirmed as sufficient headroom |
   | `markdown-lint` | 5 | Fast linting step |
@@ -61,7 +62,7 @@ Create `.github/workflows/ci.yml`:
 
 ## ci.yml Job Structure and Dependency Graph
 
-`ci.yml` defines **twelve jobs**:
+`ci.yml` defines **thirteen jobs**:
 
 | Job | Trigger | Purpose |
 |---|---|---|
@@ -72,6 +73,7 @@ Create `.github/workflows/ci.yml`:
 | `build-linux` | All events | Calls `_build-linux.yml` — compiles in GHCR container, delegates test execution to `test-linux` via `_test-linux.yml`. |
 | `build-windows` | All events | Calls `_build-windows.yml` — compiles and tests on Windows. |
 | `coverage-linux` | All events | Calls `_coverage-linux.yml` — build + test + lcov in GHCR container. |
+| `asan-linux` | All events | Calls `_asan-linux.yml` — configures + compiles with ASAN/UBSan instrumentation and runs `requires-opengl` tests under xvfb. |
 | `markdown-lint` | All events | Calls `_markdown-lint.yml` — markdownlint via `npx`. |
 | `all-checks-pass` | All events | Gate job (`if: always()`). |
 | `package-windows` | Push to main/develop | Calls `_package-windows.yml`. NOT in `all-checks-pass`. |
@@ -87,7 +89,8 @@ Create `.github/workflows/ci.yml`:
 - `compute-version` has NO `needs:` — runs independently, gated only by push event `if:` condition
 - `package-windows` has `needs: [build-windows, prepare, compute-version]` — `prepare` for its `vcpkg_commit_id` output
 - `package-linux-deb` has `needs: [build-linux, prepare, compute-version]` — same rationale
-- `all-checks-pass` has `needs: [prepare, supply-chain-lint, validate-assets, build-linux, build-windows, coverage-linux, markdown-lint]`
+- `asan-linux` has `needs: [supply-chain-lint, validate-assets, prepare]`
+- `all-checks-pass` has `needs: [prepare, supply-chain-lint, validate-assets, build-linux, build-windows, coverage-linux, markdown-lint, asan-linux]`
 
 **Rationale — `validate-assets` gates all build jobs**: all three build jobs wait for
 `validate-assets` before starting. A failing `validate-assets` blocks ALL build jobs — not just
@@ -171,9 +174,33 @@ loops so all errors surface in one execution.
   env var set from `inputs.build_dir`. The artifact upload name is `${{ inputs.test_artifact_name
   }}` — the sha uniqueness suffix is applied at the call site.
 
-  **Container `options: --user root`**: All three Linux container jobs (`_build-linux.yml`,
-  `_test-linux.yml`, `_coverage-linux.yml`) set `options: --user root` on their `container:`
-  block. This is required because the pre-baked GHCR image's default user is non-root, which
+  **ASAN job (`_asan-linux.yml`)**: ASAN/UBSan instrumentation requires compile-time
+  flags, so the ASAN job is a standalone reusable workflow `_asan-linux.yml` (NOT a
+  second call to `_test-linux.yml` — that workflow downloads pre-built artifacts and
+  has no configure or build steps). `_asan-linux.yml` runs its own configure step with
+  `cmake --preset ci-linux-asan` (with `VCPKG_MANIFEST_INSTALL=OFF` and
+  `-DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed`), builds the ASAN-instrumented binary,
+  and runs only the `requires-opengl` tests under `xvfb-run`. The `asan-linux` job in
+  `ci.yml` calls `_asan-linux.yml` with `needs: [supply-chain-lint, validate-assets, prepare]`
+  and is listed in `all-checks-pass`'s `needs:` list. ASAN instrumentation sets
+  `ASAN_OPTIONS: halt_on_error=1:detect_leaks=0` and `LSAN_OPTIONS: detect_leaks=0`
+  (leak detection disabled because the CI container environment produces false positives
+  with Irrlicht's global state). The ASAN run does NOT generate coverage reports —
+  `ENABLE_COVERAGE=OFF` is baked into the `ci-linux-asan` preset because ASAN and gcov
+  runtimes conflict. The preset also clears `CMAKE_C_COMPILER_LAUNCHER` and
+  `CMAKE_CXX_COMPILER_LAUNCHER` to empty strings — this disables the ccache launchers
+  inherited from `ci-linux` and prevents ASAN-instrumented object files from entering
+  the shared ccache (see the CMakePresets.json bullet below for the full rationale).
+  The `_asan-linux.yml` workflow therefore does NOT include the
+  `hendrikmuhs/ccache-action` step. `timeout-minutes: 45` (configure + compile + xvfb test execution).
+  Like the other Linux container jobs, `_asan-linux.yml` sets
+  `container: image: ghcr.io/m0wa/aitown-ci-linux@sha256:<digest>` with
+  `options: --user root`; this provides the pre-baked `/opt/vcpkg_installed` that the
+  configure step requires.
+
+  **Container `options: --user root`**: All four Linux container jobs (`_build-linux.yml`,
+  `_test-linux.yml`, `_coverage-linux.yml`, `_asan-linux.yml`) set `options: --user root`
+  on their `container:` block. This is required because the pre-baked GHCR image's default user is non-root, which
   causes permission failures when writing to `$GITHUB_WORKSPACE` and `/home/runner`. Without it,
   artifact upload and workspace writes fail with permission denied.
 
@@ -308,9 +335,10 @@ loops so all errors surface in one execution.
   ```
 
   Note: label names are `integration` and `requires-opengl` per the Testing Strategy label conventions. **Do not use `--gtest_output` as a ctest flag** — it is a GTest binary flag and CTest silently ignores it. **`AITOWN_HEADLESS=1` and `ALSOFT_DRIVERS=null` are required on the integration test step** — integration tests use `EDT_NULL` which suppresses Irrlicht window creation, but `AudioSystem` initialization still attempts to open an audio device; `ALSOFT_DRIVERS=null` forces the null driver and prevents failures on headless runners without audio hardware. The unit test step includes `AITOWN_HEADLESS=1` and `ALSOFT_DRIVERS=null` as a defensive guard — these are zero-cost to apply and prevent accidental device instantiation from failing unit tests as the codebase grows. The OpenGL test step requires a real OpenGL context (via xvfb) but uses `ALSOFT_DRIVERS=null` to suppress audio device initialization on headless runners; `AITOWN_HEADLESS=1` must NOT be set for the OpenGL test step — it causes application code to skip `IrrlichtDevice` initialization, which means tests in the `requires-opengl` bucket that explicitly create `EDT_OPENGL` devices would have those paths bypassed, producing false green results. **`coverage-linux`** is the separate job that enables `-DENABLE_COVERAGE=ON` (see below).
-- **CMakePresets.json**: All three CI jobs use named presets defined in `CMakePresets.json` at the repo root instead of long `-D` flag chains:
+- **CMakePresets.json**: All four CI jobs use named presets defined in `CMakePresets.json` at the repo root instead of long `-D` flag chains:
   - `ci-linux` — Ninja generator, `ENABLE_COVERAGE=OFF`, ccache launchers (`build-linux` job)
   - `ci-linux-coverage` — inherits `ci-linux`, `ENABLE_COVERAGE=ON` (`coverage-linux` job)
+  - `ci-linux-asan` — inherits `ci-linux`; adds `-fsanitize=address,undefined -fno-omit-frame-pointer` to `CMAKE_CXX_FLAGS` and `CMAKE_EXE_LINKER_FLAGS`; sets `ENABLE_COVERAGE=OFF` (ASAN and gcov runtimes conflict); sets `CMAKE_C_COMPILER_LAUNCHER: ""` and `CMAKE_CXX_COMPILER_LAUNCHER: ""` (empty strings) to disable ccache — the parent `ci-linux` preset enables ccache launchers, and ASAN-instrumented object files must not enter the shared ccache because `build-linux` uses the same ccache key; without this override, a subsequent `build-linux` run could restore ASAN-instrumented `.o` files from the cache, producing a non-ASAN binary silently linked against sanitizer-instrumented objects.
   - `ci-windows` — Ninja generator, `CMAKE_BUILD_TYPE=Release`, `ENABLE_COVERAGE=OFF` (`build-windows` job)
 
   Configure steps call `cmake --preset <name>` instead of `cmake -B build -S . -G ... -D...`. Local development: set `VCPKG_ROOT` then `cmake --preset ci-linux` (add `-DVCPKG_OVERLAY_PORTS=vcpkg-overlays` if using gcc-12 fallback).
@@ -1249,6 +1277,7 @@ all-checks-pass:
     - build-windows
     - coverage-linux
     - markdown-lint
+    - asan-linux
   steps:
     - name: Verify all platform builds passed
       shell: bash   # REQUIRED: Bash arrays are used; default shell on ubuntu-latest is bash but must be explicit
@@ -1267,6 +1296,7 @@ all-checks-pass:
           "${{ needs.build-windows.result }}"
           "${{ needs.coverage-linux.result }}"
           "${{ needs.markdown-lint.result }}"
+          "${{ needs.asan-linux.result }}"
         )
         failed=0
         for result in "${results[@]}"; do
@@ -1701,15 +1731,15 @@ miss; 120 min provides sufficient headroom.
    layer is deep in the image; `mode=min` would miss it, producing cold-cache build times on every run)
 9. Print image digest and update instructions — the `steps.docker_build.outputs.digest` value
    (sha256) must be pinned in: (1) `.github/workflows/_build-linux.yml`, (2) `_test-linux.yml`,
-   (3) `_coverage-linux.yml`, and (4) `.devcontainer/Dockerfile`. The digest output is the
-   authoritative source for the pin values.
+   (3) `_coverage-linux.yml`, (4) `_asan-linux.yml`, and (5) `.devcontainer/Dockerfile`. The
+   digest output is the authoritative source for the pin values.
 
 **Image tag format**: `ghcr.io/m0wa/aitown-ci-linux:vcpkg-${VCPKG_SHORT_SHA}`
 
 **Known issue — stale echo in "Print image digest" step**: the step currently references
 `test-container-xvfb` job (which no longer exists). The correct jobs to update after an image
-rebuild are: `_build-linux.yml`, `_test-linux.yml`, `_coverage-linux.yml`, and
-`.devcontainer/Dockerfile`.
+rebuild are: `_build-linux.yml`, `_test-linux.yml`, `_coverage-linux.yml`,
+`_asan-linux.yml`, and `.devcontainer/Dockerfile`.
 
 **Secure download policy**: All file downloads in `docker/ci-linux/Dockerfile` and
 `.devcontainer/Dockerfile` must use `curl` (not `wget`) with `--proto '=https' --tlsv1.2`.

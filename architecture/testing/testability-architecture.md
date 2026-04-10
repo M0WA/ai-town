@@ -1132,14 +1132,25 @@ the audio playback path, not a unit test with strict call-count expectations on 
   # ui_tests would have undefined-reference link errors if aitown_ui were compiled
   # without the flag. The PRIVATE qualifier ensures the definition does NOT propagate
   # to the aitown binary (the top-level executable). MUST NOT be set on aitown.
-  # Pattern: apply to aitown_sim as well when simulation_tests needs non-inline test
-  # helpers (e.g. testForceUnlockDensityTier()). Added in Phase 11m.
+  # Pattern: apply to aitown_sim / aitown_audio as well when their test targets need
+  # non-inline test helpers (e.g. testForceUnlockDensityTier(), testGetSourceHandle()).
+  # Added in Phase 11m (aitown_ui/ui_tests), Phase 11q6 (aitown_audio/integration_tests).
   target_compile_definitions(ui_tests PRIVATE AITOWN_TESTING_ENABLED=1)
   target_compile_definitions(aitown_ui PRIVATE AITOWN_TESTING_ENABLED=1)
 
   # audio_tests — uses MockAudioSystem from tests/simulation/;
   # IAudioSystem.h from src/interfaces/; audio_constants.h from src/audio/
   target_include_directories(audio_tests PRIVATE tests/simulation/ src/interfaces/ src/audio/ ${CMAKE_SOURCE_DIR})
+
+  # REQUIRED for integration_tests AND aitown_audio (Phase 11q6): enable AITOWN_TESTING_ENABLED
+  # so that AudioSystem::testGetSourceHandle() (a non-inline method defined in AudioSystem.cpp,
+  # gated on #ifdef AITOWN_TESTING_ENABLED) is compiled into both the library and the test binary.
+  # VehicleReleaseTest is an integration test (constructs real AudioSystem with null-backend thread)
+  # so it lives in integration_tests, not audio_tests. Without AITOWN_TESTING_ENABLED on
+  # aitown_audio, the function body is compiled out → undefined-reference linker error.
+  # MUST NOT be set on aitown (production binary).
+  target_compile_definitions(integration_tests PRIVATE AITOWN_TESTING_ENABLED=1)
+  target_compile_definitions(aitown_audio PRIVATE AITOWN_TESTING_ENABLED=1)
 
   # integration_tests — needs shared mock paths and UI header paths for Phase 3+ integration tests;
   # src/rendering/ is required because IrrlichtUIBackend.h lives there and integration tests compile against it
@@ -1155,6 +1166,40 @@ the audio playback path, not a unit test with strict call-count expectations on 
   ```
 
   If a test target needs a specialization, it must subclass the shared mock — not redefine it. This sharing is intentional: the same mock interface is used consistently across all simulation-adjacent tests.
+
+- **`AudioSystemVehicleReleaseTest` fixture** (Phase 11q6, `tests/integration/VehicleReleaseTest.cpp`):
+  Constructs a real `AudioSystem` with the null OpenAL Soft backend. The fixture pattern is:
+
+  ```cpp
+  class AudioSystemVehicleReleaseTest : public ::testing::Test {
+  protected:
+      ManualClock clock_;
+      std::unique_ptr<AudioSystem> audio_;
+
+      void SetUp() override {
+          // logger=nullptr  → falls back to stderr
+          // clock_          → ManualClock member; allows deterministic timing
+          // alcFunctions=nullptr → DefaultAlcFunctions (real ALC); null driver via ALSOFT_DRIVERS=null
+          audio_ = std::make_unique<AudioSystem>(nullptr, &clock_, nullptr);
+      }
+
+      void TearDown() override {
+          audio_.reset();  // joins audio background thread before test teardown
+      }
+  };
+  ```
+
+  `ALSOFT_DRIVERS=null` is set in the ctest environment (CI: `env:` block in workflow step;
+  local builds: via `ENVIRONMENT "ALSOFT_DRIVERS=null"` in the `aitown_add_tests()` call —
+  see `framework.md` §`aitown_add_tests()` macro), not in the fixture — this ensures
+  `alcOpenDevice` succeeds on the null backend and the audio thread starts normally.
+  `set_tests_properties()` MUST NOT be used for this purpose (see `AitownTestHelpers.cmake`
+  header: it does not propagate to individually-discovered test cases under
+  `DISCOVERY_MODE PRE_TEST`). The three constructor arguments map to `AudioSystem`'s declared signature:
+  `explicit AudioSystem(irr::ILogger* logger, IClock* clock, IAlcFunctions* alcFunctions = nullptr)`.
+  `ManualClock` is declared as a plain member (not a pointer) so no heap allocation is needed and
+  lifetime is managed automatically by the fixture.
+
 - **`IClock`** — injectable clock interface for audio timing and loan gate tests.
 
   **Spec entry**:

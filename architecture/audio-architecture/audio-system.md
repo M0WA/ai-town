@@ -102,6 +102,11 @@ public:
 
     // Synchronise the OpenAL listener position and orientation to the current camera.
     // Must be called once per frame from the main thread after Irrlicht updates the camera.
+    // In addition to setting AL_POSITION and AL_ORIENTATION on the OpenAL listener, the
+    // implementation writes the listener's world-space X and Z coordinates into
+    // m_listenerX and m_listenerZ (float members of AudioSystem). These cached values
+    // are read by updateVehicleAudio() to compute per-slot listenerDistanceSq for the
+    // distance-based eviction heuristic.
     virtual void syncListenerToCamera(const CameraState& cam) = 0;
 
     // Signal a game-over condition to the audio system.
@@ -297,6 +302,24 @@ public:
     //     Derivation: speedFraction = currentSpeed / 13.9 m/s (max road speed per traffic-system.md);
     //     0.21 ≈ 3/13.9 (idle-full-on threshold); 0.36 ≈ (8−3)/13.9 (ramp width).
     //   - Set AL_POSITION on both sources to (worldX, 0.0f, worldZ) for 3D spatial rolloff.
+    //   - **Listener distance update**: While scanning `m_vehicleAudio[i]` to find the
+    //     matching pair (where `idleSourceIdx == idleIdx && moveSourceIdx == moveIdx`),
+    //     compute `distSq = (worldX - m_listenerX)^2 + (worldZ - m_listenerZ)^2` (where
+    //     `m_listenerX` and `m_listenerZ` are float members of AudioSystem updated each
+    //     frame by syncListenerToCamera). Then apply all four distance writes:
+    //       (a) `m_sfxSlots[idleIdx].listenerDistanceSq = distSq` (AudioSystem-side SFX
+    //           slot tracking — used by non-vehicle SFX eviction paths that may scan
+    //           the same slot indices);
+    //       (b) `m_sfxSlots[moveIdx].listenerDistanceSq = distSq`;
+    //       (c) `m_pool.updateSFXSlotDistance(idleIdx, distSq)` — keeps the pool's own
+    //           `m_sfxSlots` copy in sync with AudioSystem (separate arrays; see
+    //           source-pool.md — `findEvictionCandidate` reads the pool's copy);
+    //       (d) `m_pool.updateSFXSlotDistance(moveIdx, distSq)`;
+    //       (e) `m_pool.updateVehiclePairDistance(i, distSq)` — writes `distSq` into
+    //           `VehiclePairSlot.listenerDistanceSq` (see source-pool.md
+    //           §updateVehiclePairDistance), which is read by the vehicle-pair eviction
+    //           heuristic in `acquireVehicleEnginePair`. All five writes keep both the
+    //           SFX-slot eviction path and the vehicle-pair eviction path correct.
     // idleIdx / moveIdx must be the values returned by acquireVehicleEnginePair(); passing
     // {-1, -1} (a failed acquisition) is a no-op.
     //
@@ -415,6 +438,11 @@ private:
     std::atomic<float>        m_musicVolume{0.8f};   // music source gain — written by main thread via setMusicVolume(), read by audio thread during source gain updates
     std::atomic<float>        m_sfxVolume{0.8f};     // SFX source gain — written by main thread via setSFXVolume(), read by audio thread during source gain updates
     float                     m_masterVolume{1.0f};  // master AL listener gain — applied immediately by setMasterVolume() via alListenerf(AL_GAIN, gain); no cross-thread read
+    // Listener world-space position cache — written by syncListenerToCamera() (main thread),
+    // read by updateVehicleAudio() (also main thread, same frame — no cross-thread access).
+    // Used to compute per-slot listenerDistanceSq for the distance-based eviction heuristic.
+    float                     m_listenerX{0.0f};
+    float                     m_listenerZ{0.0f};
     // Music ducking state machine (audio thread only for gain writes; main thread reads atomically):
     enum class DuckState { IDLE, DUCKING, DUCKED, RELEASING };
     std::atomic<DuckState>    m_duckState{DuckState::IDLE};

@@ -217,6 +217,32 @@ std::array<VehiclePairSlot, 12> m_vehiclePairs{};  // up to 12 active vehicles (
 
 Releasing only one source of a pair (e.g., on LOD cull) is prohibited. The cull path must call `releaseVehicleEnginePair(idleIdx, moveIdx)` — never free individual sources from a pair via `acquireSFXSource`/release paths.
 
+**`updateVehiclePairDistance(int pairIdx, float distanceSq)`** (main thread only):
+
+Sets `m_vehiclePairs[pairIdx].listenerDistanceSq = distanceSq`. Bounds-checked: no-op if
+`pairIdx < 0 || pairIdx >= kMaxVehiclePairs`. Called by `AudioSystem::updateVehicleAudio()`
+each frame after computing `(worldX − m_listenerX)² + (worldZ − m_listenerZ)²` to keep
+the vehicle-pair eviction heuristic current (step 3 of `acquireVehicleEnginePair` — evict
+the pair with greatest average listener distance squared as tiebreak). Not thread-safe with
+`acquireVehicleEnginePair`; both are main-thread-only operations.
+
+**`updateSFXSlotDistance(int poolIdx, float distanceSq)`** (main thread only):
+
+Sets `m_sfxSlots[poolIdx].listenerDistanceSq = distanceSq` on the pool's internal
+`PoolSFXEntry` array, which is read by the eviction candidate selection logic in
+`acquireSFXSource()` and `acquireVehicleEnginePair()` when distance-weighted tiebreaking
+is needed. Bounds-checked: no-op if `poolIdx < 0 || poolIdx >= kEvictableSFXCount`.
+Called by `AudioSystem::updateVehicleAudio()` for each active vehicle engine source
+(both idle and move indices) each frame. Not thread-safe with pool acquisition/eviction
+methods; all are main-thread-only operations.
+
+**Note**: `AudioSourcePool::m_sfxSlots` (`PoolSFXEntry[]`) is a separate array from
+`AudioSystem::m_sfxSlots` (`SFXSlot[]`). `updateVehicleAudio()` must write the same
+`distanceSq` value to both: the `AudioSystem`-side slot (for non-vehicle SFX eviction
+paths that scan the same slot indices) and the pool-side slot via `updateSFXSlotDistance()`
+(for `acquireSFXSource()` / `acquireVehicleEnginePair()` eviction). See `audio-system.md`
+section on `updateVehicleAudio()` for the full five-write sequence.
+
 ## SFX Pool Thread Safety — `m_sfxVehicleReserved` and `cleanupFinishedSFX`
 
 ### The race hazard
