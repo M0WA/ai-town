@@ -538,9 +538,17 @@ in `Population.h`). The accessor is `unsigned int testGetSourceHandle(int poolId
 **`AudioSystemVehicleReleaseTest::SlotReacquirableAfterRelease`**
 
 ```text
-After SourceStoppedAfterRelease completes:
-1. acquireVehicleEnginePair(zone) again.
-2. ASSERT returned indices are valid (>= 0) — pool slot is genuinely free.
+1. Acquire a pair via acquireVehicleEnginePair(zone) → (idleIdx, moveIdx).
+2. Obtain AL handles: srcIdle = audio.testGetSourceHandle(idleIdx),
+                      srcMove = audio.testGetSourceHandle(moveIdx).
+3. Wait for audio thread to process pendingInit: poll alGetSourcei(srcIdle/srcMove, AL_SOURCE_STATE)
+   == AL_PLAYING (max 200 ms / 5 ms intervals).
+4. releaseVehicleEnginePair(idleIdx, moveIdx).
+5. Poll alGetSourcei(srcIdle/srcMove, AL_SOURCE_STATE) until AL_STOPPED
+   (max 200 ms / 5 ms intervals); fail if timeout elapses.
+6. Re-acquire via acquireVehicleEnginePair(zone) → (idleIdx2, moveIdx2).
+7. ASSERT idleIdx2 >= 0 && moveIdx2 >= 0 — pool slot is genuinely free and reusable.
+8. (Optional) ASSERT idleIdx2 == idleIdx && moveIdx2 == moveIdx — released slots are recycled.
 ```
 
 - [ ] Test source file `tests/integration/VehicleReleaseTest.cpp` created.

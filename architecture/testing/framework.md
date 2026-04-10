@@ -295,6 +295,12 @@ target_link_libraries(integration_tests PRIVATE
 # compiled into the library and visible to VehicleReleaseTest. MUST NOT be set on aitown.
 target_compile_definitions(integration_tests PRIVATE AITOWN_TESTING_ENABLED=1)
 target_compile_definitions(aitown_audio PRIVATE AITOWN_TESTING_ENABLED=1)
+# Phase 11q6: SceneEntityManagerDestroyOrderTest — verifies null-before-remove ordering
+# contract on SceneEntityManager::destroy(); uses EDT_NULL (no GL context needed).
+target_sources(integration_tests PRIVATE tests/integration/SceneEntityManagerDestroyOrderTest.cpp)
+# Phase 11q6: VehicleReleaseTest — verifies AudioSystem releases AL sources on
+# releaseVehicleEnginePair(); uses real AudioSystem + null OpenAL backend (ALSOFT_DRIVERS=null).
+target_sources(integration_tests PRIVATE tests/integration/VehicleReleaseTest.cpp)
 # nlohmann_json::nlohmann_json: add to integration_tests PRIVATE if any integration test
 # source file uses `#include <nlohmann/json.hpp>` for programmatic JSON manipulation
 # (e.g., nlohmann::json::parse / j.dump() in serialize/deserialize assertions). This is
