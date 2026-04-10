@@ -1,15 +1,14 @@
 # CI base image — extends ghcr.io/m0wa/aitown-ci-linux.
 # Both this file and ci.yml MUST pin identical digests (Atomicity Contract item 5).
 FROM ghcr.io/m0wa/aitown-ci-linux@sha256:52f7ddf4d4130144f41f72466ffe4a3b85c662f73c509aa415b58f067fb3dc74
+# The CI base image ends with USER ci. Switch to root for all build-time
+# installs below; switch back to ci (with NOPASSWD sudo) at the end.
+USER root
 
 ARG TZ
 ENV TZ="$TZ"
 
 ARG CLAUDE_CODE_VERSION=latest
-
-# Create node user (uid/gid 1000) to match the node:20 image convention
-RUN groupadd --gid 1000 node \
-  && useradd --uid 1000 --gid node --shell /bin/bash --create-home node
 
 # Install Node.js 20 via NodeSource (nodistro works on any Debian/Ubuntu variant)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -80,11 +79,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
   && (test -f /usr/bin/batcat && ln -sf /usr/bin/batcat /usr/local/bin/bat || true)
 
-# Ensure default node user has access to /usr/local/share
-RUN mkdir -p /usr/local/share/npm-global && \
-  chown -R node:node /usr/local/share
+# Grant ci user passwordless sudo (devcontainer only — not present in the CI image).
+RUN echo "ci ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ci && \
+    chmod 0440 /etc/sudoers.d/ci
 
-ARG USERNAME=node
+# Ensure ci user has access to /usr/local/share
+RUN mkdir -p /usr/local/share/npm-global && \
+  chown -R ci:ci /usr/local/share
+
+ARG USERNAME=ci
 
 # Persist bash history.
 RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
@@ -99,8 +102,8 @@ ENV DEVCONTAINER=true
 ENV LIBGL_ALWAYS_SOFTWARE=1
 
 # Create workspace and config directories and set permissions
-RUN mkdir -p /workspace /home/node/.claude && \
-  chown -R node:node /workspace /home/node/.claude
+RUN mkdir -p /workspace /home/ci/.claude && \
+  chown -R ci:ci /workspace /home/ci/.claude
 
 WORKDIR /workspace
 
@@ -156,14 +159,12 @@ RUN ARCH=$(dpkg --print-architecture) && \
 
 # CMake is pre-installed in the CI base image at /opt/cmake/bin — PATH already set.
 
-# Transfer ownership of vcpkg directories to the non-root user so that
-# cmake --preset ci-linux can take vcpkg's write lock during configure.
-# Both /opt/vcpkg (the toolchain) and /opt/vcpkg_installed (pre-built packages)
-# are baked into the CI base image as root-owned; the node user needs write access.
-RUN chown -R node:node /opt/vcpkg /opt/vcpkg_installed
+# Transfer ownership of /opt/vcpkg to ci so cmake --preset ci-linux can take
+# vcpkg's write lock during configure. /opt/vcpkg_installed is already ci-owned
+# (baked into the CI base image).
+RUN chown -R ci:ci /opt/vcpkg
 
-# Set up non-root user
-USER node
+USER ci
 
 # Install global packages
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
@@ -198,4 +199,4 @@ RUN pip3 install --break-system-packages numpy Pillow trimesh Wand scipy pypng
 # Install Claude
 RUN npm install -g --ignore-scripts @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
-USER node
+USER ci

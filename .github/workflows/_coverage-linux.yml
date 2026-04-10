@@ -20,12 +20,13 @@ jobs:
     timeout-minutes: 60
     container:
       image: ghcr.io/m0wa/aitown-ci-linux@sha256:52f7ddf4d4130144f41f72466ffe4a3b85c662f73c509aa415b58f067fb3dc74
-      options: --user root
     permissions:
       packages: read    # pull from GHCR
       checks: write     # required by dorny/test-reporter
       contents: read    # required by actions/checkout
     steps:
+      - name: Mark workspace as git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       # Checkout
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -81,11 +82,6 @@ jobs:
         env:
           GTEST_OUTPUT: 'xml:test_results/'
           ALSOFT_DRIVERS: 'null'
-
-      # Fix git safe.directory for dorny/test-reporter.
-      - name: Fix git safe.directory for test reporter
-        if: always()
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       # Publish test results via dorny/test-reporter.
       - name: Publish test results

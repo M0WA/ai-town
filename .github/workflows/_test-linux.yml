@@ -38,7 +38,6 @@ jobs:
     timeout-minutes: 30
     container:
       image: ghcr.io/m0wa/aitown-ci-linux@sha256:52f7ddf4d4130144f41f72466ffe4a3b85c662f73c509aa415b58f067fb3dc74
-      options: --user root
     permissions:
       packages: read
       checks: write
@@ -46,6 +45,8 @@ jobs:
     env:
       BUILD_DIR: ${{ inputs.build_dir }}
     steps:
+      - name: Mark workspace as git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
@@ -158,14 +159,6 @@ jobs:
             exit 1
           fi
           echo "Found $count test result file(s)."
-
-      # Fix git safe.directory for dorny/test-reporter.
-      # In container jobs the workspace is owned by a different UID than the runner;
-      # git 2.35.2+ refuses to read it unless the directory is marked safe.
-      # dorny/test-reporter calls 'git ls-files' internally.
-      - name: Fix git safe.directory for test reporter
-        if: always()
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       # Publish test results via dorny/test-reporter.
       # if: always() — must post annotations even when tests fail.

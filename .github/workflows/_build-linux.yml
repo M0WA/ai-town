@@ -23,11 +23,12 @@ jobs:
     timeout-minutes: 30
     container:
       image: ghcr.io/m0wa/aitown-ci-linux@sha256:52f7ddf4d4130144f41f72466ffe4a3b85c662f73c509aa415b58f067fb3dc74
-      options: --user root
     permissions:
       packages: read    # pull from GHCR
       contents: read    # required by actions/checkout
     steps:
+      - name: Mark workspace as git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       # Checkout (must be first — makes workflow files available on disk for subsequent steps).
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
