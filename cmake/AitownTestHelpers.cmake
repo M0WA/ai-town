@@ -2,7 +2,8 @@
 # Helper macro wrapping gtest_discover_tests() with required options.
 # Enforces the one-label-per-target rule and provides per-category timeout overrides.
 #
-# Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl> [TIMEOUT <seconds>] [DISCOVERY_TIMEOUT <seconds>])
+# Usage: aitown_add_tests(target_name LABEL <unit|integration|requires-opengl>
+#        [TIMEOUT <seconds>] [DISCOVERY_TIMEOUT <seconds>] [ENVIRONMENT <VAR=value>])
 #
 # LABELS MUST be set inside gtest_discover_tests(), NOT via set_tests_properties() afterwards.
 # gtest_discover_tests() dynamically creates CTest test entries at configure time;
@@ -14,7 +15,7 @@
 # on loaded CI runners, silently producing 0 discovered tests and a misleading empty-coverage
 # lcov report. Per-target override allows terrain_tests to use 60s.
 macro(aitown_add_tests TARGET)
-    cmake_parse_arguments(AITOWN_TEST "" "LABEL;TIMEOUT;DISCOVERY_TIMEOUT" "" ${ARGN})
+    cmake_parse_arguments(AITOWN_TEST "" "LABEL;TIMEOUT;DISCOVERY_TIMEOUT;ENVIRONMENT" "" ${ARGN})
     if(NOT AITOWN_TEST_LABEL)
         message(FATAL_ERROR "aitown_add_tests: LABEL is required (unit, integration, or requires-opengl)")
     endif()
@@ -23,6 +24,10 @@ macro(aitown_add_tests TARGET)
     endif()
     if(NOT AITOWN_TEST_DISCOVERY_TIMEOUT)
         set(AITOWN_TEST_DISCOVERY_TIMEOUT 30)  # default discovery timeout in seconds
+    endif()
+    set(_AITOWN_ENV_PROPS "")
+    if(AITOWN_TEST_ENVIRONMENT)
+        set(_AITOWN_ENV_PROPS ENVIRONMENT "${AITOWN_TEST_ENVIRONMENT}")
     endif()
     # WORKING_DIRECTORY must be CMAKE_SOURCE_DIR (project root), NOT the default
     # CMAKE_CURRENT_BINARY_DIR (the build tree).  gtest_discover_tests defaults to
@@ -52,6 +57,7 @@ macro(aitown_add_tests TARGET)
         DISCOVERY_TIMEOUT ${AITOWN_TEST_DISCOVERY_TIMEOUT}
         PROPERTIES TIMEOUT ${AITOWN_TEST_TIMEOUT}
         LABELS "${AITOWN_TEST_LABEL}"
+        ${_AITOWN_ENV_PROPS}
     )
 endmacro()
 
@@ -70,3 +76,4 @@ endmacro()
 #
 # Integration tests:
 #   aitown_add_tests(integration_tests LABEL "integration")
+#   aitown_add_tests(integration_tests LABEL "integration" ENVIRONMENT "ALSOFT_DRIVERS=null")

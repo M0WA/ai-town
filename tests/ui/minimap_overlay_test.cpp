@@ -893,12 +893,16 @@ TEST_F(MinimapOverlayTest, ClickToPan_WorldCoordinatesProportional) {
         receivedWx = wx;
         receivedWz = wz;
     });
+
+    // Phase 11q6: camera-centred minimap — set camera target to world centre.
+    CameraState cs;
+    cs.targetX = 320.f;
+    cs.targetZ = 320.f;
+    m_minimap->setCameraState(cs);
     m_minimap->show();
 
     // Click at center of minimap (1820 = 1720 + 100, 980 = 880 + 100)
-    // fracX = 100/200 = 0.5, fracZ = 100/200 = 0.5
-    // worldW = 64 * 10 = 640, worldD = 640
-    // wx = 0.5 * 640 = 320, wz = 0.5 * 640 = 320
+    // offX = 0, offZ = 0 => pan to camera target (320, 320)
     clickAt(1820, 980);
 
     EXPECT_FLOAT_EQ(receivedWx, 320.f);
@@ -913,13 +917,20 @@ TEST_F(MinimapOverlayTest, ClickToPan_TopLeftCorner_FiresCallback) {
         receivedWx = wx;
         receivedWz = wz;
     });
+
+    // Phase 11q6: camera-centred minimap — set camera target to world centre.
+    CameraState cs;
+    cs.targetX = 320.f;
+    cs.targetZ = 320.f;
+    m_minimap->setCameraState(cs);
     m_minimap->show();
 
     // y=881 avoids the Svc button hit area (y:848-880 is consumed by button handler).
-    // fracX = 0/200 = 0, fracZ = 1/200 = 0.005
+    // offX = (1720 - 1820) / (200/640) = -320, offZ = (881 - 980) / (200/640) = -316.8
+    // panTo(320 + (-320), 320 + (-316.8)) = (0, 3.2)
     clickAt(1720, 881);
-    EXPECT_FLOAT_EQ(receivedWx, 0.f);
-    EXPECT_NEAR(receivedWz, 3.2f, 0.1f);  // (1/200) * 640 = 3.2
+    EXPECT_NEAR(receivedWx, 0.f, 0.1f);
+    EXPECT_NEAR(receivedWz, 3.2f, 0.1f);
 }
 
 // ###########################################################################

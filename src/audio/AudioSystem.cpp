@@ -2090,6 +2090,11 @@ void AudioSystem::triggerStinger(StingerType type) {
 // ---------------------------------------------------------------------------
 void AudioSystem::syncListenerToCamera(const CameraState& cam) {
     if (m_deviceLost.load(std::memory_order_relaxed)) return;
+
+    // Cache listener world-space XZ for vehicle eviction distance computation.
+    m_listenerX = cam.position.x;
+    m_listenerZ = cam.position.z;
+
     // AL_POSITION.
     alListener3f(AL_POSITION, cam.position.x, cam.position.y, cam.position.z);
     alCheckError("syncListenerToCamera:alListener3f(AL_POSITION)");
@@ -2585,6 +2590,11 @@ void AudioSystem::updateVehicleAudio(int idleIdx, int moveIdx,
     if (idleIdx == -1) return;
     if (m_deviceLost.load(std::memory_order_relaxed)) return;
 
+    // Compute squared distance from listener to vehicle (for eviction heuristic).
+    const float dx     = worldX - m_listenerX;
+    const float dz     = worldZ - m_listenerZ;
+    const float distSq = dx * dx + dz * dz;
+
     // Find the matching VehicleAudioSlot and update per-frame state.
     for (int i = 0; i < kMaxVehiclePairs; ++i) {
         if (m_vehicleAudio[i].idleSourceIdx.load(std::memory_order_relaxed) == idleIdx &&
@@ -2593,6 +2603,16 @@ void AudioSystem::updateVehicleAudio(int idleIdx, int moveIdx,
             m_vehicleAudio[i].speedFraction.store(speedFraction, std::memory_order_relaxed);
             m_vehicleAudio[i].worldX.store(worldX, std::memory_order_relaxed);
             m_vehicleAudio[i].worldZ.store(worldZ, std::memory_order_relaxed);
+
+            // Update listenerDistanceSq in AudioSystem's sfx slots (eviction heuristic).
+            if (idleIdx >= 0 && idleIdx < kEvictableSFXCount)
+                m_sfxSlots[idleIdx].listenerDistanceSq = distSq;
+            if (moveIdx >= 0 && moveIdx < kEvictableSFXCount)
+                m_sfxSlots[moveIdx].listenerDistanceSq = distSq;
+            // Update pool's own copies (used by AudioSourcePool eviction).
+            m_pool.updateSFXSlotDistance(idleIdx, distSq);
+            m_pool.updateSFXSlotDistance(moveIdx, distSq);
+            m_pool.updateVehiclePairDistance(i, distSq);
             return;
         }
     }
@@ -2842,3 +2862,12 @@ void AudioSystem::cleanupFinishedSFX() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// testGetSourceHandle — test-only accessor for AL source handle at pool index.
+// ---------------------------------------------------------------------------
+#ifdef AITOWN_TESTING_ENABLED
+unsigned int AudioSystem::testGetSourceHandle(int poolIdx) const {
+    return m_sources[poolIdx];
+}
+#endif  // AITOWN_TESTING_ENABLED

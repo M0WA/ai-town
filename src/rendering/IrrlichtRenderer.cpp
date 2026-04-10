@@ -3206,20 +3206,35 @@ void IrrlichtRenderer::despawnVehicleAgent(AgentHandle handle)
     if (it == m_agentNodes.end()) return;
 
     IMeshSceneNode* node = it->second;
+
+    // Null-before-remove: erase map entry before any side-effects of node->remove().
+    it->second = nullptr;
+    m_agentNodes.erase(it);
+
     if (node) {
-        // Eviction sequence: clear material texture slots first.
+        // Grab the shared mesh so the scene-manager cache cannot evict it while
+        // other agent nodes for the same variant are still alive (shared-mesh fix).
+        // getMesh() returns IMesh*; grab()/drop() are available directly via IReferenceCounted.
+        IMesh* sharedMesh = node->getMesh();
+        if (sharedMesh) sharedMesh->grab();
+
+        // C-4: getMaterial(i) called exactly once per outer iteration.
         for (u32 i = 0; i < node->getMaterialCount(); ++i) {
-            for (u32 t = 0; t < irr::video::MATERIAL_MAX_TEXTURES; ++t) {
-                node->getMaterial(i).setTexture(t, nullptr);
-            }
+            irr::video::SMaterial& mat = node->getMaterial(i);
+            for (u32 t = 0; t < irr::video::MATERIAL_MAX_TEXTURES; ++t)
+                mat.setTexture(t, nullptr);
         }
+        // vehicles_diffuse_atlas_d.png is loaded via IVideoDriver::getTexture() (not TextureCache),
+        // so TextureCache::evictUnreferenced() is not called here — Step 3 of the SceneEntityManager
+        // destroy sequence does not apply. See architecture/graphics-architecture/texture-cache.md.
+
         // Reset material state.
         if (m_driver) m_driver->setMaterial(SMaterial{});
-        // Remove from scene graph.
+        // Remove from scene graph — safe: mesh ref-count held by grab above.
         node->remove();
-        // Do NOT drop() the mesh — scene manager retains B3D mesh cache ownership.
+
+        if (sharedMesh) sharedMesh->drop();  // release; mesh stays alive if others hold it
     }
-    m_agentNodes.erase(it);
 }
 
 // -------------------------------------------------------------------------

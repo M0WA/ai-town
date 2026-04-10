@@ -1,0 +1,45 @@
+# ASAN Linux — reusable workflow
+# Self-contained ASAN+UBSAN build and test job.
+# Builds from source with ci-linux-asan preset (no ccache — ASAN objects must
+# not share the ccache with non-ASAN builds) and runs requires-opengl tests
+# under xvfb-run with halt_on_error=1.
+name: ASAN Linux
+
+on:
+  workflow_call:
+
+jobs:
+  asan-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container:
+      image: ghcr.io/m0wa/aitown-ci-linux@sha256:fdf5a354a1a16166aad2448bdf157ae711aad11f83815e3d3792100caae4cdf1
+      options: --user root
+    permissions:
+      packages: read
+      contents: read
+    steps:
+      - name: Mark workspace as git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Configure (ASAN)
+        env:
+          VCPKG_MANIFEST_INSTALL: "OFF"
+        run: |
+          cmake --preset ci-linux-asan \
+            -DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run OpenGL tests under ASAN
+        env:
+          ASAN_OPTIONS: halt_on_error=1:detect_leaks=0
+          LSAN_OPTIONS: detect_leaks=0
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          ALSOFT_DRIVERS: "null"
+        run: |
+          xvfb-run --auto-servernum ctest --test-dir build -L "^requires-opengl$" --output-on-failure
