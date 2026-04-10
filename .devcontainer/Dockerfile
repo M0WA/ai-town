@@ -5,6 +5,7 @@ FROM ghcr.io/m0wa/aitown-ci-linux@sha256:fdf5a354a1a16166aad2448bdf157ae711aad11
 # installs below; switch back to ci (with NOPASSWD sudo) at the end.
 USER root
 
+ARG TARGETARCH
 ARG TZ
 ENV TZ="$TZ"
 
@@ -112,40 +113,36 @@ RUN mkdir -p /workspace /home/ci/.claude && \
 WORKDIR /workspace
 
 ARG GIT_DELTA_VERSION=0.18.2
-RUN ARCH=$(dpkg --print-architecture) && \
-  curl --proto '=https' --tlsv1.2 --fail --location \
-    --output "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" \
-    "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
-  dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
-  rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
+RUN curl --proto '=https' --tlsv1.2 --fail --location \
+    --output "git-delta_${GIT_DELTA_VERSION}_${TARGETARCH}.deb" \
+    "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${TARGETARCH}.deb" && \
+  dpkg -i "git-delta_${GIT_DELTA_VERSION}_${TARGETARCH}.deb" && \
+  rm "git-delta_${GIT_DELTA_VERSION}_${TARGETARCH}.deb"
 
 # AMD Compressonator CLI (amd64 only — no GPU required for CPU-based DXT compression)
 ARG COMPRESSONATOR_VERSION=4.5.52
-RUN ARCH=$(dpkg --print-architecture) && \
-  if [ "$ARCH" = "amd64" ]; then \
+RUN if [ "${TARGETARCH}" = "amd64" ]; then \
     curl --proto '=https' --tlsv1.2 --fail --silent --location \
       --output "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" \
       "https://github.com/GPUOpen-Tools/compressonator/releases/download/V${COMPRESSONATOR_VERSION}/compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" && \
     dpkg -i "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb" && \
     rm "compressonatorcli_${COMPRESSONATOR_VERSION}_amd64.deb"; \
   else \
-    echo "Skipping compressonatorcli: only amd64 binaries available (arch=$ARCH)"; \
+    echo "Skipping compressonatorcli: only amd64 binaries available (arch=${TARGETARCH})"; \
   fi
 
 # actionlint — GitHub Actions workflow linter
 ARG ACTIONLINT_VERSION=1.7.11
-RUN ARCH=$(dpkg --print-architecture) && \
-  curl --proto '=https' --tlsv1.2 --fail --silent --location \
-    --output "actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" \
-    "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" && \
-  tar -xzf "actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" actionlint && \
+RUN curl --proto '=https' --tlsv1.2 --fail --silent --location \
+    --output "actionlint_${ACTIONLINT_VERSION}_linux_${TARGETARCH}.tar.gz" \
+    "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${TARGETARCH}.tar.gz" && \
+  tar -xzf "actionlint_${ACTIONLINT_VERSION}_linux_${TARGETARCH}.tar.gz" actionlint && \
   mv actionlint /usr/local/bin/actionlint && \
-  rm "actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz"
+  rm "actionlint_${ACTIONLINT_VERSION}_linux_${TARGETARCH}.tar.gz"
 
 # Blender headless (amd64 only — no GPU required for background Python export scripts)
 ARG BLENDER_VERSION=4.3.2
-RUN ARCH=$(dpkg --print-architecture) && \
-  if [ "$ARCH" = "amd64" ]; then \
+RUN if [ "${TARGETARCH}" = "amd64" ]; then \
     BLENDER_MINOR="${BLENDER_VERSION%.*}" && \
     curl --proto '=https' --tlsv1.2 --fail --silent --location \
       --output "blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
@@ -155,7 +152,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
     ln -sf /opt/blender/blender /usr/local/bin/blender && \
     rm "blender-${BLENDER_VERSION}-linux-x64.tar.xz"; \
   else \
-    echo "Skipping Blender: only amd64 binaries available (arch=$ARCH)"; \
+    echo "Skipping Blender: only amd64 binaries available (arch=${TARGETARCH})"; \
   fi
 
 # NOTE: texdiag (DirectXTex DDS inspector) is Windows-only (links ole32/version).
