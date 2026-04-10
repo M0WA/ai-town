@@ -191,8 +191,12 @@ Add all 5 declarations to the `private:` section of `CameraController.h`.
 
 ##### 4a. `checkZoneFootprintClear` (line 285, CC=34) + S134 at line 306
 
-The service-building overlap guard (lines 301–311) contains 5 nested loops/conditions.
-Extract into a new private method:
+The service-building overlap guard (lines 301–311) contains 5 nested loops/conditions
+that must be replaced — NOT extracted verbatim — using an AABB rectangle-overlap test.
+A `ServiceBuilding` occupies a 2×2 footprint at `(sb.x, sb.z)`, so its bounding box is
+`[sb.x, sb.x+2) × [sb.z, sb.z+2)`. The zone footprint is `[tileX, tileX+N) × [tileZ, tileZ+N)`.
+Two axis-aligned rectangles overlap iff their projections on both axes overlap simultaneously.
+Extract into a new private method using this AABB predicate (nesting depth: 1 for + 1 if = 2 levels):
 
 ```cpp
 // In CitySimulation.h (private):
@@ -203,21 +207,16 @@ bool checkServiceBuildingOverlap(int tileX, int tileZ, int N) const;
 // In CitySimulation.cpp:
 bool CitySimulation::checkServiceBuildingOverlap(int tileX, int tileZ, int N) const {
     for (const ServiceBuilding& sb : m_zoning.m_serviceBuildings) {
-        for (int sdx = 0; sdx < 2; ++sdx) {
-            for (int sdz = 0; sdz < 2; ++sdz) {
-                int sx = sb.x + sdx, sz = sb.z + sdz;
-                for (int dx = 0; dx < N; ++dx) {
-                    for (int dz = 0; dz < N; ++dz) {
-                        if (tileX + dx == sx && tileZ + dz == sz)
-                            return true;  // overlap detected
-                    }
-                }
-            }
-        }
+        if (sb.x < tileX + N && sb.x + 2 > tileX &&
+            sb.z < tileZ + N && sb.z + 2 > tileZ)
+            return true;  // AABB overlap detected
     }
     return false;
 }
 ```
+
+This replaces the O(n·N²) five-loop brute-force with an O(n) AABB check, eliminates all
+S134 nesting violations (nesting depth 2 ≤ 3), and cannot introduce a new S134 in the helper.
 
 In `checkZoneFootprintClear`, replace the inlined block with:
 
