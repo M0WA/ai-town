@@ -11,7 +11,11 @@ ENV TZ="$TZ"
 
 ARG CLAUDE_CODE_VERSION=latest
 
-# Install Node.js 20 via NodeSource (nodistro works on any Debian/Ubuntu variant)
+# Install Node.js 20 via NodeSource, then install all dev-ergonomics packages in one layer.
+# Excluded (already in CI image): git, curl, ca-certificates, jq, pkg-config,
+#   build-essential, ccache, ninja-build, gcc-13, g++-13, xvfb, libgl1-mesa-dev,
+#   libglu1-mesa-dev, libxxf86vm-dev, libx11-dev, libxext-dev, libglew-dev,
+#   libasound2-dev, libpulse-dev, lcov, ffmpeg, sox, python3, python3-pip, vorbis-tools.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg \
   && mkdir -p /etc/apt/keyrings \
@@ -19,63 +23,56 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
      | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
   && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
      > /etc/apt/sources.list.d/nodesource.list \
-  && apt-get update && apt-get install -y --no-install-recommends nodejs \
-  && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install developer-ergonomics packages not present in the CI base image.
-# Excluded (already in CI image): git, curl, ca-certificates, jq, pkg-config,
-#   build-essential, ccache, ninja-build, gcc-13, g++-13, xvfb, libgl1-mesa-dev,
-#   libglu1-mesa-dev, libxxf86vm-dev, libx11-dev, libxext-dev, libglew-dev,
-#   libasound2-dev, libpulse-dev, lcov, ffmpeg, sox, python3, python3-pip, vorbis-tools.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-  less \
-  procps \
-  sudo \
-  fzf \
-  zsh \
-  man-db \
-  unzip \
-  zip \
-  gnupg2 \
-  gh \
-  iptables \
-  ipset \
-  iproute2 \
-  dnsutils \
+  && apt-get update && apt-get install -y --no-install-recommends \
   aggregate \
-  nano \
-  vim \
+  assimp-utils \
   autoconf \
   automake \
-  libtool \
-  openssh-client \
-  valgrind \
-  binutils \
-  xauth \
-  libnvtt-bin \
-  mediainfo \
-  scrot \
-  htop \
-  tree \
-  ripgrep \
-  fd-find \
   bat \
-  imagemagick \
-  libimage-exiftool-perl \
-  libmagickwand-dev \
-  gdb \
-  lldb \
-  linux-perf \
-  heaptrack \
+  bear \
+  binutils \
   clang-format \
   clang-tidy \
   clangd \
-  bear \
+  dnsutils \
+  fd-find \
+  fzf \
+  gdb \
+  gh \
+  gnupg2 \
+  heaptrack \
+  htop \
+  imagemagick \
+  iproute2 \
+  ipset \
+  iptables \
+  less \
+  libimage-exiftool-perl \
+  libmagickwand-dev \
+  libnvtt-bin \
+  libtool \
+  linux-perf \
+  lldb \
+  man-db \
+  mediainfo \
+  nano \
+  nodejs \
+  openssh-client \
   pandoc \
-  assimp-utils \
   pngcheck \
+  procps \
   python3-opencv \
+  ripgrep \
+  scrot \
+  sudo \
+  tree \
+  unzip \
+  valgrind \
+  vim \
+  xauth \
   xxd \
+  zip \
+  zsh \
   && apt-get clean && rm -rf /var/lib/apt/lists/* \
   && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
   && (test -f /usr/bin/batcat && ln -sf /usr/bin/batcat /usr/local/bin/bat || true)
