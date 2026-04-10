@@ -1,6 +1,6 @@
 # CI base image — extends ghcr.io/m0wa/aitown-ci-linux.
 # Both this file and ci.yml MUST pin identical digests (Atomicity Contract item 5).
-FROM ghcr.io/m0wa/aitown-ci-linux@sha256:52f7ddf4d4130144f41f72466ffe4a3b85c662f73c509aa415b58f067fb3dc74
+FROM ghcr.io/m0wa/aitown-ci-linux@sha256:fdf5a354a1a16166aad2448bdf157ae711aad11f83815e3d3792100caae4cdf1
 # The CI base image ends with USER ci. Switch to root for all build-time
 # installs below; switch back to ci (with NOPASSWD sudo) at the end.
 USER root
