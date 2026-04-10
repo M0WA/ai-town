@@ -108,6 +108,8 @@ Do not suggest alternative engines, languages, or platforms.
 - Clear separation of concerns (rendering, logic, audio)
 - **C++ class file naming**: C++ class implementation files (`.cpp`) and their paired class header files (`.h`) MUST use **CamelCase** (e.g., `TextureCache.cpp` / `TextureCache.h`, `SceneEntityManager.cpp` / `SceneEntityManager.h`, `TerrainChunk.cpp` / `TerrainChunk.h`). Non-class C-style headers that contain only constants, enums, or POD structs (e.g., `simulation_constants.h`, `terrain_types.h`, `shader_constants.h`) MAY use `snake_case`.
 - **Interface naming**: Pure-virtual interface classes MUST be placed under `src/interfaces/` and their filenames MUST be prefixed with `I` (e.g., `IRenderer.h`, `ITerrainQuery.h`, `IAudioSystem.h`). Concrete implementations live in their domain subdirectory (e.g., `src/rendering/`, `src/audio/`) without the `I` prefix.
+- **Nesting depth**: Do not nest control flow (`if`, `switch`, `for`, `while`, etc.) more than 3 levels deep; 2 levels is optimal. A third level is only acceptable in exceptional cases — prefer early returns, guard clauses, or helper functions to reduce depth.
+- **Cognitive Complexity**: No function may exceed a Cognitive Complexity score of 25. Aim for ≤15. Cognitive Complexity measures how hard code is to understand: each control-flow construct adds 1, each additional nesting level adds an extra penalty, and boolean operator sequence changes add 1. Unlike cyclomatic complexity it reflects human readability, not just path count. Functions above 25 MUST be refactored into smaller, focused functions.
 
 ### Dependencies
 
