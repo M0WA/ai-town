@@ -106,6 +106,11 @@ public:
     // positioning/removal/material access). Caller must not call remove() or drop().
     [[nodiscard]] irr::scene::ISceneNode* getNode() const;
 
+    // getMeshNode() — returns the raw IMeshSceneNode* stored by this wrapper.
+    // Used by IrrlichtRenderer to grab/drop the current mesh around node->remove().
+    // Caller must NOT call remove() or drop() on the returned pointer.
+    [[nodiscard]] irr::scene::IMeshSceneNode* getMeshNode() const;
+
     // getCurrentLOD() — returns the active LOD index (0, 1, or 2).
     [[nodiscard]] int getCurrentLOD() const { return m_currentLOD; }
 

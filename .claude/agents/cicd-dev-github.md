@@ -73,6 +73,7 @@ These are non-obvious constraints that cause subtle CI failures if missed.
 
 **`validate-assets` job**: Requires `permissions: contents: read`. Four-item atomicity: `tools/validate_assets.py` + CI job step + schema files + any new asset rules must land in the same commit.
 
+
 ## Spec Files (your domain)
 
 - `architecture/ci-cd/` — all files

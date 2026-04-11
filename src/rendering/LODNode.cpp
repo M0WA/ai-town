@@ -164,3 +164,8 @@ irr::scene::ISceneNode* LODNode::getNode() const
 {
     return m_node;  // implicit upcast from IMeshSceneNode* to ISceneNode*
 }
+
+irr::scene::IMeshSceneNode* LODNode::getMeshNode() const
+{
+    return m_node;
+}
