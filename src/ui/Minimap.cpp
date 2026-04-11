@@ -55,6 +55,10 @@ Minimap::Minimap(IUIBackend* backend, IAudioSystem* /*audio*/, ICitySimulation* 
 // ---------------------------------------------------------------------------
 void Minimap::show() {
     m_visible = true;
+    // Force an immediate tile-cache refresh on the next draw() so the minimap
+    // shows roads/zones from the first frame — without this the cache stays
+    // empty until the first budget tick fires (which can take many seconds).
+    m_pendingTicks = 1;
     if (!m_backend) return;
 
     m_backend->setElementVisible(m_mapBg, true);
@@ -85,12 +89,13 @@ void Minimap::hide() {
 void Minimap::draw() {
     if (!m_visible || !m_backend) return;
 
-    // Budget-tick cache refresh
+    // Budget-tick cache refresh (also triggered once by show() for immediate population).
     if (m_pendingTicks > 0) {
         if (!m_sim) {
+            // No simulation attached — skip cache refresh but continue to draw
+            // UI chrome (toggle buttons, legend visibility, button alpha).
             m_pendingTicks = 0;
-            return;
-        }
+        } else {
 
         const int mapW = m_sim->getMapTilesX();
         const int mapD = m_sim->getMapTilesZ();
@@ -124,6 +129,7 @@ void Minimap::draw() {
 
         m_roadSpeedCache = m_sim->getRoadSegmentSpeeds();
         m_pendingTicks = 0;
+        } // else (m_sim != nullptr)
     }
 
     // Update legend visibility

@@ -212,14 +212,20 @@ TEST_F(MinimapOverlayTest, SetOverlayMode_None_GetReturnsNone) {
 // ===========================================================================
 
 TEST_F(MinimapOverlayTest, Draw_OverlayInactive_NoSpeedQuery) {
+    // show() sets m_pendingTicks=1 for an immediate first-frame cache refresh.
+    // That first draw() queries all sim caches (tiles, service coverage, road speeds)
+    // once.  After the initial refresh pendingTicks resets to 0, so a second draw()
+    // without another budget tick must make no further sim queries.
     m_minimap->show();
     m_minimap->setOverlayMode(MinimapOverlay::Traffic);
     // overlayActive is still false (no toggleOverlay call).
 
+    // First draw: consume the show()-injected tick (one-time initial refresh).
+    EXPECT_NO_FATAL_FAILURE(m_minimap->draw());
+
+    // Second draw without budget tick: no further sim queries expected.
     EXPECT_CALL(m_sim, getRoadSegmentSpeeds()).Times(0);
     EXPECT_CALL(m_sim, getServiceCoverage()).Times(0);
-
-    // No budget ticks -> no cache refresh -> no sim queries.
     EXPECT_NO_FATAL_FAILURE(m_minimap->draw());
 }
 

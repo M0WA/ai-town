@@ -164,6 +164,8 @@ jobs:
       - coverage-linux
       - markdown-lint
       - asan-linux
+      - package-windows
+      - package-linux-deb
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -172,7 +174,8 @@ jobs:
       - name: Verify all platform builds passed
         shell: bash
         run: |
-          results=(
+          # Core jobs: must be 'success' on every trigger.
+          core_results=(
             "${{ needs.prepare.result }}"
             "${{ needs.supply-chain-lint.result }}"
             "${{ needs.validate-assets.result }}"
@@ -182,10 +185,22 @@ jobs:
             "${{ needs.markdown-lint.result }}"
             "${{ needs.asan-linux.result }}"
           )
+          # Package jobs: must be 'success' on push to main/develop;
+          # 'skipped' is accepted on PRs (their if: condition excludes them there).
+          package_results=(
+            "${{ needs.package-windows.result }}"
+            "${{ needs.package-linux-deb.result }}"
+          )
           failed=0
-          for result in "${results[@]}"; do
+          for result in "${core_results[@]}"; do
             if [[ "$result" != "success" ]]; then
-              echo "Job result '$result' is not 'success' — failing gate."
+              echo "Core job result '$result' is not 'success' — failing gate."
+              failed=1
+            fi
+          done
+          for result in "${package_results[@]}"; do
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "Package job result '$result' is not 'success' or 'skipped' — failing gate."
               failed=1
             fi
           done
