@@ -216,6 +216,8 @@ TEST_F(ZoneOverlayTest, UIManager_ZonePlacement_AddsOverlayEntry)
     // LMB down (sets anchor) then LMB up (commits placement).
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
     uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
+    // Phase 11q9: overlay is flushed in update(), not synchronously on event.
+    uiManager_->update(0.016f);
 
     // Verify the overlay map received in the last setZoneOverlay call is non-empty
     // and contains an entry with the Residential/Low ARGB color (0xB480CC80).
@@ -303,8 +305,100 @@ TEST_F(ZoneOverlayTest, UIManager_Demolish_RemovesOverlayEntry)
     // LMB click at the tile.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
     uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
+    // Phase 11q9: overlay is flushed in update(), not synchronously on event.
+    uiManager_->update(0.016f);
 
     // Tile (5,5) key=55 must not be in the overlay map after demolish.
     EXPECT_EQ(capturedMap.count(55u), 0u)
         << "Tile (5,5) key=55 should be removed from overlay after demolish";
+}
+
+// ---------------------------------------------------------------------------
+// Test 4: UIManager_MedZonePlacement_AddsAllFootprintTilesToOverlay
+//
+// Select Medium density Residential and place at tile (3, 2).
+// After LMB down + up, setZoneOverlay must be called with a map that contains
+// all four 2×2 footprint keys:
+//   (3,2)→ key = 2*10+3 = 23
+//   (4,2)→ key = 2*10+4 = 24
+//   (3,3)→ key = 3*10+3 = 33
+//   (4,3)→ key = 3*10+4 = 34
+// All four must carry the Residential/Medium ARGB 0xB480CC80.
+// (Map dimensions: 10×10, set in SetUp.)
+// ---------------------------------------------------------------------------
+TEST_F(ZoneOverlayTest, UIManager_MedZonePlacement_AddsAllFootprintTilesToOverlay)
+{
+    activateZoneTool();
+    uiManager_->setSelectedDensityTierForTest(1);  // 1 = Medium
+
+    stubPickTile(3, 2);
+
+    ZoneOverlayMap capturedMap;
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(SaveArg<2>(&capturedMap));
+
+    EXPECT_CALL(sim_, queryTile(_, _)).Times(AnyNumber()).WillRepeatedly(Return(QueryResult{}));
+    QueryResult placed{};
+    placed.isZoned = true;
+    EXPECT_CALL(sim_, queryTile(3, 2))
+        .WillOnce(Return(QueryResult{}))
+        .WillRepeatedly(Return(placed));
+
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
+    // Phase 11q9: overlay is flushed in update(), not synchronously on event.
+    uiManager_->update(0.016f);
+
+    // All four 2×2 footprint keys must be present in the overlay map.
+    const int64_t k23 = 2*10 + 3, k24 = 2*10 + 4;
+    const int64_t k33 = 3*10 + 3, k34 = 3*10 + 4;
+    EXPECT_GT(capturedMap.count(k23), 0u) << "key 23 (3,2) must be in overlay";
+    EXPECT_GT(capturedMap.count(k24), 0u) << "key 24 (4,2) must be in overlay";
+    EXPECT_GT(capturedMap.count(k33), 0u) << "key 33 (3,3) must be in overlay";
+    EXPECT_GT(capturedMap.count(k34), 0u) << "key 34 (4,3) must be in overlay";
+}
+
+// ---------------------------------------------------------------------------
+// Test 5: UIManager_HighZonePlacement_AddsAllFootprintTilesToOverlay
+//
+// Select High density Residential and place at tile (1, 1).
+// setZoneOverlay must be called with a map containing all nine 3×3 keys:
+//   (1,1)=11  (2,1)=12  (3,1)=13
+//   (1,2)=21  (2,2)=22  (3,2)=23
+//   (1,3)=31  (2,3)=32  (3,3)=33
+// (keys = tileZ*10 + tileX, mapTilesX=10)
+// ---------------------------------------------------------------------------
+TEST_F(ZoneOverlayTest, UIManager_HighZonePlacement_AddsAllFootprintTilesToOverlay)
+{
+    activateZoneTool();
+    uiManager_->setSelectedDensityTierForTest(2);  // 2 = High
+
+    stubPickTile(1, 1);
+
+    ZoneOverlayMap capturedMap;
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(SaveArg<2>(&capturedMap));
+
+    EXPECT_CALL(sim_, queryTile(_, _)).Times(AnyNumber()).WillRepeatedly(Return(QueryResult{}));
+    QueryResult placed{};
+    placed.isZoned = true;
+    EXPECT_CALL(sim_, queryTile(1, 1))
+        .WillOnce(Return(QueryResult{}))
+        .WillRepeatedly(Return(placed));
+
+    uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
+    // Phase 11q9: overlay is flushed in update(), not synchronously on event.
+    uiManager_->update(0.016f);
+
+    for (int dz = 0; dz < 3; ++dz) {
+        for (int dx = 0; dx < 3; ++dx) {
+            int64_t k = static_cast<int64_t>(1 + dz) * 10 + (1 + dx);
+            EXPECT_GT(capturedMap.count(k), 0u)
+                << "key " << k << " (" << (1+dx) << "," << (1+dz)
+                << ") must be in overlay for 3×3 High zone";
+        }
+    }
 }

@@ -674,6 +674,8 @@ TEST_F(WorldInteractionTest, WorldInteraction_Demolish_SparseOverlay_ErasesEntry
     // Phase 11q8 flow: down records anchor; up counts occupied tiles and demolishes.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
     uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
+    // Phase 11q9: overlay is flushed lazily; use test seam to flush without update().
+    uiManager_->flushOverlayForTest();
 
     // Assert: overlay map is empty after demolish.
     EXPECT_TRUE(capturedAfterDemolish.empty())

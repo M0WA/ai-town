@@ -539,3 +539,38 @@ TEST_F(FootprintTest, FootprintTest_ZoneRecovery_WhenRoadRestored)
     EXPECT_FALSE(qr.isAbandoned)
         << "Building must recover automatically when road is restored within 3 tiles";
 }
+
+// ============================================================================
+// FootprintTest_ServiceBuilding_DemolishFromNonOriginTile
+// Demolishing a service building by clicking any non-origin footprint tile
+// must remove the entire service building — not silently no-op.
+//
+// Setup: FireStation placed at (3, 3) with road at (2, 3).
+// Footprint tiles: (3,3), (4,3), (3,4), (4,4).
+// Demolish from (4,4) — the far corner (not the origin).
+// After demolish: all four footprint tiles must report no service building.
+// ============================================================================
+TEST_F(FootprintTest, FootprintTest_ServiceBuilding_DemolishFromNonOriginTile)
+{
+    sim_->placeRoad(2, 3);
+    sim_->placeServiceBuilding(3, 3, ServiceBuildingType::FireStation);
+
+    // Verify all four tiles are occupied before demolish.
+    ASSERT_TRUE(isTileOccupied(3, 3)) << "pre-condition: (3,3) occupied";
+    ASSERT_TRUE(isTileOccupied(4, 3)) << "pre-condition: (4,3) occupied";
+    ASSERT_TRUE(isTileOccupied(3, 4)) << "pre-condition: (3,4) occupied";
+    ASSERT_TRUE(isTileOccupied(4, 4)) << "pre-condition: (4,4) occupied";
+
+    // Demolish from the non-origin far corner.
+    sim_->demolishTile(4, 4);
+
+    // All four footprint tiles must now be free.
+    EXPECT_FALSE(isTileOccupied(3, 3))
+        << "(3,3): service building must be removed after demolish from non-origin tile";
+    EXPECT_FALSE(isTileOccupied(4, 3))
+        << "(4,3): service building footprint must be cleared";
+    EXPECT_FALSE(isTileOccupied(3, 4))
+        << "(3,4): service building footprint must be cleared";
+    EXPECT_FALSE(isTileOccupied(4, 4))
+        << "(4,4): demolish origin tile — must be cleared";
+}
