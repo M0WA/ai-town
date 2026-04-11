@@ -1,6 +1,6 @@
 ## Phase 11q8: Demolish Drag-Select + Modal on Mouse-Up
 
-**Status: TODO**
+**Status: DONE**
 
 **Prerequisite**: phase-11q7 merged.
 
