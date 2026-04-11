@@ -51,6 +51,27 @@ These are non-obvious constraints derived from the architecture specs. Violating
 
 **Scene node ownership**: Via `SceneEntityManager`. `destroy()` nulls the pointer before `remove()`.
 
+## Code Quality — Cognitive Complexity
+
+After writing or modifying C++ code, check the complexity of changed functions:
+
+```bash
+python3 tools/cognitive_complexity.py --only-violations src/path/to/changed.cpp
+```
+
+**Thresholds**:
+
+| Status | Score | Meaning |
+|--------|-------|---------|
+| OK | < 16 | Target range for new code |
+| WARN | 16–25 | Elevated — do not increase further |
+| CRITICAL | ≥ 26 | Over project cap — do not increase further |
+
+**Rules**:
+- Do not proactively refactor existing WARN or CRITICAL functions unless the user explicitly asks. Pre-existing complexity is a pre-existing condition — note it if relevant, but leave it alone.
+- When modifying a function that is already WARN or CRITICAL, do not raise its score. Add the needed behaviour via early returns or small extracted helpers without inflating the existing function.
+- New functions you write should stay in the OK range (score < 16).
+
 ## Spec Files (your domain)
 
 - `architecture/graphics-architecture/` — all files

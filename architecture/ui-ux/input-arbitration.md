@@ -38,7 +38,7 @@ Checking only `!criticalVisible` is insufficient: the `modalActive` guard MUST a
 
    (b) **`MouseButtonDown button=0` (left-click) consumes the event** (`return true`) only when ALL of the following conditions hold: (1) a non-Query placement tool is active (i.e., the active tool is Zone, Road, Utilities, or Demolish — NOT QueryTool and NOT "No tool"), AND (2) `pickTerrainTile()` ray-cast returns `true` (the ray hit valid terrain). If either condition is false, the event is NOT consumed (returns `false`). In particular, a `QueryTool` left-click does NOT consume the event — it passes through so the QueryPanel open/inspect path (Priority 3) can handle it. **Hover-tile update on click (drag throttle invariant)**: after a successful `pickTerrainTile()` hit in the `MouseButtonDown` handler, `m_hoveredTileX` and `m_hoveredTileZ` MUST be updated to the clicked tile coordinates before any placement occurs. Without this update, the drag throttle condition `(hitX != m_hoveredTileX || hitZ != m_hoveredTileZ)` in the subsequent `MouseMove` handler evaluates `true` for the same tile (because `m_hoveredTileX` still holds the stale pre-click value, often −1), causing the initial tile to be double-placed on the first drag step. **Zone tool — rectangular drag-select**: `MouseButtonDown` records the anchor tile in `m_zoneAnchorX`/`m_zoneAnchorZ` and returns `true` (consumed) without placing anything. `MouseMove` while LMB is held computes the axis-aligned rectangle from anchor to current hover tile, **partitions the selected tiles into `freeTiles` (tiles where placement would succeed) and `blockedTiles` (tiles that are blocked for any reason: already occupied by an existing zone, or not within road range for the selected density tier as reported by `ICitySimulation::isWithinRoadRange(x, z, tier)`)**, and calls `IRenderer::setTilePlacementPreview(freeTiles, kHoverArgb, blockedTiles)`. Free tiles display in the normal green/teal preview colour (`kHoverArgb`); blocked tiles display in red (`kHoverArgbBlocked` — a fixed renderer constant, not caller-supplied). This gives the player immediate visual feedback about which tiles will be skipped at placement time. `setTileHoverHighlight(-1,-1)` is called to clear the single-tile hover cursor while the preview is active. `MouseButtonUp button=0` fills all tiles in `[min(anchor,hover), max(anchor,hover)]` by calling `doTerrainPlacement(tx, tz)` for each tile (blocked tiles — occupied or out of road range — are naturally skipped by the placement logic), then clears the anchor and calls `setTilePlacementPreview({}, 0)` to remove the preview. A single click-and-release (no drag) fills a 1×1 rectangle — exactly one tile. **Road tool — straight-line drag-select**: `MouseButtonDown` records the anchor tile in `m_zoneAnchorX`/`m_zoneAnchorZ` and returns `true` (consumed) without placing anything. `MouseMove` while LMB is held snaps to the dominant axis (whichever of |dX| vs |dZ| is larger), **partitions the straight-line tiles into `freeTiles` (unoccupied) and `blockedTiles` (tiles already occupied by an existing road)**, and calls `IRenderer::setTilePlacementPreview(freeTiles, kHoverArgb, blockedTiles)`. As with the Zone tool, free tiles render in the normal preview colour and blocked tiles render in red via `kHoverArgbBlocked`. `setTileHoverHighlight(-1,-1)` clears the single-tile hover. `MouseButtonUp button=0` places all tiles along the snapped line by calling `doTerrainPlacement()` for each (blocked tiles are skipped), then clears the anchor and preview. A single click-and-release places exactly one road tile. **Utilities tool**: `MouseButtonDown` calls `doTerrainPlacement()` immediately, and `MouseMove` while LMB is held calls `doTerrainPlacement()` for each new tile entered (tile-by-tile drag behavior). The tool does not use `setTilePlacementPreview()`.
 
-   **Demolition Tool**: The demolish tool is activated via the Demolish button in the toolbar (or hotkey `X`). While demolish is NOT the active tool, left-mouse events must NEVER trigger demolition logic. Tool-mode is checked before any tile-interaction handler fires, ensuring the Zone tool (or any other tool) cannot accidentally enter the demolition code path. **Mouse-down** (LMB press) while Demolish is active: calls `pickTerrainTile()` to identify the hovered tile; if the ray-cast succeeds, calls `IRenderer::setTileHoverHighlight(tileX, tileZ)` to display a demolition-colour highlight quad as visual feedback (no dialog shown yet). The handler stores the highlighted tile coordinates in `m_demolishAnchorX`/`m_demolishAnchorZ` and returns `true` (consumed). If the ray-cast fails (miss), no highlight is set and the event is NOT consumed. **Mouse-up** (LMB release): if the current mouse position ray-casts to the same tile that was highlighted on mouse-down (matching `m_demolishAnchorX`/`m_demolishAnchorZ`), the confirmation modal "Demolish [tile type]? [Yes] [No]" is opened. If the cursor has moved to a different tile between down and up (hit test differs from anchor), the highlight is cleared via `IRenderer::setTileHoverHighlight(-1, -1)` and no modal is shown. **Yes button** in the modal: calls `ICitySimulation::demolishTile(tileX, tileZ)` with the tile coordinates stored in the modal and dismisses the modal. **No button** or modal dismissed (Esc): dismisses the modal, calls `IRenderer::setTileHoverHighlight(-1, -1)` to clear the highlight, clears the anchor state, and remains in Demolish tool mode ready for the next demolition attempt. **Tool switching**: when the player clicks a toolbar button to switch from Demolish to Zone, Road, Utilities, or Query, or presses Escape to deselect the tool entirely, any pending demolition highlight is cleared synchronously via `IRenderer::setTileHoverHighlight(-1, -1)` as part of the tool-deselect handler (Priority 7e / tool-deselect path), and the anchor state is reset to `{-1, -1}`.
+   **Demolition Tool**: The demolish tool is activated via the Demolish button in the toolbar (or hotkey `X`). While demolish is NOT the active tool, left-mouse events must NEVER trigger demolition logic. **Mouse-down** (LMB press): calls `pickTerrainTile()` to identify the hovered tile; if the ray-cast succeeds, records the anchor in `m_demolishAnchorX`/`m_demolishAnchorZ` and calls `IRenderer::setTileHoverHighlight(tileX, tileZ, 1)` to show a demolish-red single-tile highlight; returns `true` (consumed). If the ray-cast fails, no highlight is set and the event is not consumed. **Mouse-move while LMB held**: when `m_lmbHeld` and `m_demolishAnchorX != -1`, computes the axis-aligned rectangle from anchor to current hover tile, partitions the tiles into `occupiedTiles` (`isZoned || isRoad || serviceType != None` — shown in `kHoverArgbDemolish`) and `emptyTiles` (shown in `kHoverArgbBlocked`), calls `IRenderer::setTilePlacementPreview(occupiedTiles, kHoverArgbDemolish, emptyTiles)`, and clears the single-tile hover via `setTileHoverHighlight(-1, -1)`. **Mouse-up** (LMB release): reads the release tile from `m_world.hoveredTileX/Z`; counts occupied tiles in `[min(anchor,hover), max(anchor,hover)]`. If zero occupied tiles: clears state silently (no modal, no demolish). If one or more occupied tiles: (a) when `m_demolishConfirmEnabled` is `true`, stores the release tile in `demolishReleaseX/Z`, calls `ModalDialog::showDemolishConfirm(N)` with the occupied count, and sets `demolishModalPending = true`; (b) when `m_demolishConfirmEnabled` is `false`, demolishes all occupied tiles immediately via `ICitySimulation::demolishTile()`, updates `overlayMap`, calls `setZoneOverlay()`, and calls `setUnsavedChanges(true)`. Returns `true` (consumed). **Modal poll** (`updateModalDialogState()`): when `demolishModalPending` is `true` and the modal closes, reads `pollResult()`; on `Accept` iterates the stored rect (`demolishAnchorX/Z` → `demolishReleaseX/Z`) and demolishes all occupied tiles; on `Cancel` clears state without demolishing. In both cases clears `setTilePlacementPreview({}, 0, {})` and `clearDemolishHighlight()`, and resets anchor/release fields to `{-1, -1}`. **"Confirm before demolish" setting**: controlled by the "Confirm before demolish" toggle in Settings > Gameplay. When OFF, mouse-up always demolishes immediately. A single click-and-release (1×1 rect) behaves identically to a multi-tile drag. **Tool switching / RMB cancel**: when the player right-clicks or switches tools, anchor and release state are cleared synchronously; `setTilePlacementPreview({}, 0, {})` and `clearDemolishHighlight()` are called.
 
    (c) **Modal and CRITICAL-toast suppression**: if a blocking modal (`ModalDialog`, Priority 1) or a CRITICAL toast (`NotificationManager`, Priority 2) consumed the event at a higher priority, the event never reaches Priority 7. No additional guard is required at Priority 7 for this case — the chain short-circuits naturally. However, if Priority 7 code is ever invoked speculatively (e.g., via a direct call bypassing the chain), it MUST check `m_modal->isActive() || m_notifications->hasCriticalToastVisible()` and return `false` immediately. This mirrors the identical suppression logic used at Priority 6 (`CameraController` suppresses input when a blocking modal is active).
 
@@ -188,56 +188,47 @@ if (event.EventType == irr::EET_GUI_EVENT) {
 
 ## Demolition Tool
 
-The Demolish tool is activated via the Demolish button in the toolbar (or hotkey `X`).
+The demolish tool is activated via the Demolish button in the toolbar (or hotkey `X`). While
+demolish is NOT the active tool, left-mouse events must NEVER trigger demolition logic.
 
-**Input ownership**: The Demolish tool takes exclusive input ownership of left-mouse tile
-interaction only while it is the active tool. As soon as the player switches to the Zone, Road,
-Utilities, or Query tool (via toolbar click, hotkey, or right-click tool deselect), any pending
-demolition highlight is cleared synchronously via `IRenderer::setTileHoverHighlight(-1, -1)` and
-the anchor state is reset to `{-1, -1}`. The new tool takes over tile interaction immediately —
-there is no lingering demolition state after a tool switch.
+**Mouse-down** (LMB press): calls `pickTerrainTile()` to identify the hovered tile; if the
+ray-cast succeeds, records the anchor in `m_demolishAnchorX`/`m_demolishAnchorZ` and calls
+`IRenderer::setTileHoverHighlight(tileX, tileZ, 1)` to show a demolish-red single-tile highlight;
+returns `true` (consumed). If the ray-cast fails, no highlight is set and the event is not consumed.
 
-**Guard — non-active state**: While Demolish is NOT the active tool, left-mouse events MUST NEVER
-trigger demolition logic. Tool-mode is checked before any tile-interaction handler fires
-(see Priority 7 world interaction layer). The Zone tool's LMB-down must not enter the demolition
-code path under any circumstances.
+**Mouse-move while LMB held**: when `m_lmbHeld` and `m_demolishAnchorX != -1`, computes the
+axis-aligned rectangle from anchor to current hover tile, partitions the tiles into `occupiedTiles`
+(`isZoned || isRoad || serviceType != None` — shown in `kHoverArgbDemolish`) and `emptyTiles`
+(shown in `kHoverArgbBlocked`), calls
+`IRenderer::setTilePlacementPreview(occupiedTiles, kHoverArgbDemolish, emptyTiles)`, and clears
+the single-tile hover via `setTileHoverHighlight(-1, -1)`.
 
-**Mouse-down** (LMB press) while Demolish is active:
+**Mouse-up** (LMB release): reads the release tile from `m_world.hoveredTileX/Z`; counts occupied
+tiles in `[min(anchor,hover), max(anchor,hover)]`. If zero occupied tiles: clears state silently
+(no modal, no demolish). If one or more occupied tiles:
 
-1. Call `pickTerrainTile()` to identify the hovered tile.
-2. If the ray-cast succeeds: call `IRenderer::setTileHoverHighlight(tileX, tileZ)` to display a
-   demolition-colour highlight quad as visual feedback. Store the highlighted tile coordinates in
-   `m_demolishAnchorX` / `m_demolishAnchorZ`. Return `true` (event consumed).
-3. If the ray-cast fails (miss): no highlight is set. Return `false` (not consumed).
+- When `m_demolishConfirmEnabled` is `true`: stores the release tile in `demolishReleaseX/Z`,
+  calls `ModalDialog::showDemolishConfirm(N)` with the occupied count, and sets
+  `demolishModalPending = true`.
+- When `m_demolishConfirmEnabled` is `false`: demolishes all occupied tiles immediately via
+  `ICitySimulation::demolishTile()`, updates `overlayMap`, calls `setZoneOverlay()`, and calls
+  `setUnsavedChanges(true)`.
 
-No confirmation dialog is shown on mouse-down — the highlight is visual feedback only.
+Returns `true` (consumed) in all branches.
 
-**Mouse-up** (LMB release) while Demolish is active:
+**Modal poll** (`updateModalDialogState()`): when `demolishModalPending` is `true` and the modal
+closes, reads `pollResult()`; on `Accept` iterates the stored rect (`demolishAnchorX/Z` →
+`demolishReleaseX/Z`) and demolishes all occupied tiles; on `Cancel` clears state without
+demolishing. In both cases calls `setTilePlacementPreview({}, 0, {})` and
+`clearDemolishHighlight()`, and resets all four anchor/release fields to `{-1, -1}`.
 
-1. Ray-cast the current cursor position to obtain the tile under the cursor at release time.
-2. If the release tile matches `m_demolishAnchorX` / `m_demolishAnchorZ` (same tile that was
-   highlighted on mouse-down): open the confirmation modal "Demolish [tile type]? [Yes] [No]".
-3. If the cursor has moved to a different tile between down and up (ray-cast differs from anchor):
-   clear the highlight via `IRenderer::setTileHoverHighlight(-1, -1)`, reset anchor state, and do
-   nothing further. No modal is shown.
+**"Confirm before demolish" setting**: controlled by the "Confirm before demolish" toggle in
+Settings > Gameplay (wired to `UIManager::m_demolishConfirmEnabled` via a callback). When OFF,
+mouse-up always demolishes immediately without a modal. A single click-and-release (1×1 rect)
+behaves identically to a multi-tile drag.
 
-**Confirmation modal responses**:
-
-- **Yes**: call `ICitySimulation::demolishTile(tileX, tileZ)` with the coordinates stored from the
-  mouse-down anchor, then dismiss the modal.
-- **No** or modal dismissed (Esc): dismiss the modal, call
-  `IRenderer::setTileHoverHighlight(-1, -1)` to clear the highlight, reset anchor state to
-  `{-1, -1}`, and remain in Demolish tool mode ready for the next demolition attempt.
-
-**Tool switching — highlight cleared synchronously**: When the player switches away from Demolish
-(toolbar click to Zone, Road, Utilities, or Query; hotkey; or right-click tool deselect at
-Priority 7e), any pending demolition highlight is cleared as part of the tool-deselect handler
-before the new tool becomes active. This applies even if the confirmation modal is not open (i.e.,
-mid-drag between mouse-down and mouse-up). The clearing sequence is:
-
-1. `IRenderer::setTileHoverHighlight(-1, -1)` — clears the highlight quad.
-2. Reset `m_demolishAnchorX` / `m_demolishAnchorZ` to `{-1, -1}`.
-3. Set `m_activeTool` to the new tool value (or `None` on right-click deselect).
-
-Steps 1 and 2 MUST occur before step 3 so that no frame exists where `m_activeTool` is
-non-Demolish while a stale highlight quad remains visible.
+**Tool switching / RMB cancel**: when the player right-clicks or switches tools, anchor and release
+state are cleared synchronously; `setTilePlacementPreview({}, 0, {})` and
+`clearDemolishHighlight()` are called. Steps 1 and 2 (clear highlight and reset anchor) MUST occur
+before step 3 (set new active tool) so that no frame exists where `m_activeTool` is non-Demolish
+while a stale highlight quad remains visible.

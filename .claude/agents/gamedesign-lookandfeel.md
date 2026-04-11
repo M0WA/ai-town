@@ -39,6 +39,10 @@ When reviewing or designing systems for AI Town, focus on making the simulation 
 
 **`stinger_milestone`**: Fires only on City Rating tier transitions — not on raw population milestones. Population milestone toasts are shown but do not trigger a stinger.
 
+## UI-Related Work
+
+When the task involves designing, specifying, or prototyping user interface elements — HUD panels, menus, overlays, tooltips, or any player-facing controls — invoke the `frontend-design` skill for implementation guidance and visual prototyping. Your role is to define *what* information the player needs and *why* (feedback loops, information hierarchy, interaction intent). The `frontend-design` skill handles concrete implementation and visual polish. For UX flows, wireframing, and interaction design, coordinate with the `gamedesign-ux` agent.
+
 ## Spec Files (your domain)
 
 - `architecture/game-design/` — all files

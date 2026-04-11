@@ -979,6 +979,7 @@ target_include_directories(integration_tests PRIVATE
     src/terrain/
     src/simulation/
     src/audio/       # Phase 11q6: VehicleReleaseTest includes AudioSystem.h
+    src/platform/    # Phase 11q7: VehicleReleaseTest needs PlatformUtils.h (setAssetsDir)
 )
 # Phase 11q6: AITOWN_TESTING_ENABLED enables testGetSourceHandle() in AudioSystem.
 # MUST be set on both aitown_audio (compiled into library) and integration_tests (test TU).

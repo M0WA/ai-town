@@ -256,6 +256,7 @@ See [`architecture/DOCUMENT_INDEX.md`](architecture/DOCUMENT_INDEX.md) for the f
 | Headless CI Testing | [architecture/testing/headless-ci-testing.md](architecture/testing/headless-ci-testing.md) |
 | Property-Based Tests | [architecture/testing/property-based-tests.md](architecture/testing/property-based-tests.md) |
 | Procedural Generation Seeds | [architecture/testing/procedural-generation-seeds.md](architecture/testing/procedural-generation-seeds.md) |
+| Code Quality — Cognitive Complexity | [architecture/testing/code-quality.md](architecture/testing/code-quality.md) |
 
 #### CI/CD
 

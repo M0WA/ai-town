@@ -192,7 +192,8 @@ RUN sh -c "$(curl --proto '=https' --tlsv1.2 --fail --location https://github.co
 # Wand: ICC-preserving ImageMagick bindings for DXT5nm channel swizzle pipeline
 # scipy: tileable terrain noise synthesis (gaussian_filter for seamless edge blending)
 # pypng: byte-level PNG chunk introspection for sRGB/iCCP validation scripts
-RUN pip3 install --break-system-packages numpy Pillow trimesh Wand scipy pypng
+# tree-sitter + tree-sitter-cpp: cognitive complexity analyzer (tools/cognitive_complexity.py)
+RUN pip3 install --break-system-packages numpy Pillow trimesh Wand scipy pypng tree-sitter tree-sitter-cpp
 
 # Install Claude
 RUN npm install -g --ignore-scripts @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}

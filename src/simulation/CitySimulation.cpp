@@ -287,7 +287,9 @@ bool CitySimulation::checkZoneFootprintClear(int tileX, int tileZ, int N) const 
     for (int dx = 0; dx < N; ++dx) {
         for (int dz = 0; dz < N; ++dz) {
             int fx = tileX + dx, fz = tileZ + dz;
-            if (fx < 0 || fz < 0) {
+            if (fx < 0 || fz < 0 ||
+                (m_mapWidth > 0 && fx >= m_mapWidth) ||
+                (m_mapHeight > 0 && fz >= m_mapHeight)) {
                 return false;
             }
             int64_t fkey = Zoning::tileKey(fx, fz);
@@ -537,6 +539,43 @@ void CitySimulation::removeTileFromScene(int tileX, int tileZ, bool wasRoad,
 }
 
 // ---------------------------------------------------------------------------
+// redirectToFootprintOrigin — redirect non-origin zone or service building
+// tiles to their origin tile for demolition. Returns true (and calls
+// demolishTile on the origin) if a redirect occurred; false otherwise.
+// Phase 11q9: also handles service building footprints.
+// ---------------------------------------------------------------------------
+
+bool CitySimulation::redirectToFootprintOrigin(
+        int tileX, int tileZ,
+        std::unordered_map<int64_t, TileData>::iterator it) {
+    // Zone-tile redirect (existing logic, moved here from demolishTile).
+    if (it != m_zoning.m_tiles.end() && it->second.isZoned &&
+        it->second.footprintOriginX != -1) {
+        demolishTile(it->second.footprintOriginX, it->second.footprintOriginZ);
+        return true;
+    }
+
+    // Service building redirect — service buildings are not stored in m_tiles.
+    // Scan for a service building whose footprint covers (tileX, tileZ).
+    // Copy origin coords before calling demolishTile because the call erases
+    // from m_serviceBuildings, invalidating any live iterator/reference.
+    // Use index-based loop to avoid range-for UB on mid-iteration erase.
+    const int sN = Zoning::serviceFootprintSize();
+    const size_t sbCount = m_zoning.m_serviceBuildings.size();
+    for (size_t i = 0; i < sbCount; ++i) {
+        const int sbx = m_zoning.m_serviceBuildings[i].x;
+        const int sbz = m_zoning.m_serviceBuildings[i].z;
+        if (tileX == sbx && tileZ == sbz) return false;  // origin — no redirect
+        if (tileX >= sbx && tileX < sbx + sN &&
+            tileZ >= sbz && tileZ < sbz + sN) {
+            demolishTile(sbx, sbz);
+            return true;
+        }
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 // demolishTile
 // ---------------------------------------------------------------------------
 
@@ -544,12 +583,8 @@ void CitySimulation::demolishTile(int tileX, int tileZ) {
     int64_t key = Zoning::tileKey(tileX, tileZ);
     auto it = m_zoning.m_tiles.find(key);
 
-    // Redirect non-origin footprint tiles to origin.
-    if (it != m_zoning.m_tiles.end() && it->second.isZoned &&
-        it->second.footprintOriginX != -1) {
-        demolishTile(it->second.footprintOriginX, it->second.footprintOriginZ);
-        return;
-    }
+    // Redirect non-origin footprint tiles to origin (zone tiles + service buildings).
+    if (redirectToFootprintOrigin(tileX, tileZ, it)) return;
 
     bool hadServiceBuilding = false;
     for (const ServiceBuilding& sb : m_zoning.m_serviceBuildings) {

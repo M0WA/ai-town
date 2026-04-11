@@ -118,6 +118,10 @@ public:
     // Close the active modal dialog (if any) and resume normal input routing.
     void closeModal();
 
+    // acceptModal — test seam: simulate player clicking the primary/Accept button
+    // of the currently active modal.
+    void acceptModal();
+
     // Show the settings panel (e.g. from pause menu or toolbar button).
     void showSettings();
 
@@ -172,6 +176,17 @@ public:
     void setOverlayMapForTest(const std::unordered_map<int64_t, uint32_t>& map) {
         m_world.overlayMap = map;
     }
+
+    // setSelectedDensityTierForTest — test seam: bypass the zone sub-panel click
+    // sequence and directly set m_world.selectedDensityTier.
+    void setSelectedDensityTierForTest(int tier) {
+        m_world.selectedDensityTier = tier;
+    }
+
+    // flushOverlayForTest — test seam: flush the overlay dirty flag immediately,
+    // bypassing the normal update() loop.  Use in tests that cannot call update()
+    // (e.g. StrictMock fixtures) to observe the setZoneOverlay side-effect.
+    void flushOverlayForTest();
 
     // onNewGame — reset all world-interaction state for a new game load.
     // Clears m_world.overlayMap, calls setZoneOverlay({}) if renderer is non-null,
@@ -319,9 +334,11 @@ private:
         // Overlay refresh counter (Phase 11m)
         int overlayRefreshCounter{0};
 
-        // Demolish pending tile and modal gate (Phase 11h)
-        int  demolishPendingTileX{-1};
-        int  demolishPendingTileZ{-1};
+        // Demolish drag-select anchor/release and modal gate (Phase 11q8)
+        int  demolishAnchorX{-1};
+        int  demolishAnchorZ{-1};
+        int  demolishReleaseX{-1};
+        int  demolishReleaseZ{-1};
         bool demolishModalPending{false};
     };
     WorldInteractionState m_world;
@@ -428,6 +445,32 @@ private:
     // Performs earthworks cost computation, slope guard, sim dispatch, and overlay update.
     // Returns true if the event should be consumed (placement occurred or was blocked).
     bool doTerrainPlacement(int hitX, int hitZ);
+
+    // Phase 11q9: stamp all N×N footprint tiles in the overlay map.
+    // Extracted from doTerrainPlacement to keep cognitive complexity in check.
+    void stampZoneOverlay(int hitX, int hitZ, int footprintN);
+
+    // Phase 11q9: rebake road vertex Y positions for road tiles on the
+    // border ring around a freshly placed N×N zone.
+    void rebuildBorderRoadMeshes(int hitX, int hitZ, int N);
+
+    // Demolish drag-select sub-handlers (Phase 11q8).
+    bool onDemolishMouseDown(int hitX, int hitZ);
+    void onDemolishMouseMove(int hitX, int hitZ);
+    bool onDemolishMouseUp();
+
+    // Zone footprint hover check: returns true when any tile in the N×N
+    // footprint is occupied or out-of-bounds (for Medium/High density).
+    bool isZoneFootprintBlocked(int hitX, int hitZ) const;
+
+    // Demolish helpers — shared by onDemolishMouseUp and updateModalDialogState.
+    bool isTileOccupied(int tx, int tz) const;
+    int  countOccupiedTilesInRect(int x0, int x1, int z0, int z1) const;
+    void demolishTilesInRect(int x0, int x1, int z0, int z1);
+    void clearDemolishVisuals();
+
+    // Phase 11q9: deferred overlay flush — setZoneOverlay is called at most once per update().
+    bool m_overlayDirty{false};
 
     // --- Owned panels (allocated in UIManager constructor, deleted in destructor) ---
     // Construction/destruction order is INVARIANT:

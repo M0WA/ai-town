@@ -139,6 +139,11 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
     // Wire keybindings apply callback: SettingsPanel calls this on Controls Apply.
     m_settings->setKeybindingsApplyFn([this](const KeyBindings& b){ applyKeybindings(b); });
 
+    // Wire demolish confirm toggle: SettingsPanel notifies UIManager when the toggle changes.
+    m_settings->setDemolishConfirmChangeFn([this](bool enabled) {
+        m_demolishConfirmEnabled = enabled;
+    });
+
     // Seed SettingsPanel with the current (default) keybindings so the Controls tab
     // opens with the right state. (loadKeybindings() may not have been called yet —
     // setCurrentBindings is re-called after loadKeybindings() in main.cpp. The seeding
@@ -829,8 +834,9 @@ bool UIManager::onEvent(const InputEvent& event) {
         // is gated on m_world.activeTool != None, so without this call m_hoverVisible
         // stays true and the quad persists until the next MouseMove.
         if (m_renderer) m_renderer->clearDemolishHighlight();
-        m_world.demolishPendingTileX = -1;
-        m_world.demolishPendingTileZ = -1;
+        m_world.demolishAnchorX = -1;
+        m_world.demolishAnchorZ = -1;
+        m_world.demolishReleaseX = m_world.demolishReleaseZ = -1;
         if (m_renderer) m_renderer->setTileHoverHighlight(-1, -1);
         m_world.hoveredTileX = -1;
         m_world.hoveredTileZ = -1;
@@ -933,46 +939,9 @@ bool UIManager::onEvent(const InputEvent& event) {
                 m_renderer->setTilePlacementPreview({}, 0u, {});
             }
 
-            // Phase 11h: Demolish tool — mouse-up triggers confirmation modal or immediate demolish.
-            if (m_world.activeTool == ActiveTool::Demolish && m_world.demolishPendingTileX != -1) {
-                int upHitX = -1, upHitZ = -1;
-                bool hitTerrain = m_renderer->pickTerrainTile(event.physX, event.physY,
-                                                               upHitX, upHitZ);
-                if (hitTerrain &&
-                    upHitX == m_world.demolishPendingTileX && upHitZ == m_world.demolishPendingTileZ) {
-                    // Mouse released on same tile as press — confirm demolish.
-                    if (m_demolishConfirmEnabled && m_modal) {
-                        m_modal->showDemolishConfirm(1);
-                        m_world.demolishModalPending = true;
-                    } else {
-                        // Immediate demolish (confirm disabled).
-                        if (m_sim) {
-                            m_sim->demolishTile(m_world.demolishPendingTileX, m_world.demolishPendingTileZ);
-                            if (m_world.mapTilesX > 0 && m_world.mapTilesZ > 0) {
-                                int64_t key = static_cast<int64_t>(m_world.demolishPendingTileZ)
-                                              * m_world.mapTilesX
-                                              + m_world.demolishPendingTileX;
-                                m_world.overlayMap.erase(key);
-                                if (m_renderer) {
-                                    m_renderer->setZoneOverlay(m_world.mapTilesX, m_world.mapTilesZ,
-                                                               m_world.overlayMap);
-                                }
-                            }
-                            setUnsavedChanges(true);
-                        }
-                        m_renderer->clearDemolishHighlight();
-                        m_world.demolishPendingTileX = -1;
-                        m_world.demolishPendingTileZ = -1;
-                    }
-                } else {
-                    // Mouse released on a different tile — cancel.
-                    m_renderer->clearDemolishHighlight();
-                    m_world.demolishPendingTileX = -1;
-                    m_world.demolishPendingTileZ = -1;
-                }
-                m_world.lmbHeld = false;
-                return true;  // Consumed.
-            }
+            // Phase 11q8: Demolish mouse-up.
+            if (m_world.activeTool == ActiveTool::Demolish && m_world.demolishAnchorX != -1)
+                return onDemolishMouseUp();
 
             m_world.lmbHeld = false;
             return false;  // Up-events are never consumed by world-interaction.
@@ -1015,6 +984,9 @@ bool UIManager::onEvent(const InputEvent& event) {
                     if (hoverQ.isRoad || hoverQ.isZoned) {
                         colour = kHoverArgbBlocked;
                         tileIsBlocked = true;
+                    } else if (m_world.activeTool == ActiveTool::Zone) {
+                        tileIsBlocked = isZoneFootprintBlocked(hitX, hitZ);
+                        if (tileIsBlocked) colour = kHoverArgbBlocked;
                     }
                 }
 
@@ -1096,22 +1068,44 @@ bool UIManager::onEvent(const InputEvent& event) {
                     m_renderer->setTileHoverHighlight(-1, -1);
                     m_renderer->setTilePlacementPreview(freeTiles, colour, blockedTiles);
                 }
+                // Phase 11q8: Demolish drag preview — occupied tiles in demolish-red,
+                // empty tiles in blocked-grey.
+                else if (m_world.lmbHeld
+                         && m_world.activeTool == ActiveTool::Demolish
+                         && m_world.demolishAnchorX != -1) {
+                    onDemolishMouseMove(hitX, hitZ);
+                }
                 // All other cases: single-tile hover highlight (no drag preview).
                 else {
-                    m_renderer->setTilePlacementPreview({}, 0u, {});
-                    // footprintSize: Zone tool uses density-tier footprint (1/2/3),
-                    // all other tools use 1×1.
-                    // footprintSize=0 is a sentinel meaning "blocked" (red highlight).
-                    int hoverFootprint = 1;
-                    if (tileIsBlocked) {
-                        hoverFootprint = 0;  // Phase 11h: 0 = blocked sentinel → red highlight
-                    } else if (m_world.activeTool == ActiveTool::Zone) {
-                        // m_world.selectedDensityTier: 0=Low→1, 1=Med→2, 2=High→3
-                        hoverFootprint = m_world.selectedDensityTier + 1;
-                    } else if (m_world.activeTool == ActiveTool::Utilities) {
-                        hoverFootprint = 2;  // Service buildings always have a 2×2 footprint
+                    const int N = (m_world.activeTool == ActiveTool::Zone)
+                                  ? m_world.selectedDensityTier + 1 : 1;
+                    if (m_world.activeTool == ActiveTool::Zone && N > 1) {
+                        // Multi-tile zone: show the full N×N footprint as a placement
+                        // preview — zone colour when clear, blocked red when any tile is
+                        // occupied or out-of-bounds.  1×1 hover cursor not needed since
+                        // the footprint tiles already indicate the origin.
+                        m_renderer->setTileHoverHighlight(-1, -1);
+                        std::vector<std::pair<int,int>> footTiles;
+                        footTiles.reserve(static_cast<size_t>(N * N));
+                        for (int dz = 0; dz < N; ++dz)
+                            for (int dx = 0; dx < N; ++dx)
+                                footTiles.push_back({hitX + dx, hitZ + dz});
+                        if (tileIsBlocked) {
+                            m_renderer->setTilePlacementPreview({}, colour, footTiles);
+                        } else {
+                            m_renderer->setTilePlacementPreview(footTiles, colour, {});
+                        }
+                    } else {
+                        m_renderer->setTilePlacementPreview({}, 0u, {});
+                        // footprintSize=0 is a sentinel meaning "blocked" (red highlight).
+                        int hoverFootprint = 1;
+                        if (tileIsBlocked) {
+                            hoverFootprint = 0;  // Phase 11h: 0 = blocked sentinel → red highlight
+                        } else if (m_world.activeTool == ActiveTool::Utilities) {
+                            hoverFootprint = 2;  // Service buildings always have a 2×2 footprint
+                        }
+                        m_renderer->setTileHoverHighlight(hitX, hitZ, hoverFootprint);
                     }
-                    m_renderer->setTileHoverHighlight(hitX, hitZ, hoverFootprint);
                 }
 
                 // Zone, Road, Utilities, and Demolish all use click-only or deferred placement.
@@ -1171,21 +1165,242 @@ bool UIManager::onEvent(const InputEvent& event) {
                 return true;  // Consumed: anchor recorded; no placement yet.
             }
 
-            // Phase 11h: Demolish tool — record pending tile on mouse-down.
-            // The demolish confirmation modal (or immediate demolish) is triggered on mouse-up.
-            if (m_world.activeTool == ActiveTool::Demolish) {
-                m_world.demolishPendingTileX = hitX;
-                m_world.demolishPendingTileZ = hitZ;
-                // The renderer will use demolish red color (ToolMode::Demolish is already set).
-                m_renderer->setTileHoverHighlight(hitX, hitZ, 1);
-                return true;  // Consumed: pending tile recorded; no placement yet.
-            }
+            // Phase 11q8: record drag anchor on mouse-down.
+            if (m_world.activeTool == ActiveTool::Demolish)
+                return onDemolishMouseDown(hitX, hitZ);
 
             return doTerrainPlacement(hitX, hitZ);
         }
     }
 
     return false;
+}
+
+// ----------------------------------------------------------------
+// onDemolishMouseDown — Phase 11q8: record drag anchor on mouse-down.
+// ----------------------------------------------------------------
+bool UIManager::onDemolishMouseDown(int hitX, int hitZ) {
+    m_world.demolishAnchorX = hitX;
+    m_world.demolishAnchorZ = hitZ;
+    m_renderer->setTileHoverHighlight(hitX, hitZ, 1);
+    return true;
+}
+
+// ----------------------------------------------------------------
+// isZoneFootprintBlocked — check whether the full N×N footprint for the
+// selected density tier is blocked (any tile occupied or out-of-bounds).
+// N=1 always returns false (single tile already checked by caller).
+// ----------------------------------------------------------------
+bool UIManager::isZoneFootprintBlocked(int hitX, int hitZ) const {
+    const int N = m_world.selectedDensityTier + 1;
+    if (N <= 1 || !m_sim) return false;
+    if (hitX < 0 || hitZ < 0) return true;
+    // Use UIManager-owned map dimensions (set via setMapDimensions) rather than
+    // querying the sim — avoids unexpected mock calls in StrictMock test fixtures.
+    const int mapW = m_world.mapTilesX;
+    const int mapH = m_world.mapTilesZ;
+    if ((mapW > 0 && hitX + N > mapW) || (mapH > 0 && hitZ + N > mapH))
+        return true;
+    for (int i = 1; i < N * N; ++i) {
+        QueryResult q = m_sim->queryTile(hitX + i % N, hitZ + i / N);
+        if (q.isRoad || q.isZoned || q.serviceType != ServiceBuildingType::None)
+            return true;
+    }
+    return false;
+}
+
+// ----------------------------------------------------------------
+// isTileOccupied — returns true when the tile has a zone, road, or service building.
+// ----------------------------------------------------------------
+bool UIManager::isTileOccupied(int tx, int tz) const {
+    if (!m_sim) return false;
+    QueryResult q = m_sim->queryTile(tx, tz);
+    return q.isZoned || q.isRoad || q.serviceType != ServiceBuildingType::None;
+}
+
+// ----------------------------------------------------------------
+// countOccupiedTilesInRect — count tiles with zones/roads/services in [x0..x1] x [z0..z1].
+// ----------------------------------------------------------------
+int UIManager::countOccupiedTilesInRect(int x0, int x1, int z0, int z1) const {
+    int count = 0;
+    for (int tz = z0; tz <= z1; ++tz)
+        for (int tx = x0; tx <= x1; ++tx)
+            if (isTileOccupied(tx, tz))
+                ++count;
+    return count;
+}
+
+// ----------------------------------------------------------------
+// demolishTilesInRect — demolish all occupied tiles and erase overlay entries.
+// ----------------------------------------------------------------
+// zoneFootprintN — map DensityTier to footprint edge length for overlay cleanup.
+static int zoneFootprintN(DensityTier d) {
+    switch (d) {
+        case DensityTier::Medium: return 2;
+        case DensityTier::High:   return 3;
+        default:                  return 1;
+    }
+}
+
+void UIManager::demolishTilesInRect(int x0, int x1, int z0, int z1) {
+    if (!m_sim || m_world.mapTilesX <= 0) return;
+    for (int tz = z0; tz <= z1; ++tz) {
+        for (int tx = x0; tx <= x1; ++tx) {
+            if (!isTileOccupied(tx, tz)) continue;
+
+            // Phase 11q9: capture zone origin + footprint BEFORE demolish so we can
+            // erase all N×N overlay keys (not just the clicked tile's key).
+            // Service buildings carry no overlay entries; skip the footprint logic for them.
+            int ox = tx, oz = tz, foot = 1;
+            QueryResult preq = m_sim->queryTile(tx, tz);
+            if (preq.isZoned && !preq.isRoad) {
+                if (preq.footprintOriginX != -1) {
+                    ox = preq.footprintOriginX;
+                    oz = preq.footprintOriginZ;
+                    foot = zoneFootprintN(m_sim->queryTile(ox, oz).densityTier);
+                } else {
+                    foot = zoneFootprintN(preq.densityTier);
+                }
+            }
+
+            m_sim->demolishTile(tx, tz);
+
+            for (int fdz = 0; fdz < foot; ++fdz) {
+                for (int fdx = 0; fdx < foot; ++fdx) {
+                    int64_t fkey = static_cast<int64_t>(oz + fdz) * m_world.mapTilesX
+                                   + (ox + fdx);
+                    m_world.overlayMap.erase(fkey);
+                }
+            }
+        }
+    }
+    m_overlayDirty = true;
+    setUnsavedChanges(true);
+}
+
+// ----------------------------------------------------------------
+// clearDemolishVisuals — clear preview, highlight, and anchor/release state.
+// ----------------------------------------------------------------
+void UIManager::clearDemolishVisuals() {
+    if (m_renderer) {
+        m_renderer->setTilePlacementPreview({}, 0u, {});
+        m_renderer->clearDemolishHighlight();
+    }
+    m_world.demolishAnchorX = m_world.demolishAnchorZ = -1;
+    m_world.demolishReleaseX = m_world.demolishReleaseZ = -1;
+}
+
+// ----------------------------------------------------------------
+// onDemolishMouseMove — Phase 11q8: rectangular demolish preview while dragging.
+// Occupied tiles shown in demolish-red, empty tiles in blocked-grey.
+// ----------------------------------------------------------------
+void UIManager::onDemolishMouseMove(int hitX, int hitZ) {
+    int x0 = std::min(m_world.demolishAnchorX, hitX);
+    int x1 = std::max(m_world.demolishAnchorX, hitX);
+    int z0 = std::min(m_world.demolishAnchorZ, hitZ);
+    int z1 = std::max(m_world.demolishAnchorZ, hitZ);
+    std::vector<std::pair<int,int>> occupiedTiles;
+    std::vector<std::pair<int,int>> emptyTiles;
+    const size_t total = static_cast<size_t>((x1-x0+1)*(z1-z0+1));
+    occupiedTiles.reserve(total);
+    emptyTiles.reserve(total);
+    for (int tz = z0; tz <= z1; ++tz)
+        for (int tx = x0; tx <= x1; ++tx)
+            (isTileOccupied(tx, tz) ? occupiedTiles : emptyTiles).push_back({tx, tz});
+    m_renderer->setTileHoverHighlight(-1, -1);
+    m_renderer->setTilePlacementPreview(occupiedTiles, kHoverArgbDemolish, emptyTiles);
+}
+
+// ----------------------------------------------------------------
+// onDemolishMouseUp — Phase 11q8: show confirm modal (if enabled and
+// occupied tiles > 0), or demolish immediately (confirm disabled).
+// ----------------------------------------------------------------
+bool UIManager::onDemolishMouseUp() {
+    // Guard: if a demolish-confirm modal is already pending (waiting for the user
+    // to accept/cancel) or the modal is still active, do NOT re-trigger the flow.
+    // This prevents the MouseButtonUp that follows the "Yes" click from reopening
+    // the modal — the modal's MouseButtonDown handler closes the dialog, making
+    // it inactive before the paired MouseButtonUp arrives, which would otherwise
+    // leak through Priority 7 and call onDemolishMouseUp() again.
+    if (m_world.demolishModalPending || hasActiveModal()) {
+        m_world.lmbHeld = false;
+        return true;
+    }
+
+    int releaseX = m_world.hoveredTileX;
+    int releaseZ = m_world.hoveredTileZ;
+    if (releaseX == -1) releaseX = m_world.demolishAnchorX;
+    if (releaseZ == -1) releaseZ = m_world.demolishAnchorZ;
+
+    int x0 = std::min(m_world.demolishAnchorX, releaseX);
+    int x1 = std::max(m_world.demolishAnchorX, releaseX);
+    int z0 = std::min(m_world.demolishAnchorZ, releaseZ);
+    int z1 = std::max(m_world.demolishAnchorZ, releaseZ);
+    int occupiedCount = countOccupiedTilesInRect(x0, x1, z0, z1);
+
+    if (occupiedCount == 0) {
+        clearDemolishVisuals();
+    } else if (m_demolishConfirmEnabled && m_modal) {
+        m_world.demolishReleaseX = releaseX;
+        m_world.demolishReleaseZ = releaseZ;
+        m_modal->showDemolishConfirm(occupiedCount);
+        m_world.demolishModalPending = true;
+    } else {
+        demolishTilesInRect(x0, x1, z0, z1);
+        clearDemolishVisuals();
+    }
+    m_world.lmbHeld = false;
+    return true;
+}
+
+// ----------------------------------------------------------------
+// rebuildBorderRoadMeshes — Phase 11q9: rebake road vertex Y positions
+// for road tiles on the border ring around a freshly placed N×N zone.
+// placeZone() flattened terrain heights; placeRoadMesh() re-samples.
+// ----------------------------------------------------------------
+void UIManager::rebuildBorderRoadMeshes(int hitX, int hitZ, int N) {
+    if (!m_renderer || !m_sim) return;
+    for (int dx = -1; dx <= N; ++dx) {
+        for (int dz = -1; dz <= N; ++dz) {
+            // Skip the zone footprint itself — only the border ring.
+            if (dx >= 0 && dx < N && dz >= 0 && dz < N) continue;
+            int nx = hitX + dx;
+            int nz = hitZ + dz;
+            QueryResult q = m_sim->queryTile(nx, nz);
+            if (q.isRoad) {
+                m_renderer->placeRoadMesh(nx, nz);
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------------------
+// stampZoneOverlay — Phase 11q9: stamp all N×N footprint tiles in the
+// overlay map so the zone colour covers the full placed footprint.
+// Extracted from doTerrainPlacement to keep cognitive complexity in check.
+// ----------------------------------------------------------------
+void UIManager::stampZoneOverlay(int hitX, int hitZ, int footprintN) {
+    if (m_world.mapTilesX <= 0 || m_world.mapTilesZ <= 0) return;
+    if (!m_sim) return;
+
+    QueryResult placed = m_sim->queryTile(hitX, hitZ);
+    if (!placed.isZoned) return;
+
+    ZoneType    zoneType    = static_cast<ZoneType>(m_world.selectedZoneType);
+    DensityTier densityTier = static_cast<DensityTier>(m_world.selectedDensityTier);
+    const uint32_t ovColor  = computeZoneOverlayColor(zoneType, densityTier);
+    static constexpr size_t kOverlayCap = 100000u;
+
+    for (int dz = 0; dz < footprintN; ++dz) {
+        for (int dx = 0; dx < footprintN; ++dx) {
+            if (m_world.overlayMap.size() >= kOverlayCap) break;
+            int64_t fkey = static_cast<int64_t>(hitZ + dz) * m_world.mapTilesX
+                           + (hitX + dx);
+            m_world.overlayMap[fkey] = ovColor;
+        }
+    }
+
+    m_overlayDirty = true;
 }
 
 // ----------------------------------------------------------------
@@ -1222,7 +1437,13 @@ bool UIManager::doTerrainPlacement(int hitX, int hitZ) {
 
     switch (m_world.activeTool) {
         case ActiveTool::Zone: {
-            // Guard: skip overlay writes until map dimensions are set.
+            const int N = m_world.selectedDensityTier + 1;  // footprint: Low=1, Med=2, High=3
+            // Phase 11q9: enforce minimum footprint — Medium requires 2×2, High requires 3×3.
+            // isZoneFootprintBlocked returns false for Low (N=1), so this guard is a no-op
+            // for Low density and the sim handles single-tile blocking internally.
+            if (isZoneFootprintBlocked(hitX, hitZ)) {
+                return true;  // footprint occupied or OOB — consume event, skip placement
+            }
             m_sim->placeZone(hitX, hitZ,
                              static_cast<ZoneType>(m_world.selectedZoneType),
                              static_cast<DensityTier>(m_world.selectedDensityTier),
@@ -1230,40 +1451,8 @@ bool UIManager::doTerrainPlacement(int hitX, int hitZ) {
             // Phase 11m: rebuild road mesh scene nodes adjacent to the zone footprint.
             // placeZone() flattened their terrain heights; placeRoadMesh() rebakes
             // road vertex Y positions from the updated terrain.
-            if (m_renderer && m_sim) {
-                const int N = m_world.selectedDensityTier + 1;  // footprint: Low=1, Med=2, High=3
-                for (int dx = -1; dx <= N; ++dx) {
-                    for (int dz = -1; dz <= N; ++dz) {
-                        // Skip the zone footprint itself — only the border ring.
-                        if (dx >= 0 && dx < N && dz >= 0 && dz < N) continue;
-                        int nx = hitX + dx;
-                        int nz = hitZ + dz;
-                        QueryResult q = m_sim->queryTile(nx, nz);
-                        if (q.isRoad) {
-                            m_renderer->placeRoadMesh(nx, nz);
-                        }
-                    }
-                }
-            }
-            if (m_world.mapTilesX > 0 && m_world.mapTilesZ > 0) {
-                // Phase 11m: insert overlay entry only when the tile was actually zoned.
-                // placeZone() may have rejected the placement (road proximity, OOB, occupied).
-                // Query the tile after placement to confirm it is now zoned.
-                QueryResult placed = m_sim->queryTile(hitX, hitZ);
-                if (placed.isZoned) {
-                    int64_t key = static_cast<int64_t>(hitZ) * m_world.mapTilesX
-                                  + hitX;
-                    ZoneType  zoneType   = static_cast<ZoneType>(m_world.selectedZoneType);
-                    DensityTier densityTier = static_cast<DensityTier>(m_world.selectedDensityTier);
-                    static constexpr size_t kOverlayCap = 100000u;
-                    if (m_world.overlayMap.size() < kOverlayCap) {
-                        m_world.overlayMap[key] = computeZoneOverlayColor(zoneType, densityTier);
-                    }
-                    if (m_renderer) {
-                        m_renderer->setZoneOverlay(m_world.mapTilesX, m_world.mapTilesZ, m_world.overlayMap);
-                    }
-                }
-            }
+            rebuildBorderRoadMeshes(hitX, hitZ, N);
+            stampZoneOverlay(hitX, hitZ, N);
             setUnsavedChanges(true);
             break;
         }
@@ -1540,23 +1729,13 @@ bool UIManager::updateModalDialogState() {
         m_world.demolishModalPending = false;
         auto result = m_modal->pollResult();
         if (result == ModalDialog::DialogResult::Accept) {
-            if (m_sim && m_world.demolishPendingTileX != -1) {
-                m_sim->demolishTile(m_world.demolishPendingTileX, m_world.demolishPendingTileZ);
-                if (m_world.mapTilesX > 0 && m_world.mapTilesZ > 0 && m_renderer) {
-                    int64_t key = static_cast<int64_t>(m_world.demolishPendingTileZ)
-                                  * m_world.mapTilesX
-                                  + m_world.demolishPendingTileX;
-                    m_world.overlayMap.erase(key);
-                    m_renderer->setZoneOverlay(m_world.mapTilesX, m_world.mapTilesZ, m_world.overlayMap);
-                }
-                setUnsavedChanges(true);
-            }
-            if (m_renderer) m_renderer->clearDemolishHighlight();
-        } else {
-            if (m_renderer) m_renderer->clearDemolishHighlight();
+            int x0 = std::min(m_world.demolishAnchorX, m_world.demolishReleaseX);
+            int x1 = std::max(m_world.demolishAnchorX, m_world.demolishReleaseX);
+            int z0 = std::min(m_world.demolishAnchorZ, m_world.demolishReleaseZ);
+            int z1 = std::max(m_world.demolishAnchorZ, m_world.demolishReleaseZ);
+            demolishTilesInRect(x0, x1, z0, z1);
         }
-        m_world.demolishPendingTileX = -1;
-        m_world.demolishPendingTileZ = -1;
+        clearDemolishVisuals();
     }
 
     // Forward budget ticks from CitySimulation to SaveSystem (5-tick auto-save gate).
@@ -1699,7 +1878,11 @@ void UIManager::updateHUDState(float realDeltaSeconds) {
                         int tileX = static_cast<int>(it->first % m_world.mapTilesX);
                         int tileZ = static_cast<int>(it->first / m_world.mapTilesX);
                         QueryResult qr = m_sim->queryTile(tileX, tileZ);
-                        if (!qr.isZoned || !qr.underConstruction) {
+                        // Phase 11q9: non-origin tiles inherit their origin's underConstruction flag.
+                        bool underConstr = (qr.footprintOriginX != -1)
+                            ? m_sim->queryTile(qr.footprintOriginX, qr.footprintOriginZ).underConstruction
+                            : qr.underConstruction;
+                        if (!qr.isZoned || !underConstr) {
                             it = m_world.overlayMap.erase(it);
                             anyRemoved = true;
                         } else {
@@ -1707,7 +1890,7 @@ void UIManager::updateHUDState(float realDeltaSeconds) {
                         }
                     }
                     if (anyRemoved)
-                        m_renderer->setZoneOverlay(m_world.mapTilesX, m_world.mapTilesZ, m_world.overlayMap);
+                        m_overlayDirty = true;
                 }
                 m_world.overlayRefreshCounter = 0;
                 break;
@@ -1758,7 +1941,11 @@ void UIManager::updateHUDState(float realDeltaSeconds) {
                 int tileX = static_cast<int>(it->first % m_world.mapTilesX);
                 int tileZ = static_cast<int>(it->first / m_world.mapTilesX);
                 QueryResult qr = m_sim->queryTile(tileX, tileZ);
-                if (!qr.isZoned || !qr.underConstruction) {
+                // Phase 11q9: non-origin tiles inherit their origin's underConstruction flag.
+                bool underConstr = (qr.footprintOriginX != -1)
+                    ? m_sim->queryTile(qr.footprintOriginX, qr.footprintOriginZ).underConstruction
+                    : qr.underConstruction;
+                if (!qr.isZoned || !underConstr) {
                     it = m_world.overlayMap.erase(it);
                     anyRemoved = true;
                 } else {
@@ -1766,8 +1953,15 @@ void UIManager::updateHUDState(float realDeltaSeconds) {
                 }
             }
             if (anyRemoved)
-                m_renderer->setZoneOverlay(m_world.mapTilesX, m_world.mapTilesZ, m_world.overlayMap);
+                m_overlayDirty = true;
         }
+    }
+
+    // Phase 11q9: flush overlay dirty flag — at most one setZoneOverlay per frame.
+    if (m_overlayDirty && m_renderer
+            && m_world.mapTilesX > 0 && m_world.mapTilesZ > 0) {
+        m_renderer->setZoneOverlay(m_world.mapTilesX, m_world.mapTilesZ, m_world.overlayMap);
+        m_overlayDirty = false;
     }
 }
 
@@ -1850,6 +2044,10 @@ void UIManager::showGameOverModal(int64_t totalDebt, int monthsInDeficit) {
     }
 
     m_modal->showGameOver(totalDebt, monthsInDeficit);
+}
+
+void UIManager::acceptModal() {
+    if (m_modal) m_modal->acceptForTest();
 }
 
 void UIManager::closeModal() {
@@ -2053,6 +2251,18 @@ void UIManager::setMapDimensions(int mapTilesX, int mapTilesZ) {
 
 ActiveTool UIManager::getActiveTool() const {
     return m_world.activeTool;
+}
+
+// ----------------------------------------------------------------
+// flushOverlayForTest — test seam: flush overlay dirty flag immediately.
+// ----------------------------------------------------------------
+void UIManager::flushOverlayForTest() {
+    if (m_overlayDirty && m_renderer
+            && m_world.mapTilesX > 0 && m_world.mapTilesZ > 0) {
+        m_renderer->setZoneOverlay(m_world.mapTilesX, m_world.mapTilesZ,
+                                   m_world.overlayMap);
+        m_overlayDirty = false;
+    }
 }
 
 // ----------------------------------------------------------------
