@@ -341,28 +341,30 @@ code, a north tile maps to a larger py (bottom of minimap) rather than a smaller
 
 1. **Change `sinA = sinf(-yawRad)` → `sinA = sinf(yawRad)`** (remove the negation
    from the sin call; `cosA` is unchanged since cos is even).
-2. **Change `py = centreZ + rotZ * scaleZ` → `py = centreZ - rotZ * scaleZ`** in
-   all four tile-drawing loops (zone colors, road network, service coverage, traffic
-   congestion).
-3. **`px = centreX + rotX * scaleX` is correct and must NOT change.**
+2. **`py = centreZ + rotZ * scaleZ` is correct and must NOT change.**
+   Camera forward = −Z at yaw=0, so forward tiles have `relZ < 0` → `rotZ < 0` →
+   `py < centreZ` = top of minimap ✓ (no sign change needed).
+3. **Change `px = centreX + rotX * scaleX` → `px = centreX - rotX * scaleX`.**
+   Irrlicht LH: camera right = −X (`xaxis = normalize(up × forward)` with forward=−Z
+   gives xaxis = −X). Negating px maps world +X to screen-left (camera-left). ✓
 4. **Change north indicator sin term:**
-   `+ 90.f * sinf(yawRad)` → `− 90.f * sinf(yawRad)` (the cos term is unchanged).
+   `+ 90.f * sinf(yawRad)` → `− 90.f * sinf(yawRad)` (negated to match px X-flip).
 
 **Rotation formula at yaw=0 verification after fix:**
 
 - `cosA=1`, `sinA=0` → `rotX=relX`, `rotZ=relZ`
-- East tile (relX=r): px = centreX + r*scaleX > centreX → RIGHT ✓
-- North tile (relZ=r): py = centreZ − r*scaleZ < centreZ → TOP ✓
+- Irrlicht LH: camera right = −X, so world +X = camera LEFT.
+- East tile (relX=r > 0): px = centreX − r*scaleX < centreX → LEFT ✓ (east = camera-left)
+- Forward tile (relZ=−r < 0, camera looks toward −Z): py = centreZ + (−r)*scaleZ < centreZ → TOP ✓
 
 **Rotation formula at yaw=90° verification after fix:**
 
 - `cosA=0`, `sinA=sin(90°)=1`
-- Camera forward = +X (east). East tile (relX=r, relZ=0):
-  - rotX = r*0 − 0*1 = 0 → px = centreX ✓ (top = centre-x)
-  - rotZ = r*1 + 0*0 = r → py = centreZ − r*scaleZ < centreZ → TOP ✓
-- North tile (relX=0, relZ=r):
-  - rotX = 0*0 − r*1 = −r → px = centreX + (−r)*scaleX < centreX → LEFT ✓
-  (north is to camera's left when camera faces east)
+- Camera forward at yaw=90° = −X. Forward tile (relX=−r, relZ=0):
+  - rotX = (−r)*0 − 0*1 = 0 → px = centreX ✓ (top = centre-x)
+  - rotZ = (−r)*1 + 0*0 = −r → py = centreZ + (−r)*scaleZ < centreZ → TOP ✓
+- Camera right at yaw=90° = +Z (Irrlicht LH). Tile at relZ=r (camera-right):
+  - rotX = 0*0 − r*1 = −r → px = centreX − (−r)*scaleX = centreX + r > centreX → RIGHT ✓
 
 **Current (buggy) — in the `sinA` declaration near line 177:**
 
@@ -380,20 +382,23 @@ const float sinA    = sinf(yawRad);    // removed negation: counter-rotates worl
 
 Update the comment on the cosA line to remove the now-misleading `(-yawRad)` form.
 
-**For all four tile-drawing loops**, change:
+**For all four tile-drawing loops**, change the px formula:
 
 ```cpp
-const int   py   = static_cast<int>(centreZ + rotZ * scaleZ);
+const int   px   = static_cast<int>(centreX + rotX * scaleX);   // old (wrong)
 ```
 
 to:
 
 ```cpp
-const int   py   = static_cast<int>(centreZ - rotZ * scaleZ);
+const int   px   = static_cast<int>(centreX - rotX * scaleX);   // Irrlicht LH X-flip
 ```
 
+The py formula `centreZ + rotZ * scaleZ` is **correct and unchanged** — forward tiles
+have `relZ < 0` at yaw=0 so `rotZ < 0` → `py < centreZ` = top of minimap. ✓
+
 (Four occurrences: zone-color loop, road-network loop, service-coverage overlay
-loop, traffic-congestion overlay loop. `px` is UNCHANGED in all loops.)
+loop, traffic-congestion overlay loop.)
 
 **North indicator — current (buggy, lines ~279–280):**
 
@@ -415,9 +420,9 @@ Acceptance criteria:
 
 - [x] `sinA = sinf(yawRad)` (negation removed from sin call) in `drawOverlay()`.
 - [x] `cosA = cosf(yawRad)` comment updated to remove `−yawRad` form.
-- [x] All four tile loops use `centreZ - rotZ * scaleZ` (was `+`).
-- [x] All four tile loops use `centreX + rotX * scaleX` (unchanged).
-- [x] North indicator uses `- 90.f * sinf(yawRad)` (was `+`).
+- [x] All four tile loops use `centreZ + rotZ * scaleZ` (forward tiles have relZ < 0 → py < centreZ = top ✓).
+- [x] All four tile loops use `centreX - rotX * scaleX` (Irrlicht LH: camera right = −X, negation corrects left/right).
+- [x] North indicator uses `- 90.f * sinf(yawRad)` (was `+`, negated to match px X-flip).
 - [x] `make build` succeeds with no new warnings.
 
 ---
@@ -444,20 +449,22 @@ m_panCallback(m_cameraState.targetX + worldOffX, m_cameraState.targetZ + worldOf
 
 ```cpp
 const float offX = (static_cast<float>(mx) - (kMapX + kMapW * 0.5f)) / scaleX;
-const float offZ = (kMapY + kMapH * 0.5f - static_cast<float>(my)) / scaleZ;
-const float worldOffX = offX * cosYaw + offZ * sinYaw;
-const float worldOffZ = -offX * sinYaw + offZ * cosYaw;
+const float offZ = (static_cast<float>(my) - (kMapY + kMapH * 0.5f)) / scaleZ;
+const float worldOffX = -offX * cosYaw + offZ * sinYaw;
+const float worldOffZ =  offX * sinYaw + offZ * cosYaw;
 m_panCallback(m_cameraState.targetX + worldOffX, m_cameraState.targetZ + worldOffZ);
 ```
 
-Only `offZ` changes sign (`my − centreZ` → `centreZ − my`). `offX` and the
-`worldOffX`/`worldOffZ` formulas are unchanged.
+`offZ` is positive down-screen (consistent with `py = centreZ + rotZ * scaleZ`).
+`worldOffX` negates `offX` to invert the px X-flip; `worldOffZ` changes sign
+accordingly to preserve correct inverse-rotation behaviour.
 
 Acceptance criteria:
 
-- [x] `offZ = (kMapY + kMapH * 0.5f - my) / scaleZ` (negated vs. current).
+- [x] `offZ = (my - centreZ) / scaleZ` (positive down-screen; sign consistent with py formula).
 - [x] `offX` formula unchanged.
-- [x] `worldOffX` / `worldOffZ` formulas unchanged.
+- [x] `worldOffX = -offX * cosYaw + offZ * sinYaw` (offX negated to invert px X-flip).
+- [x] `worldOffZ = offX * sinYaw + offZ * cosYaw`.
 - [x] `make build` succeeds with no new warnings.
 
 ---
@@ -522,9 +529,10 @@ offZ      = ((kMapY+100) - clickY) / scaleZ
 Acceptance criteria:
 
 - [x] Section label updated to `(Phase 11q7)`.
-- [x] Rotation formulas updated (`cos(yaw_rad)` / `sin(yaw_rad)`, `py` uses `−`).
+- [x] Rotation formulas updated (`cos(yaw_rad)` / `sin(yaw_rad)`, `py` uses `+`, `px` uses `−`).
+- [x] Irrlicht LH X-axis note added explaining camera right = −X and px negation.
 - [x] North indicator sin term corrected to `− 90·sin(yaw_rad)`.
-- [x] Click-to-pan `offZ` corrected to `(kMapY+100) − clickY`.
+- [x] Click-to-pan `worldOffX` corrected to `−offX * cos + offZ * sin` (X-flip inverse).
 - [x] `npx markdownlint-cli 'architecture/**/*.md'` passes with no errors.
 
 ---
@@ -546,10 +554,10 @@ the tile cache, then `m_minimap->draw()`.
 
 **`MM44_NorthTileAppearsAboveCentre_Yaw0`**
 
-A residential tile at (50, 51) is one tile north (+Z) of the camera target row 50.
-`relZ = 51*10 − 500 = 10 > 0`. With the fix, `rotZ = relZ = 10`,
-`py = 980 − 10*(200/1000) = 980 − 2 = 978 < 980`. The tile's `fillColoredRect`
-y-coordinate must be **strictly less than** `kMapY + 100 = 980`.
+A residential tile at (50, 49) is one tile forward (−Z) of the camera target.
+`relZ = 49*10 − 500 = −10 < 0`. Camera looks toward −Z at yaw=0, so this tile is
+in front. `rotZ = relZ = −10`, `py = 980 + (−10)*(200/1000) = 980 − 2 = 978 < 980`.
+The tile's `fillColoredRect` y-coordinate must be **strictly less than** `kMapY + 100 = 980`.
 
 ```cpp
 TEST_F(MinimapOverlayTest, MM44_NorthTileAppearsAboveCentre_Yaw0) {
@@ -595,8 +603,9 @@ TEST_F(MinimapOverlayTest, MM44_NorthTileAppearsAboveCentre_Yaw0) {
 
 **`MM44_SouthTileAppearsBelowCentre_Yaw0`**
 
-A residential tile at (50, 49) is one tile south (−Z of north) of the camera target.
-`relZ = 49*10 − 500 = −10 < 0`. `py = 980 − (−10)*(0.2) = 980 + 2 = 982 > 980`.
+A residential tile at (50, 51) is one tile behind (+Z) the camera target.
+`relZ = 51*10 − 500 = 10 > 0`. Camera looks toward −Z, so +Z is behind.
+`rotZ = 10`, `py = 980 + 10*(0.2) = 982 > 980`.
 The tile's `fillColoredRect` y-coordinate must be **strictly greater than** 980.
 
 ```cpp
@@ -640,16 +649,16 @@ TEST_F(MinimapOverlayTest, MM44_SouthTileAppearsBelowCentre_Yaw0) {
 
 ---
 
-**`MM44_EastTileAppearsRightOfCentre_Yaw0`**
+**`MM44_EastTileAppearsLeftOfCentre_Yaw0`**
 
 A residential tile at (51, 50) is one tile east (+X) of the camera target.
-`relX = 51*10 − 500 = 10 > 0`. At yaw=0: `rotX = relX = 10`;
-`px = 1820 + 10*0.2 = 1822 > 1820`. The tile's `fillColoredRect`
-x-coordinate must be **strictly greater than** `kMapX + 100 = 1820`.
-(Verifies that the `px` formula is unchanged by the fix.)
+`relX = 51*10 − 500 = 10 > 0`. Irrlicht LH: camera right = −X, so +X = camera-left.
+At yaw=0: `rotX = relX = 10`; `px = 1820 − 10*0.2 = 1818 < 1820`. The tile's
+`fillColoredRect` x-coordinate must be **strictly less than** `kMapX + 100 = 1820`.
+(Verifies the Irrlicht LH px X-flip.)
 
 ```cpp
-TEST_F(MinimapOverlayTest, MM44_EastTileAppearsRightOfCentre_Yaw0) {
+TEST_F(MinimapOverlayTest, MM44_EastTileAppearsLeftOfCentre_Yaw0) {
     QueryResult eastTile;
     eastTile.isRoad  = false;
     eastTile.isZoned = true;
@@ -683,7 +692,7 @@ TEST_F(MinimapOverlayTest, MM44_EastTileAppearsRightOfCentre_Yaw0) {
     m_minimap->drawOverlay();
 
     ASSERT_NE(eastPx, -1) << "No residential tile rendered";
-    EXPECT_GT(eastPx, 1820) << "East tile must appear right of minimap centre";
+    EXPECT_LT(eastPx, 1820) << "East tile (+X = camera-left in Irrlicht LH) must appear left of minimap centre";
 }
 ```
 

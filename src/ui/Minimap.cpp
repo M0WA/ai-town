@@ -180,8 +180,16 @@ void Minimap::drawOverlay() {
 
     static constexpr float kDegToRad = 3.14159265f / 180.0f;
     const float yawRad  = m_cameraState.yaw * kDegToRad;
-    const float cosA    = cosf(yawRad);    // cos is even: cosf(-yawRad) == cosf(yawRad)
-    const float sinA    = sinf(yawRad);    // removed negation: counter-rotates world correctly
+    // Camera-up minimap: rotate world tiles by +yaw so the camera forward direction
+    // (-Z at yaw=0) always appears at the top of the minimap.
+    // Sign rule: sinA = +sinf(yawRad).  The rotation applied to (relX, relZ) is:
+    //   rotX = relX*cosA - relZ*sinA
+    //   rotZ = relX*sinA + relZ*cosA
+    // At yaw=0: identity (no rotation), -Z forward → top ✓.
+    // At yaw=+θ: tiles rotate so the new forward direction stays at top.
+    // (−sinA would invert left/right.)
+    const float cosA = cosf(yawRad);
+    const float sinA = sinf(yawRad);
     const float scaleX  = static_cast<float>(kMapW) / worldW;   // px/m
     const float scaleZ  = static_cast<float>(kMapH) / worldD;
     const float centreX = kMapX + kMapW * 0.5f;
@@ -198,8 +206,9 @@ void Minimap::drawOverlay() {
                 const float relZ = wz - m_cameraState.targetZ;
                 const float rotX = relX * cosA - relZ * sinA;
                 const float rotZ = relX * sinA + relZ * cosA;
-                const int   px   = static_cast<int>(centreX + rotX * scaleX);
-                const int   py   = static_cast<int>(centreZ - rotZ * scaleZ);
+                // Irrlicht LH: camera right = -X, so negate X to keep left/right correct.
+                const int   px   = static_cast<int>(centreX - rotX * scaleX);
+                const int   py   = static_cast<int>(centreZ + rotZ * scaleZ);
                 if (px < kMapX || px >= kMapX + kMapW || py < kMapY || py >= kMapY + kMapH) continue;
                 int r, g, b;
                 switch (tile.zoneType) {
@@ -224,8 +233,8 @@ void Minimap::drawOverlay() {
                 const float relZ = wz - m_cameraState.targetZ;
                 const float rotX = relX * cosA - relZ * sinA;
                 const float rotZ = relX * sinA + relZ * cosA;
-                const int   px   = static_cast<int>(centreX + rotX * scaleX);
-                const int   py   = static_cast<int>(centreZ - rotZ * scaleZ);
+                const int   px   = static_cast<int>(centreX - rotX * scaleX);
+                const int   py   = static_cast<int>(centreZ + rotZ * scaleZ);
                 if (px < kMapX || px >= kMapX + kMapW || py < kMapY || py >= kMapY + kMapH) continue;
                 m_backend->fillColoredRect(px, py, tileW, tileH, 0x7F, 0x8C, 0x8D, 255);
             }
@@ -241,8 +250,8 @@ void Minimap::drawOverlay() {
             const float relZ = wz - m_cameraState.targetZ;
             const float rotX = relX * cosA - relZ * sinA;
             const float rotZ = relX * sinA + relZ * cosA;
-            const int   px   = static_cast<int>(centreX + rotX * scaleX);
-            const int   py   = static_cast<int>(centreZ - rotZ * scaleZ);
+            const int   px   = static_cast<int>(centreX - rotX * scaleX);
+            const int   py   = static_cast<int>(centreZ + rotZ * scaleZ);
             if (px < kMapX || px >= kMapX + kMapW || py < kMapY || py >= kMapY + kMapH) continue;
             int r, g, b;
             switch (sct.coveredBy) {
@@ -265,8 +274,8 @@ void Minimap::drawOverlay() {
             const float relZ = wz - m_cameraState.targetZ;
             const float rotX = relX * cosA - relZ * sinA;
             const float rotZ = relX * sinA + relZ * cosA;
-            const int   px   = static_cast<int>(centreX + rotX * scaleX);
-            const int   py   = static_cast<int>(centreZ - rotZ * scaleZ);
+            const int   px   = static_cast<int>(centreX - rotX * scaleX);
+            const int   py   = static_cast<int>(centreZ + rotZ * scaleZ);
             if (px < kMapX || px >= kMapX + kMapW || py < kMapY || py >= kMapY + kMapH) continue;
             int r, g, b;
             if (seg.speedFraction >= 0.4f) {
@@ -280,7 +289,10 @@ void Minimap::drawOverlay() {
         }
     }
 
-    // North indicator: small white rect at minimap border at yaw_rad from top.
+    // North indicator: small white dot on the minimap border that shows where
+    // world -Z (game north) appears in camera-up view.  At yaw=0 it is at top;
+    // at yaw=+90° (camera facing -X, world -Z = camera right = minimap right) it appears
+    // on the right.  X is negated to match the flipped tile X axis.
     {
         const int nx = static_cast<int>(kMapX + kMapW * 0.5f - 90.f * sinf(yawRad));
         const int ny = static_cast<int>(kMapY + kMapH * 0.5f - 90.f * cosf(yawRad));
@@ -430,11 +442,12 @@ bool Minimap::onEvent(const InputEvent& event) {
                     const float yawRad = m_cameraState.yaw * kDegToRad;
                     const float cosYaw = cosf(yawRad);
                     const float sinYaw = sinf(yawRad);
-                    // Offset from minimap centre
+                    // Inverse of drawing transform (px = centreX - rotX*scaleX, py = centreZ + rotZ*scaleZ).
+                    // rotX = (centreX - px)/scaleX = -offX_raw, so inverse rotation uses -offX_raw.
                     const float offX = (static_cast<float>(mx) - (kMapX + kMapW * 0.5f)) / scaleX;
-                    const float offZ = (kMapY + kMapH * 0.5f - static_cast<float>(my)) / scaleZ;
-                    const float worldOffX = offX * cosYaw + offZ * sinYaw;
-                    const float worldOffZ = -offX * sinYaw + offZ * cosYaw;
+                    const float offZ = (static_cast<float>(my) - (kMapY + kMapH * 0.5f)) / scaleZ;
+                    const float worldOffX = -offX * cosYaw + offZ * sinYaw;
+                    const float worldOffZ =  offX * sinYaw + offZ * cosYaw;
                     m_panCallback(m_cameraState.targetX + worldOffX, m_cameraState.targetZ + worldOffZ);
                 }
             }

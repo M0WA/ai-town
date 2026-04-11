@@ -17,6 +17,7 @@
 //   MM-42:  Element leak regression (5 tests)
 //   MM-43:  Overlay tile rendering (11 tests)
 //   MM-44:  Coordinate mapping direction verification (4 tests)
+//           (East tile appears LEFT of centre — Irrlicht LH: camera right = -X)
 //
 // Mock policy: NiceMock<MockUIBackend> (incidental backend calls), and
 //              NiceMock<MockCitySimulation> for m_sim.
@@ -933,11 +934,13 @@ TEST_F(MinimapOverlayTest, ClickToPan_TopLeftCorner_FiresCallback) {
     m_minimap->show();
 
     // y=881 avoids the Svc button hit area (y:848-880 is consumed by button handler).
-    // offX = (1720 - 1820) / (200/640) = -320, offZ = (980 - 881) / (200/640) = 316.8
-    // panTo(320 + (-320), 320 + 316.8) = (0, 636.8)
+    // offX = (1720 - 1820) / (200/640) = -320
+    // offZ = (881 - 980) / (200/640) = -316.8
+    // Irrlicht LH X-flip: worldOffX = -offX*cosYaw + offZ*sinYaw = 320
+    // panTo(320 + 320, 320 + (-316.8)) = (640, 3.2)
     clickAt(1720, 881);
-    EXPECT_NEAR(receivedWx, 0.f, 0.1f);
-    EXPECT_NEAR(receivedWz, 636.8f, 0.1f);
+    EXPECT_NEAR(receivedWx, 640.f, 0.1f);
+    EXPECT_NEAR(receivedWz, 3.2f, 0.1f);
 }
 
 // ###########################################################################
@@ -1808,10 +1811,11 @@ TEST_F(MinimapOverlayTest, OverlayToggle_ClickActiveTfcButton_Deactivates) {
 // MM-44: Coordinate mapping direction verification
 // ###########################################################################
 
-// A residential tile at grid position (50,51) is one tile north (+Z) of
-// camera target (500,500).  relZ = 51*10 - 500 = 10 > 0.  With the fix,
-// py = 980 - 10*(200/1000) = 978 < 980.  The tile's fillColoredRect
-// y-coordinate must be strictly less than kMapY + 100 = 980.
+// A residential tile at grid position (50,49) is one tile north (-Z direction)
+// of camera target (500,500).  relZ = 49*10 - 500 = -10 < 0.  The camera at
+// yaw=0 looks toward -Z (eye is at larger Z than target), so -Z = forward =
+// "north" in this game.  With py = centreZ + rotZ*scaleZ:
+// py = 980 + (-10)*(200/1000) = 978 < 980.  The tile must appear above centre.
 TEST_F(MinimapOverlayTest, MM44_NorthTileAppearsAboveCentre_Yaw0) {
     QueryResult northTile;
     northTile.isRoad  = false;
@@ -1822,11 +1826,11 @@ TEST_F(MinimapOverlayTest, MM44_NorthTileAppearsAboveCentre_Yaw0) {
     unzoned.isRoad = false;
     unzoned.isZoned = false;
 
-    // 100x100 map; tile (50,51) = one row north of camera target (50,50).
+    // 100x100 map; tile (50,49): relZ = 49*10 - 500 = -10 (in camera look direction).
     ON_CALL(m_sim, getMapTilesX()).WillByDefault(Return(100));
     ON_CALL(m_sim, getMapTilesZ()).WillByDefault(Return(100));
     ON_CALL(m_sim, queryTile(_, _)).WillByDefault(Return(unzoned));
-    ON_CALL(m_sim, queryTile(50, 51)).WillByDefault(Return(northTile));
+    ON_CALL(m_sim, queryTile(50, 49)).WillByDefault(Return(northTile));
 
     CameraState cs;
     cs.targetX     = 500.f;
@@ -1851,9 +1855,10 @@ TEST_F(MinimapOverlayTest, MM44_NorthTileAppearsAboveCentre_Yaw0) {
     EXPECT_LT(northPy, 980) << "North tile must appear above minimap centre";
 }
 
-// A residential tile at (50,49) is one tile south (-Z).  relZ = 49*10 - 500
-// = -10 < 0.  py = 980 - (-10)*(0.2) = 982 > 980.  Y must be strictly
-// greater than 980.
+// A residential tile at (50,51) is one tile south (+Z direction).
+// relZ = 51*10 - 500 = +10 > 0.  +Z is behind the camera at yaw=0.
+// With py = centreZ + rotZ*scaleZ:
+// py = 980 + 10*(200/1000) = 982 > 980.  Y must be strictly greater than 980.
 TEST_F(MinimapOverlayTest, MM44_SouthTileAppearsBelowCentre_Yaw0) {
     QueryResult southTile;
     southTile.isRoad  = false;
@@ -1867,7 +1872,7 @@ TEST_F(MinimapOverlayTest, MM44_SouthTileAppearsBelowCentre_Yaw0) {
     ON_CALL(m_sim, getMapTilesX()).WillByDefault(Return(100));
     ON_CALL(m_sim, getMapTilesZ()).WillByDefault(Return(100));
     ON_CALL(m_sim, queryTile(_, _)).WillByDefault(Return(unzoned));
-    ON_CALL(m_sim, queryTile(50, 49)).WillByDefault(Return(southTile));
+    ON_CALL(m_sim, queryTile(50, 51)).WillByDefault(Return(southTile));
 
     CameraState cs;
     cs.targetX     = 500.f;
@@ -1893,9 +1898,9 @@ TEST_F(MinimapOverlayTest, MM44_SouthTileAppearsBelowCentre_Yaw0) {
 }
 
 // A residential tile at (51,50) is one tile east (+X).  relX = 51*10 - 500
-// = 10 > 0.  px = 1820 + 10*0.2 = 1822 > 1820.  X must be strictly greater
-// than 1820.
-TEST_F(MinimapOverlayTest, MM44_EastTileAppearsRightOfCentre_Yaw0) {
+// = 10 > 0.  Irrlicht LH: camera right = -X, so world +X = camera-LEFT.
+// px = 1820 - 10*0.2 = 1818 < 1820.  X must be strictly less than 1820.
+TEST_F(MinimapOverlayTest, MM44_EastTileAppearsLeftOfCentre_Yaw0) {
     QueryResult eastTile;
     eastTile.isRoad  = false;
     eastTile.isZoned = true;
@@ -1930,11 +1935,14 @@ TEST_F(MinimapOverlayTest, MM44_EastTileAppearsRightOfCentre_Yaw0) {
     m_minimap->drawOverlay();
 
     ASSERT_NE(eastPx, -1) << "No residential tile rendered";
-    EXPECT_GT(eastPx, 1820) << "East tile must appear right of minimap centre";
+    EXPECT_LT(eastPx, 1820) << "East tile (+X = camera-left in Irrlicht LH) must appear left of minimap centre";
 }
 
 // A click at (1820, 975) -- 5 pixels above minimap centre (centreY=980) --
-// with yaw=0 should pan to a world Z greater than 500.f (north is +Z).
+// with yaw=0 should pan to a world Z less than 500.f.  The camera at yaw=0
+// looks toward -Z (smaller Z = forward = top of minimap), so clicking above
+// centre moves the camera in the -Z direction.
+// offZ = (975 - 980) / scaleZ = -5/0.2 = -25; panToZ = 500 - 25 = 475.
 TEST_F(MinimapOverlayTest, MM44_ClickToPan_AboveCentre_PansNorth_Yaw0) {
     ON_CALL(m_sim, getMapTilesX()).WillByDefault(Return(100));
     ON_CALL(m_sim, getMapTilesZ()).WillByDefault(Return(100));
@@ -1955,8 +1963,8 @@ TEST_F(MinimapOverlayTest, MM44_ClickToPan_AboveCentre_PansNorth_Yaw0) {
     clickAt(1820, 975);
 
     ASSERT_NE(panToZ, -1.f) << "Pan callback not called";
-    EXPECT_GT(panToZ, 500.f)
-        << "Clicking above minimap centre should pan camera northward (+Z)";
+    EXPECT_LT(panToZ, 500.f)
+        << "Clicking above minimap centre (forward direction) pans toward -Z";
     EXPECT_NEAR(panToX, 500.f, 1.0f)
         << "Clicking at centreX should not pan horizontally";
 }

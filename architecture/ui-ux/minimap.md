@@ -6,25 +6,38 @@
   **Coordinate mapping** (Phase 11q7): The minimap is camera-centred and camera-following.
 
   - **Camera target = minimap centre**: `(targetX, targetZ)` always maps to pixel
-    `(kMapX + 100, kMapY + 100)`. Tiles are expressed relative to the camera target
-    and rotated by `yaw_rad` so the camera's forward direction points toward the
-    top of the minimap.
+    `(kMapX + 100, kMapY + 100)`. The minimap is **camera-up**: the camera's look
+    direction is always at the top. The camera eye sits at larger Z than the target
+    (look direction = −Z at yaw=0), so −Z is "game north" (forward direction).
+    Tiles are expressed relative to the camera target and rotated by `yaw_rad` so the
+    camera's look direction stays at the top as the camera yaws.
   - **World extents**: `worldW = getMapTilesX() × kTileSize` (metres); `worldD = getMapTilesZ() × kTileSize` (metres). `kTileSize = 10.0f` m/tile is a compile-time constant local to `Minimap.cpp`.
   - **Scale**: `scaleX = kMapW / worldW` px/m; `scaleZ = kMapH / worldD` px/m.
   - **Per-tile pixel position**:
 
     ```text
     relX = wx - targetX;  relZ = wz - targetZ          (world-space offset from target)
-    rotX = relX * cos(yaw_rad) - relZ * sin(yaw_rad)    (rotate world so cam-fwd = up)
+    rotX = relX * cos(yaw_rad) - relZ * sin(yaw_rad)    (camera-up rotation)
     rotZ = relX * sin(yaw_rad) + relZ * cos(yaw_rad)
-    px   = kMapX + 100 + rotX * scaleX
-    py   = kMapY + 100 - rotZ * scaleZ
+    px   = kMapX + 100 - rotX * scaleX      (negated: Irrlicht LH camera right = −X)
+    py   = kMapY + 100 + rotZ * scaleZ
     ```
 
+    **Irrlicht LH X-axis note**: In Irrlicht's left-handed coordinate system the view
+    matrix uses `xaxis = normalize(up × forward)`. When the camera looks in the −Z
+    direction (yaw=0), this gives `xaxis = −X`, meaning world +X is screen-LEFT.
+    Negating the `px` formula corrects the horizontal orientation so that tiles to the
+    camera's right appear on the right side of the minimap.
+
+    With this formula: forward tiles have `relZ < 0` at yaw=0 → `rotZ < 0` →
+    `py < centreY` (above centre = top). ✓
     Tiles outside `[kMapX, kMapX+kMapW) × [kMapY, kMapY+kMapH)` are culled.
-  - **North indicator**: A small "N" marker rendered at the minimap border at angle
-    `yaw_rad` from the top: pixel `(kMapX + 100 − 90·sin(yaw_rad), kMapY + 100 − 90·cos(yaw_rad))`.
-    This gives the player an absolute bearing reference as the camera rotates.
+  - **North indicator**: A small marker rendered at the minimap border tracking the
+    fixed −Z world direction (game north) on the rotating minimap:
+    pixel `(kMapX + 100 − 90·sin(yaw_rad), kMapY + 100 − 90·cos(yaw_rad))`.
+    (X-negated to match the flipped px formula.)
+    At yaw=0 it is at the top-centre (north = camera look direction); as the camera
+    yaws the marker orbits the minimap border to show where north is in the rotated view.
   - **Viewport indicator**: Always centred at `(kMapX+100, kMapY+100)` — no translation
     needed since camera target is always the minimap centre. **Side length**:
     `side = 200 × (zoomDistance / CameraController::kMaxZoomDistance)`, clamped to [8, 190] px.
@@ -32,14 +45,15 @@
     after zone/road tile colours: top strip, bottom strip, left strip, right strip —
     all at `rgba(255, 255, 255, 200)`. `m_viewportRect` is no longer a persistent GUI
     element as of Phase 11p; the viewport indicator is fully transient.
-  - **Click-to-pan**: Offset from minimap centre converted to metres, then rotated
-    by `+yaw_rad` to recover world-space offset from camera target:
+  - **Click-to-pan**: Offset from minimap centre converted to rotated metres, then
+    inverse-rotated to recover world-space offset from camera target.
+    `offX` is negated before the inverse rotation to compensate for the px X-flip:
 
     ```text
     offX      = (clickX - (kMapX+100)) / scaleX
-    offZ      = ((kMapY+100) - clickY) / scaleZ
-    worldOffX =  offX * cos(yaw_rad) + offZ * sin(yaw_rad)
-    worldOffZ = -offX * sin(yaw_rad) + offZ * cos(yaw_rad)
+    offZ      = (clickY - (kMapY+100)) / scaleZ
+    worldOffX = -offX * cos(yaw_rad) + offZ * sin(yaw_rad)
+    worldOffZ =  offX * sin(yaw_rad) + offZ * cos(yaw_rad)
     panTo(targetX + worldOffX, targetZ + worldOffZ)
     ```
 
@@ -47,7 +61,7 @@
     `CameraController`; Minimap accesses it via the class name (no instance required).
 - **Interaction**: Click-to-pan camera to clicked minimap position
 - **Overlay toggle**: An extensible icon-button row on the minimap border; **one button per overlay type** (radio behavior — only one overlay active at a time; clicking active overlay deactivates it). For V1 with Service Coverage and Traffic Congestion overlays, the row has two icon buttons plus the implicit "off" state. This architecture scales to additional overlays (demand heat map, etc.) without UX redesign.
-  - **Toggle button position**: The overlay toggle row is anchored to the **top edge of the minimap**. The minimap occupies virtual bounds x: 1720–1920 px, y: 880–1080 px (bottom-right corner). The **full overlay toggle row** spans virtual x: 1576–1752 px, y: 848–880 px (supporting up to 4 overlay buttons). The rightmost button (first, e.g. Service Coverage) sits at x: 1720–1752 px; additional overlay buttons extend leftward from x:1720 (each 32×32 px with 4 px gap between buttons). **Up to 4 overlay toggle buttons are supported; each button is 32 px wide with 4 px gap; the leftmost button's left edge is no further left than x: 1576 (= 1720 − 4 × (32+4)). The full overlay toggle row occupies x: 1576–1752, y: 848–880 px. The input-arbitration widget footprint for the minimap widget is **dynamic**: when no overlay is active it spans (x: 1576–1920, y: 848–1080); when any overlay is active it expands upward to (x: 1576–1920, y: 732–1080) to cover the legend panel (y:732–832) and label strip (y:832–848). `Minimap::getWidgetFootprint()` returns the correct current footprint (computed from `m_overlayActive`); UIManager must call `getWidgetFootprint()` each frame to keep arbitration bounds in sync with overlay state. The `kMinimapWidgetTop` (y:848, no overlay) and `kMinimapWidgetTopOverlayActive` (y:732, overlay active) constants in `ui_constants.h` encode these two Y values.**
+  - **Toggle button position**: The overlay toggle row is anchored to the **top edge of the minimap**. The minimap occupies virtual bounds x: 1720–1920 px, y: 880–1080 px (bottom-right corner). The **full overlay toggle row** spans virtual x: 1576–1752 px, y: 848–880 px (supporting up to 4 overlay buttons). The rightmost button (first, e.g. Service Coverage) sits at x: 1720–1752 px; additional overlay buttons extend leftward from x:1720 (each 32×32 px with 4 px gap between buttons). **Up to 4 overlay toggle buttons are supported; each button is 32 px wide with 4 px gap; the leftmost button's left edge is no further left than x: 1576 (= 1720 − 4 × (32+4)). The full overlay toggle row occupies x: 1576–1752, y: 848–880 px. The input-arbitration widget footprint for the minimap widget is dynamic: when no overlay is active it spans (x: 1576–1920, y: 848–1080); when any overlay is active it expands upward to (x: 1576–1920, y: 732–1080) to cover the legend panel (y:732–832) and label strip (y:832–848). `Minimap::getWidgetFootprint()` returns the correct current footprint (computed from `m_overlayActive`); UIManager must call `getWidgetFootprint()` each frame to keep arbitration bounds in sync with overlay state. The `kMinimapWidgetTop` (y:848, no overlay) and `kMinimapWidgetTopOverlayActive` (y:732, overlay active) constants in `ui_constants.h` encode these two Y values.**
   - Active button state: filled icon with accent color border. Inactive: outline icon, no border. States defined in UI sprite sheet.
   - When an overlay is active: a **label strip** (16 px tall) appears **immediately above the toggle row** at virtual y: 832–848 px (overlay name, left-aligned to x:1720), and a **legend panel** (200×100 px) is anchored **above the label strip** at virtual x: 1720–1920, y: **732–832 px** (100 px tall, positioned immediately above the label strip at y:832). The legend panel spans the full minimap width (x: 1720–1920) and is positioned immediately below the minimap render area's chrome stack (above the label strip). This placement keeps the legend clear of the minimap (y:880–1080), toggle row (y:848–880), and label strip (y:832–848). **Do NOT anchor the legend inside the minimap bounds** (y:880–1080) — this causes visual overlap with the city map tiles. The legend panel dynamically updates to show data for whichever overlay is currently active (Service Coverage or Traffic Congestion), displaying category colors with text labels (8×8 px color swatch and text label per category).
   - **Service Coverage overlay**: Covered tiles receive a colour tint according to the active
