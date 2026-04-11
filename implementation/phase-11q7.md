@@ -1,6 +1,6 @@
 ## Phase 11q7: Service-Building UAF Segfault + Wire LODNode::update() + Minimap 180° Rotation Fix
 
-**Status: IN_PROGRESS**
+**Status: DONE**
 
 **Prerequisite**: phase-11q6 merged.
 
