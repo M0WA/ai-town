@@ -305,7 +305,7 @@ been moved into the appropriate semantically correct test file.
 | Topic | Target file |
 |---|---|
 | Hotkeys, toolbar, hover, overlay, query tool, `getActiveTool`, drag, sub-panel | `tests/ui/world_interaction_test.cpp` |
-| Demolish with confirm modal | `tests/ui/world_interaction_test.cpp` |
+| Demolish drag-select (anchor, preview, commit, empty-skip, tool-isolation) | `tests/ui/demolition_input_test.cpp` |
 | Escape from Paused / MainMenu | `tests/ui/world_interaction_test.cpp` |
 | `consumeStartGameRequest` via `update()` | `tests/ui/world_interaction_test.cpp` (`ValidHandleWorldInteractionTest`) |
 | `ForcedLoanIssued` notification dialog | `tests/ui/notification_system_test.cpp` |
