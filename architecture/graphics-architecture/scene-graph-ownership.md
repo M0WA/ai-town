@@ -597,6 +597,12 @@ stable integer ID assigned by the traffic simulation for the vehicle's lifetime.
 `destroyTileNode(tileX, tileZ)` is the canonical eviction helper for building
 (and road-tile) scene nodes stored in `m_buildingNodes`. Its contract is:
 
+0. **Grab the shared mesh** — obtain the `IMesh*` (or `IAnimatedMesh*`) via
+   `lodNode->getMeshNode()->getMesh()` and call `mesh->grab()`. This increments
+   the Irrlicht reference count, preventing the mesh cache from freeing the shared
+   `CSkinnedMesh` (or equivalent) while the scene node is being torn down in the
+   steps below. `LODNode::getMeshNode()` returns the underlying `IMeshSceneNode*`
+   and was added as an accessor in phase-11q7 (Issue 1).
 1. Look up the `LODNode*` in `m_buildingNodes` by `(tileX, tileZ)`. If not found,
    return immediately (no-op — caller may safely call on an absent tile).
 2. Iterate all material slots on the underlying scene node — for every texture unit
@@ -613,6 +619,9 @@ stable integer ID assigned by the traffic simulation for the vehicle's lifetime.
    line; the scene manager may destroy it immediately.
 5. `delete lodNode` — free the `LODNode*` C++ wrapper. The wrapper is non-owning
    after `node->remove()` (the Irrlicht scene manager released the node).
+5.5. **Drop the mesh grab** — call `mesh->drop()` to release the temporary reference
+   acquired in step 0. The mesh cache may now free the mesh if no other owners hold
+   a reference; this is safe because the scene node was already removed in step 4.
 6. Erase the entry from `m_buildingNodes`.
 
 **TextureCache integration**: after one or more `destroyTileNode()` calls, the
@@ -876,13 +885,17 @@ on a clean slate without reinitializing the renderer or device.
 
 `clearCity()` performs the following steps in order:
 
-1. **Evict building nodes**: iterate `m_buildingNodes`, perform the full node eviction
-   sequence on each entry — (1) clear all material texture slots (iterate
-   `mat.setTexture(t, nullptr)` for each texture unit), (2) call
-   `m_driver->setMaterial(SMaterial{})` to flush the driver state, (3) call
-   `node->remove()`, (4) `delete kv.second` to free the `LODNode*` C++ wrapper (building
-   nodes are wrapped in `LODNode`; the wrapper is heap-allocated by `placeBuildingMesh` and
-   not reference-counted — it must be `delete`d explicitly after `node->remove()`). Call
+1. **Evict building nodes**: iterate `m_buildingNodes` via `evictLODNodeRegistry()`
+   (see §Helper Functions below), which calls `evictOneLODNode()` for each entry.
+   `evictOneLODNode()` applies the full grab/drop-guarded eviction sequence: (0) grab
+   the shared mesh via `lodNode->getMeshNode()->getMesh()->grab()` before touching
+   materials, (1) clear all material texture slots (`mat.setTexture(t, nullptr)` for
+   each texture unit), (2) `m_driver->setMaterial(SMaterial{})` to flush driver state,
+   (3) `node->remove()`, (4) `delete kv.second` to free the `LODNode*` C++ wrapper
+   (heap-allocated by `placeBuildingMesh`, not reference-counted — must be `delete`d
+   explicitly after `node->remove()`), (5.5) `mesh->drop()` to release the temporary
+   grab. This matches the Tile Node Eviction Sequence contract (see §Tile Node Eviction
+   Sequence) and prevents UAF when multiple tile nodes share a cached `.b3d` mesh. Call
    `m_buildingNodes.clear()` once after the loop to drop all now-dangling map entries.
    **Do NOT call `destroyTileNode()` during the iteration** — that method erases from the
    map internally, causing iterator invalidation on `std::unordered_map`. Use the
@@ -938,6 +951,25 @@ pool and are **not** present in node material slots. No `releaseLinear()` call i
 building material slots either, since buildings use sRGB atlas textures (not the linear pool).
 See `architecture/graphics-architecture/texture-cache.md §Eviction safety` for the full
 per-pool release contract.
+
+### Helper Functions
+
+Two private helpers encapsulate the per-node and bulk eviction logic to avoid duplicating
+the grab/drop-guarded sequence in `destroyTileNode()` and `clearCity()`:
+
+- **`evictOneLODNode(LODNode* lodNode)`** — removes a single building LOD node from
+  the scene graph using the full grab/drop-guarded eviction contract from
+  §Tile Node Eviction Sequence: grabs the shared mesh, clears all material texture
+  slots, flushes the driver material state, calls `node->remove()`, deletes the
+  `LODNode*` wrapper, then drops the mesh. Called by `destroyTileNode()` for
+  on-demand per-tile demolition and by the bulk-eviction path in `clearCity()`.
+
+- **`evictLODNodeRegistry()`** — iterates the building LOD node registry
+  (`m_buildingNodes`) and calls `evictOneLODNode()` for every entry, then calls
+  `m_buildingNodes.clear()` to drop all now-dangling map entries. Used by
+  `clearCity()` to bulk-evict all building nodes at once without triggering iterator
+  invalidation (direct per-entry erasure inside the loop is forbidden — see step 1
+  of the Contract above).
 
 ### Call Site
 
