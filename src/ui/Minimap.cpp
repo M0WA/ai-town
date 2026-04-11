@@ -174,8 +174,8 @@ void Minimap::drawOverlay() {
 
     static constexpr float kDegToRad = 3.14159265f / 180.0f;
     const float yawRad  = m_cameraState.yaw * kDegToRad;
-    const float cosA    = cosf(-yawRad);   // negative: counter-rotate world beneath camera
-    const float sinA    = sinf(-yawRad);
+    const float cosA    = cosf(yawRad);    // cos is even: cosf(-yawRad) == cosf(yawRad)
+    const float sinA    = sinf(yawRad);    // removed negation: counter-rotates world correctly
     const float scaleX  = static_cast<float>(kMapW) / worldW;   // px/m
     const float scaleZ  = static_cast<float>(kMapH) / worldD;
     const float centreX = kMapX + kMapW * 0.5f;
@@ -193,7 +193,7 @@ void Minimap::drawOverlay() {
                 const float rotX = relX * cosA - relZ * sinA;
                 const float rotZ = relX * sinA + relZ * cosA;
                 const int   px   = static_cast<int>(centreX + rotX * scaleX);
-                const int   py   = static_cast<int>(centreZ + rotZ * scaleZ);
+                const int   py   = static_cast<int>(centreZ - rotZ * scaleZ);
                 if (px < kMapX || px >= kMapX + kMapW || py < kMapY || py >= kMapY + kMapH) continue;
                 int r, g, b;
                 switch (tile.zoneType) {
@@ -219,7 +219,7 @@ void Minimap::drawOverlay() {
                 const float rotX = relX * cosA - relZ * sinA;
                 const float rotZ = relX * sinA + relZ * cosA;
                 const int   px   = static_cast<int>(centreX + rotX * scaleX);
-                const int   py   = static_cast<int>(centreZ + rotZ * scaleZ);
+                const int   py   = static_cast<int>(centreZ - rotZ * scaleZ);
                 if (px < kMapX || px >= kMapX + kMapW || py < kMapY || py >= kMapY + kMapH) continue;
                 m_backend->fillColoredRect(px, py, tileW, tileH, 0x7F, 0x8C, 0x8D, 255);
             }
@@ -236,7 +236,7 @@ void Minimap::drawOverlay() {
             const float rotX = relX * cosA - relZ * sinA;
             const float rotZ = relX * sinA + relZ * cosA;
             const int   px   = static_cast<int>(centreX + rotX * scaleX);
-            const int   py   = static_cast<int>(centreZ + rotZ * scaleZ);
+            const int   py   = static_cast<int>(centreZ - rotZ * scaleZ);
             if (px < kMapX || px >= kMapX + kMapW || py < kMapY || py >= kMapY + kMapH) continue;
             int r, g, b;
             switch (sct.coveredBy) {
@@ -260,7 +260,7 @@ void Minimap::drawOverlay() {
             const float rotX = relX * cosA - relZ * sinA;
             const float rotZ = relX * sinA + relZ * cosA;
             const int   px   = static_cast<int>(centreX + rotX * scaleX);
-            const int   py   = static_cast<int>(centreZ + rotZ * scaleZ);
+            const int   py   = static_cast<int>(centreZ - rotZ * scaleZ);
             if (px < kMapX || px >= kMapX + kMapW || py < kMapY || py >= kMapY + kMapH) continue;
             int r, g, b;
             if (seg.speedFraction >= 0.4f) {
@@ -276,7 +276,7 @@ void Minimap::drawOverlay() {
 
     // North indicator: small white rect at minimap border at yaw_rad from top.
     {
-        const int nx = static_cast<int>(kMapX + kMapW * 0.5f + 90.f * sinf(yawRad));
+        const int nx = static_cast<int>(kMapX + kMapW * 0.5f - 90.f * sinf(yawRad));
         const int ny = static_cast<int>(kMapY + kMapH * 0.5f - 90.f * cosf(yawRad));
         m_backend->fillColoredRect(nx - 3, ny - 3, 6, 6, 255, 255, 255, 220);
     }
@@ -426,7 +426,7 @@ bool Minimap::onEvent(const InputEvent& event) {
                     const float sinYaw = sinf(yawRad);
                     // Offset from minimap centre
                     const float offX = (static_cast<float>(mx) - (kMapX + kMapW * 0.5f)) / scaleX;
-                    const float offZ = (static_cast<float>(my) - (kMapY + kMapH * 0.5f)) / scaleZ;
+                    const float offZ = (kMapY + kMapH * 0.5f - static_cast<float>(my)) / scaleZ;
                     const float worldOffX = offX * cosYaw + offZ * sinYaw;
                     const float worldOffZ = -offX * sinYaw + offZ * cosYaw;
                     m_panCallback(m_cameraState.targetX + worldOffX, m_cameraState.targetZ + worldOffZ);

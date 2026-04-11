@@ -205,17 +205,21 @@ void IrrlichtRenderer::evictOneLODNode(LODNode* lodNode) {
     if (!lodNode) return;
     irr::scene::ISceneNode* node = lodNode->getNode();
     if (node) {
-        // Step 1: clear material texture slots.
+        // Grab the current mesh — same shared-mesh fix as destroyTileNode (Issue 2).
+        irr::scene::IMesh* sharedMesh = lodNode->getMeshNode()
+                                        ? lodNode->getMeshNode()->getMesh() : nullptr;
+        if (sharedMesh) sharedMesh->grab();
+
         for (irr::u32 m = 0; m < node->getMaterialCount(); ++m) {
             irr::video::SMaterial& mat = node->getMaterial(m);
             for (irr::u32 t = 0; t < irr::video::MATERIAL_MAX_TEXTURES; ++t) {
                 mat.setTexture(t, nullptr);
             }
         }
-        // Step 2: flush driver last-bound state.
         if (m_driver) m_driver->setMaterial(irr::video::SMaterial{});
-        // Step 3: remove from scene graph.
-        node->remove();
+        node->remove();  // mesh ref held by grab above
+
+        if (sharedMesh) sharedMesh->drop();
     }
 }
 
@@ -1431,6 +1435,17 @@ void IrrlichtRenderer::destroyTileNode(
     scene::ISceneNode* node = lodNode->getNode();
 
     if (node && m_driver) {
+        // Grab the current mesh before clearing materials and removing the node.
+        // Prevents the Irrlicht mesh cache from evicting the shared CSkinnedMesh
+        // between the node->remove() call (which fires CMeshSceneNode destructor →
+        // Mesh->drop()) and any subsequent cache-maintenance path that would drop
+        // the last cache reference to zero — freeing the mesh while other
+        // CMeshSceneNode instances at different tiles still reference the same
+        // B3D asset. Pattern mirrors despawnVehicleAgent (phase-11q6 shared-mesh fix).
+        scene::IMesh* sharedMesh = lodNode->getMeshNode()
+                                   ? lodNode->getMeshNode()->getMesh() : nullptr;
+        if (sharedMesh) sharedMesh->grab();
+
         // Step 1: clear material texture slots.
         u32 matCount = node->getMaterialCount();
         for (u32 m = 0; m < matCount; ++m) {
@@ -1441,8 +1456,12 @@ void IrrlichtRenderer::destroyTileNode(
         }
         // Step 2: flush driver last-bound state.
         m_driver->setMaterial(SMaterial{});
-        // Step 3 + 4: remove the scene node.
+        // Step 3: remove the scene node — mesh ref-count held by grab above.
         node->remove();  // do NOT access node* after this
+
+        // Release the grab; mesh stays alive as long as the cache or any other
+        // CMeshSceneNode instance still holds a reference.
+        if (sharedMesh) sharedMesh->drop();
     }
 
     // Erase destroys the unique_ptr, which deletes the LODNode wrapper.
@@ -2991,26 +3010,34 @@ void IrrlichtRenderer::initCloudPlane()
 // -------------------------------------------------------------------------
 void IrrlichtRenderer::update(float dt)
 {
-    if (!m_cloudNode) return;
+    // Cloud UV scroll + cloud dome repositioning.
+    if (m_cloudNode) {
+        constexpr float kCloudScrollX = 0.002f;
+        constexpr float kCloudScrollZ = 0.0008f;
 
-    constexpr float kCloudScrollX = 0.002f;
-    constexpr float kCloudScrollZ = 0.0008f;
+        m_cloudUVOffset.X = std::fmod(m_cloudUVOffset.X + kCloudScrollX * dt, 1.0f);
+        m_cloudUVOffset.Y = std::fmod(m_cloudUVOffset.Y + kCloudScrollZ * dt, 1.0f);
 
-    m_cloudUVOffset.X = std::fmod(m_cloudUVOffset.X + kCloudScrollX * dt, 1.0f);
-    m_cloudUVOffset.Y = std::fmod(m_cloudUVOffset.Y + kCloudScrollZ * dt, 1.0f);
+        m_cloudNode->getMaterial(0)
+            .getTextureMatrix(0)
+            .setTextureTranslate(m_cloudUVOffset.X, m_cloudUVOffset.Y);
 
-    m_cloudNode->getMaterial(0)
-        .getTextureMatrix(0)
-        .setTextureTranslate(m_cloudUVOffset.X, m_cloudUVOffset.Y);
+        if (m_camera) {
+            const core::vector3df camPos = m_camera->getPosition();
+            m_cloudNode->setPosition(camPos);
+        }
+    }
 
-    // Node tracks full camera position (X, Y, Z) so dome stays centred on camera at all heights.
-    // m_lastCameraPosition is updated by setCamera() every frame before update() runs.
+    // LOD update for all building nodes (zone buildings + service buildings).
+    // Called once per frame before beginFrame() so mesh swaps complete before
+    // drawAll() starts. m_camera may be null before the first setCamera() call.
+    // m_vehicleNodes are LOD0-only (no lod1/lod2) — not iterated here.
+    // m_roadNodes use swapMeshRaw() from the road-placement path — not iterated here.
     if (m_camera) {
-        const core::vector3df camPos = m_camera->getPosition();
-        // Node tracks full camera XYZ — dome stays centred on camera at all heights.
-        // The vertex shader uses gl_Vertex.y directly (already cam-relative local
-        // space) so no per-frame camera-Y uniform is needed.
-        m_cloudNode->setPosition(camPos);
+        const core::vector3df camPos = m_camera->getAbsolutePosition();
+        for (auto& kv : m_buildingNodes) {
+            if (kv.second) kv.second->update(camPos);
+        }
     }
 }
 

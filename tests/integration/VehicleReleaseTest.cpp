@@ -14,6 +14,7 @@
 
 #include "AudioSystem.h"
 #include "ManualClock.h"
+#include "PlatformUtils.h"
 #include "simulation_types.h"
 
 #include <thread>
@@ -47,6 +48,7 @@ protected:
     std::unique_ptr<AudioSystem> audio_;
 
     void SetUp() override {
+        setAssetsDir(resolveAssetsDir());
         try {
             audio_ = std::make_unique<AudioSystem>(nullptr, &clock_, nullptr);
         } catch (const std::exception& e) {

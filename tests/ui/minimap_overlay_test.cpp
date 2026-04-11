@@ -16,6 +16,7 @@
 //   MM-41:  Input footprint (8 tests)
 //   MM-42:  Element leak regression (5 tests)
 //   MM-43:  Overlay tile rendering (11 tests)
+//   MM-44:  Coordinate mapping direction verification (4 tests)
 //
 // Mock policy: NiceMock<MockUIBackend> (incidental backend calls), and
 //              NiceMock<MockCitySimulation> for m_sim.
@@ -926,11 +927,11 @@ TEST_F(MinimapOverlayTest, ClickToPan_TopLeftCorner_FiresCallback) {
     m_minimap->show();
 
     // y=881 avoids the Svc button hit area (y:848-880 is consumed by button handler).
-    // offX = (1720 - 1820) / (200/640) = -320, offZ = (881 - 980) / (200/640) = -316.8
-    // panTo(320 + (-320), 320 + (-316.8)) = (0, 3.2)
+    // offX = (1720 - 1820) / (200/640) = -320, offZ = (980 - 881) / (200/640) = 316.8
+    // panTo(320 + (-320), 320 + 316.8) = (0, 636.8)
     clickAt(1720, 881);
     EXPECT_NEAR(receivedWx, 0.f, 0.1f);
-    EXPECT_NEAR(receivedWz, 3.2f, 0.1f);
+    EXPECT_NEAR(receivedWz, 636.8f, 0.1f);
 }
 
 // ###########################################################################
@@ -1795,4 +1796,161 @@ TEST_F(MinimapOverlayTest, OverlayToggle_ClickActiveTfcButton_Deactivates) {
 
     clickAt(1700, 864);  // click active Tfc button again → deactivates
     EXPECT_FALSE(m_minimap->isOverlayActive());
+}
+
+// ###########################################################################
+// MM-44: Coordinate mapping direction verification
+// ###########################################################################
+
+// A residential tile at grid position (50,51) is one tile north (+Z) of
+// camera target (500,500).  relZ = 51*10 - 500 = 10 > 0.  With the fix,
+// py = 980 - 10*(200/1000) = 978 < 980.  The tile's fillColoredRect
+// y-coordinate must be strictly less than kMapY + 100 = 980.
+TEST_F(MinimapOverlayTest, MM44_NorthTileAppearsAboveCentre_Yaw0) {
+    QueryResult northTile;
+    northTile.isRoad  = false;
+    northTile.isZoned = true;
+    northTile.zoneType = ZoneType::Residential;
+
+    QueryResult unzoned;
+    unzoned.isRoad = false;
+    unzoned.isZoned = false;
+
+    // 100x100 map; tile (50,51) = one row north of camera target (50,50).
+    ON_CALL(m_sim, getMapTilesX()).WillByDefault(Return(100));
+    ON_CALL(m_sim, getMapTilesZ()).WillByDefault(Return(100));
+    ON_CALL(m_sim, queryTile(_, _)).WillByDefault(Return(unzoned));
+    ON_CALL(m_sim, queryTile(50, 51)).WillByDefault(Return(northTile));
+
+    CameraState cs;
+    cs.targetX     = 500.f;
+    cs.targetZ     = 500.f;
+    cs.yaw         = 0.f;
+    cs.zoomDistance = 100.f;
+    m_minimap->setCameraState(cs);
+    m_minimap->show();
+    m_minimap->onBudgetTicks(1);
+    m_minimap->draw();
+
+    int northPy = -1;
+    allowAllFillColoredRect();
+    EXPECT_CALL(m_backend, fillColoredRect(_, _, _, _, 0x27, 0xAE, 0x60, 255))
+        .Times(AtLeast(1))
+        .WillRepeatedly([&](int /*x*/, int y, int, int, int, int, int, int) {
+            northPy = y;
+        });
+    m_minimap->drawOverlay();
+
+    ASSERT_NE(northPy, -1) << "No residential tile rendered";
+    EXPECT_LT(northPy, 980) << "North tile must appear above minimap centre";
+}
+
+// A residential tile at (50,49) is one tile south (-Z).  relZ = 49*10 - 500
+// = -10 < 0.  py = 980 - (-10)*(0.2) = 982 > 980.  Y must be strictly
+// greater than 980.
+TEST_F(MinimapOverlayTest, MM44_SouthTileAppearsBelowCentre_Yaw0) {
+    QueryResult southTile;
+    southTile.isRoad  = false;
+    southTile.isZoned = true;
+    southTile.zoneType = ZoneType::Residential;
+
+    QueryResult unzoned;
+    unzoned.isRoad = false;
+    unzoned.isZoned = false;
+
+    ON_CALL(m_sim, getMapTilesX()).WillByDefault(Return(100));
+    ON_CALL(m_sim, getMapTilesZ()).WillByDefault(Return(100));
+    ON_CALL(m_sim, queryTile(_, _)).WillByDefault(Return(unzoned));
+    ON_CALL(m_sim, queryTile(50, 49)).WillByDefault(Return(southTile));
+
+    CameraState cs;
+    cs.targetX     = 500.f;
+    cs.targetZ     = 500.f;
+    cs.yaw         = 0.f;
+    cs.zoomDistance = 100.f;
+    m_minimap->setCameraState(cs);
+    m_minimap->show();
+    m_minimap->onBudgetTicks(1);
+    m_minimap->draw();
+
+    int southPy = -1;
+    allowAllFillColoredRect();
+    EXPECT_CALL(m_backend, fillColoredRect(_, _, _, _, 0x27, 0xAE, 0x60, 255))
+        .Times(AtLeast(1))
+        .WillRepeatedly([&](int /*x*/, int y, int, int, int, int, int, int) {
+            southPy = y;
+        });
+    m_minimap->drawOverlay();
+
+    ASSERT_NE(southPy, -1) << "No residential tile rendered";
+    EXPECT_GT(southPy, 980) << "South tile must appear below minimap centre";
+}
+
+// A residential tile at (51,50) is one tile east (+X).  relX = 51*10 - 500
+// = 10 > 0.  px = 1820 + 10*0.2 = 1822 > 1820.  X must be strictly greater
+// than 1820.
+TEST_F(MinimapOverlayTest, MM44_EastTileAppearsRightOfCentre_Yaw0) {
+    QueryResult eastTile;
+    eastTile.isRoad  = false;
+    eastTile.isZoned = true;
+    eastTile.zoneType = ZoneType::Residential;
+
+    QueryResult unzoned;
+    unzoned.isRoad = false;
+    unzoned.isZoned = false;
+
+    ON_CALL(m_sim, getMapTilesX()).WillByDefault(Return(100));
+    ON_CALL(m_sim, getMapTilesZ()).WillByDefault(Return(100));
+    ON_CALL(m_sim, queryTile(_, _)).WillByDefault(Return(unzoned));
+    ON_CALL(m_sim, queryTile(51, 50)).WillByDefault(Return(eastTile));
+
+    CameraState cs;
+    cs.targetX     = 500.f;
+    cs.targetZ     = 500.f;
+    cs.yaw         = 0.f;
+    cs.zoomDistance = 100.f;
+    m_minimap->setCameraState(cs);
+    m_minimap->show();
+    m_minimap->onBudgetTicks(1);
+    m_minimap->draw();
+
+    int eastPx = -1;
+    allowAllFillColoredRect();
+    EXPECT_CALL(m_backend, fillColoredRect(_, _, _, _, 0x27, 0xAE, 0x60, 255))
+        .Times(AtLeast(1))
+        .WillRepeatedly([&](int x, int /*y*/, int, int, int, int, int, int) {
+            eastPx = x;
+        });
+    m_minimap->drawOverlay();
+
+    ASSERT_NE(eastPx, -1) << "No residential tile rendered";
+    EXPECT_GT(eastPx, 1820) << "East tile must appear right of minimap centre";
+}
+
+// A click at (1820, 975) -- 5 pixels above minimap centre (centreY=980) --
+// with yaw=0 should pan to a world Z greater than 500.f (north is +Z).
+TEST_F(MinimapOverlayTest, MM44_ClickToPan_AboveCentre_PansNorth_Yaw0) {
+    ON_CALL(m_sim, getMapTilesX()).WillByDefault(Return(100));
+    ON_CALL(m_sim, getMapTilesZ()).WillByDefault(Return(100));
+
+    CameraState cs;
+    cs.targetX     = 500.f;
+    cs.targetZ     = 500.f;
+    cs.yaw         = 0.f;
+    cs.zoomDistance = 100.f;
+    m_minimap->setCameraState(cs);
+    m_minimap->show();
+
+    float panToX = -1.f;
+    float panToZ = -1.f;
+    m_minimap->setPanCallback([&](float x, float z) { panToX = x; panToZ = z; });
+
+    // Click 5 pixels above centre (centreY=980 -> click at y=975).
+    clickAt(1820, 975);
+
+    ASSERT_NE(panToZ, -1.f) << "Pan callback not called";
+    EXPECT_GT(panToZ, 500.f)
+        << "Clicking above minimap centre should pan camera northward (+Z)";
+    EXPECT_NEAR(panToX, 500.f, 1.0f)
+        << "Clicking at centreX should not pan horizontally";
 }

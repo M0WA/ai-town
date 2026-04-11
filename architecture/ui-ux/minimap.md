@@ -3,11 +3,11 @@
 - **Dimensions**: 200×200 px in virtual 1920×1080 coordinate space (scaled via UIScaler)
 - **Rendered content**: Top-down zone color coding (R=green, C=blue, I=yellow), road network (grey lines), camera viewport rectangle (white outline). **Viewport indicator size constraints**: The white viewport rectangle has a **minimum size of 8×8 px** (to remain visible when the camera is zoomed far out and the viewport maps to a large world area) and a **maximum size of 190×190 px** (clamped to keep the indicator within the 200×200 px minimap boundaries with 5 px margin on each side). These clamp values are applied to the computed viewport rectangle before rendering; the camera's actual world frustum is unaffected.
 
-  **Coordinate mapping** (Phase 11q6): The minimap is camera-centred and camera-following.
+  **Coordinate mapping** (Phase 11q7): The minimap is camera-centred and camera-following.
 
   - **Camera target = minimap centre**: `(targetX, targetZ)` always maps to pixel
     `(kMapX + 100, kMapY + 100)`. Tiles are expressed relative to the camera target
-    and rotated by `-yaw_rad` so the camera's forward direction points toward the
+    and rotated by `yaw_rad` so the camera's forward direction points toward the
     top of the minimap.
   - **World extents**: `worldW = getMapTilesX() × kTileSize` (metres); `worldD = getMapTilesZ() × kTileSize` (metres). `kTileSize = 10.0f` m/tile is a compile-time constant local to `Minimap.cpp`.
   - **Scale**: `scaleX = kMapW / worldW` px/m; `scaleZ = kMapH / worldD` px/m.
@@ -15,15 +15,15 @@
 
     ```text
     relX = wx - targetX;  relZ = wz - targetZ          (world-space offset from target)
-    rotX = relX * cos(-yaw_rad) - relZ * sin(-yaw_rad)  (rotate world so cam-fwd = up)
-    rotZ = relX * sin(-yaw_rad) + relZ * cos(-yaw_rad)
+    rotX = relX * cos(yaw_rad) - relZ * sin(yaw_rad)    (rotate world so cam-fwd = up)
+    rotZ = relX * sin(yaw_rad) + relZ * cos(yaw_rad)
     px   = kMapX + 100 + rotX * scaleX
-    py   = kMapY + 100 + rotZ * scaleZ
+    py   = kMapY + 100 - rotZ * scaleZ
     ```
 
     Tiles outside `[kMapX, kMapX+kMapW) × [kMapY, kMapY+kMapH)` are culled.
   - **North indicator**: A small "N" marker rendered at the minimap border at angle
-    `yaw_rad` from the top: pixel `(kMapX + 100 + 90·sin(yaw_rad), kMapY + 100 − 90·cos(yaw_rad))`.
+    `yaw_rad` from the top: pixel `(kMapX + 100 − 90·sin(yaw_rad), kMapY + 100 − 90·cos(yaw_rad))`.
     This gives the player an absolute bearing reference as the camera rotates.
   - **Viewport indicator**: Always centred at `(kMapX+100, kMapY+100)` — no translation
     needed since camera target is always the minimap centre. **Side length**:
@@ -37,7 +37,7 @@
 
     ```text
     offX      = (clickX - (kMapX+100)) / scaleX
-    offZ      = (clickY - (kMapY+100)) / scaleZ
+    offZ      = ((kMapY+100) - clickY) / scaleZ
     worldOffX =  offX * cos(yaw_rad) + offZ * sin(yaw_rad)
     worldOffZ = -offX * sin(yaw_rad) + offZ * cos(yaw_rad)
     panTo(targetX + worldOffX, targetZ + worldOffZ)
