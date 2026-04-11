@@ -1,13 +1,17 @@
 // tests/ui/demolition_input_test.cpp
 //
-// Phase 11h Deliverable 5d: Demolition Input Tests
+// Phase 11q8: Demolition Drag-Select Input Tests
 //
-// Verifies the corrected demolition input flow (Phase 11h Deliverable 4d):
-//   - Confirmation modal fires on mouse-RELEASE (not mouse-press).
-//   - Same-tile mouse-down → mouse-up opens the confirm modal.
-//   - Different-tile mouse-up cancels the pending demolish (no modal).
-//   - Zone tool left-click does not enter the demolition code path.
-//   - Direct demolish path (setDemolishConfirm=false) calls demolishTile correctly.
+// Verifies the rectangular drag-select demolition flow (Phase 11q8):
+//   - Mouse-down records the demolish anchor tile.
+//   - Mouse-move while LMB held shows the rect preview.
+//   - Mouse-up counts occupied tiles in the selected rect:
+//       * 0 occupied → silent cancel (no modal, no demolish).
+//       * >0 occupied + confirm ON → confirmation modal opens.
+//       * >0 occupied + confirm OFF → immediate demolish.
+//   - Modal Accept → demolishTile called for occupied tiles.
+//   - Modal Cancel → no demolishTile call; highlight cleared.
+//   - Zone tool active → demolish path never entered.
 //
 // Added to ui_tests via:
 //   target_sources(ui_tests PRIVATE tests/ui/demolition_input_test.cpp)
@@ -23,8 +27,7 @@
 // TearDown contract: uiManager_.reset() before mock destructors per
 //   architecture/testing/testability-architecture.md.
 //
-// Spec reference: implementation/phase-11h.md §3c (Demolition Tool Input Fix),
-//                 §4d (UIManager Demolition Tool Input Fix), §5d (test spec).
+// Spec reference: implementation/phase-11q8.md (Demolition Drag-Select).
 
 #include "src/ui/UIManager.h"
 #include "src/ui/ui_types.h"
@@ -76,6 +79,15 @@ static InputEvent mouseButtonUp(int button, int virtX = 500, int virtY = 500)
     ev.y      = virtY;
     ev.physX  = virtX;
     ev.physY  = virtY;
+    return ev;
+}
+
+static InputEvent mouseMove(int virtX, int virtY)
+{
+    InputEvent ev{};
+    ev.type  = InputEvent::Type::MouseMove;
+    ev.x     = virtX; ev.y     = virtY;
+    ev.physX = virtX; ev.physY = virtY;
     return ev;
 }
 
@@ -216,206 +228,194 @@ protected:
 };
 
 // ============================================================================
-// DemolitionInput_MouseUp_SameTile_ConfirmModalOpened
+// DemolishDragConfirmOn_OccupiedTile_ModalOpens
 //
-// Phase 11h: confirmation modal is triggered on mouse-RELEASE (not mouse-press).
+// Drag on a single occupied tile (confirm ON) → modal shows "1 tile".
 //
 // Sequence:
-//   1. Demolish tool active.
-//   2. MouseButtonDown on tile (5,5) → records pending tile; no modal yet.
-//   3. MouseButtonUp on tile (5,5) → same tile → opens confirm modal.
-//   4. demolishTile() must NOT have been called yet (modal defers it).
+//   1. Demolish tool active, confirm ON.
+//   2. MouseDown on tile (5,5) → records demolish anchor.
+//   3. MouseMove (same position) → rect preview.
+//   4. MouseUp on tile (5,5) → tile is occupied → confirm modal opens.
+//   5. demolishTile() must NOT have been called yet (modal defers it).
 // ============================================================================
-TEST_F(DemolitionInputTest, DemolitionInput_MouseUp_SameTile_ConfirmModalOpened)
+TEST_F(DemolitionInputTest, DemolishDragConfirmOn_OccupiedTile_ModalOpens)
 {
-    // Enable the confirm modal (default ON — tests confirming modal behavior).
     uiManager_->setDemolishConfirm(true);
-
     activateDemolishTool();
 
-    // Both down and up hits resolve to tile (5,5).
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
-        .WillRepeatedly(DoAll(
-            SetArgReferee<2>(5),
-            SetArgReferee<3>(5),
-            Return(true)));
+        .WillRepeatedly(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+    // Override SetUp catch-all: tile (5,5) is zoned (occupied).
+    EXPECT_CALL(sim_, queryTile(5, 5))
+        .WillRepeatedly([]{ QueryResult q; q.isZoned = true; return q; });
 
-    // demolishTile must NOT be called until modal confirms.
     EXPECT_CALL(sim_, demolishTile(_, _)).Times(0);
 
-    // Phase 11h: mouse-DOWN records the pending tile.
     uiManager_->onEvent(mouseButtonDown(0, 500, 500));
-
-    // Modal must NOT open on mouse-down (Phase 11h fix: trigger moved to mouse-up).
-    EXPECT_FALSE(uiManager_->hasActiveModal())
-        << "Confirm modal must NOT open on mouse-down (Phase 11h fix)";
-
-    // Phase 11h: mouse-UP on the same tile opens the confirm modal.
+    uiManager_->onEvent(mouseMove(500, 500));
     uiManager_->onEvent(mouseButtonUp(0, 500, 500));
 
     EXPECT_TRUE(uiManager_->hasActiveModal())
-        << "Confirm modal must open on mouse-up when demolish tool active and same tile";
+        << "Confirm modal must open after drag over occupied tile (confirm ON)";
 }
 
 // ============================================================================
-// DemolitionInput_MouseUp_DifferentTile_NoModal
+// DemolishDrag_AllEmptyTiles_NoModalNoDemolish
 //
-// Phase 11h: if mouse is released on a different tile from where it was pressed,
-// the pending demolish is cancelled — no modal opens, no demolishTile() call.
+// All tiles in selection are empty → no modal, no demolishTile call.
 //
 // Sequence:
-//   1. Demolish tool active.
-//   2. MouseButtonDown on tile (5,5).
-//   3. MouseButtonUp on tile (6,6) — different tile.
-//   4. No modal opened; no demolishTile() call.
+//   1. Demolish tool active, confirm ON.
+//   2. Drag over tile (3,3) — queryTile returns empty QueryResult.
+//   3. MouseUp → 0 occupied tiles → silent cancel.
+//   4. No modal; no demolishTile() call.
 // ============================================================================
-TEST_F(DemolitionInputTest, DemolitionInput_MouseUp_DifferentTile_NoModal)
+TEST_F(DemolitionInputTest, DemolishDrag_AllEmptyTiles_NoModalNoDemolish)
 {
     uiManager_->setDemolishConfirm(true);
-
     activateDemolishTool();
 
-    // Press on tile (5,5).
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
-        .WillOnce(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
-    uiManager_->onEvent(mouseButtonDown(0, 500, 500));
+        .WillRepeatedly(DoAll(SetArgReferee<2>(3), SetArgReferee<3>(3), Return(true)));
+    // SetUp catch-all already returns empty QueryResult — no override needed.
 
-    // Release on tile (6,6) — different tile.
-    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
-        .WillOnce(DoAll(SetArgReferee<2>(6), SetArgReferee<3>(6), Return(true)));
-
-    // Neither modal nor demolishTile should fire.
     EXPECT_CALL(sim_, demolishTile(_, _)).Times(0);
 
-    uiManager_->onEvent(mouseButtonUp(0, 600, 600));
+    uiManager_->onEvent(mouseButtonDown(0, 300, 300));
+    uiManager_->onEvent(mouseMove(300, 300));
+    uiManager_->onEvent(mouseButtonUp(0, 300, 300));
 
     EXPECT_FALSE(uiManager_->hasActiveModal())
-        << "No confirm modal when mouse-up tile differs from mouse-down tile";
+        << "No modal must open when selection contains only empty tiles";
 }
 
 // ============================================================================
-// DemolitionInput_ConfirmYes_CallsDemolishTile
+// DemolishDrag_ConfirmOff_ImmediateDemolish
 //
-// When the Demolish tool is active and setDemolishConfirm(false) is set
-// (confirm disabled — equivalent to "player clicked Yes" without modal step),
-// demolishTile() is called with the correct tile coordinates on mouse-up.
-//
-// This tests the direct demolish path that bypasses the modal — the functional
-// end-state of "Yes" confirmation: demolishTile IS called.
-// ============================================================================
-TEST_F(DemolitionInputTest, DemolitionInput_ConfirmYes_CallsDemolishTile)
-{
-    // Confirm disabled → demolishTile called immediately on same-tile mouse-up.
-    uiManager_->setDemolishConfirm(false);
-
-    activateDemolishTool();
-
-    // Both down and up resolve to tile (5,5).
-    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
-        .WillRepeatedly(DoAll(
-            SetArgReferee<2>(5),
-            SetArgReferee<3>(5),
-            Return(true)));
-
-    // Allow clearDemolishHighlight and setZoneOverlay from the demolish commit.
-    EXPECT_CALL(renderer_, clearDemolishHighlight()).Times(AnyNumber());
-
-    // demolishTile(5, 5) must be called exactly once after mouse-up on same tile.
-    EXPECT_CALL(sim_, demolishTile(5, 5)).Times(1);
-
-    // Phase 11h: press sets pending tile (no demolish yet).
-    uiManager_->onEvent(mouseButtonDown(0, 500, 500));
-
-    // Release on same tile triggers demolish immediately (confirm disabled).
-    uiManager_->onEvent(mouseButtonUp(0, 500, 500));
-}
-
-// ============================================================================
-// DemolitionInput_ConfirmNo_NoDemolition
-//
-// When the confirm modal is active and the player cancels (No / Escape),
-// demolishTile() must NOT be called and the highlight must be cleared.
+// Confirm OFF — demolishTile called immediately on mouse-up, no modal.
 //
 // Sequence:
-//   1. Demolish tool active, confirm enabled.
-//   2. MouseDown → MouseUp on same tile → modal opens.
-//   3. uiManager_->closeModal() — equivalent to player clicking No/Escape.
-//   4. uiManager_->update() polls modal result (None/Cancel → no demolish).
-//   5. clearDemolishHighlight() called; demolishTile() not called.
+//   1. Demolish tool active, confirm OFF.
+//   2. Drag over occupied tile (5,5).
+//   3. MouseUp → confirm OFF → demolishTile(5,5) called immediately.
+//   4. No modal opened.
 // ============================================================================
-TEST_F(DemolitionInputTest, DemolitionInput_ConfirmNo_NoDemolition)
+TEST_F(DemolitionInputTest, DemolishDrag_ConfirmOff_ImmediateDemolish)
 {
-    uiManager_->setDemolishConfirm(true);
-
+    uiManager_->setDemolishConfirm(false);
     activateDemolishTool();
 
-    // Both down and up resolve to tile (3,7).
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
-        .WillRepeatedly(DoAll(
-            SetArgReferee<2>(3),
-            SetArgReferee<3>(7),
-            Return(true)));
+        .WillRepeatedly(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+    // Override SetUp catch-all: tile (5,5) is zoned (occupied).
+    EXPECT_CALL(sim_, queryTile(5, 5))
+        .WillRepeatedly([]{ QueryResult q; q.isZoned = true; return q; });
+
+    EXPECT_CALL(sim_, demolishTile(5, 5)).Times(1);
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(renderer_, clearDemolishHighlight()).Times(AnyNumber());
 
     uiManager_->onEvent(mouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(mouseMove(500, 500));
     uiManager_->onEvent(mouseButtonUp(0, 500, 500));
 
-    ASSERT_TRUE(uiManager_->hasActiveModal())
-        << "Confirm modal must be open before cancelling";
+    EXPECT_FALSE(uiManager_->hasActiveModal());
+}
 
-    // Close modal without accepting (Cancel path — No / Escape).
-    // clearDemolishHighlight() is expected when modal closes without Accept.
-    EXPECT_CALL(renderer_, clearDemolishHighlight()).Times(AtLeast(1));
+// ============================================================================
+// DemolishDrag_ConfirmOn_Accept_DemolishesTiles
+//
+// Confirm ON, accept modal → demolishTile called for occupied tiles.
+//
+// Sequence:
+//   1. Demolish tool active, confirm ON.
+//   2. Drag over occupied tile (5,5) → modal opens.
+//   3. Accept modal → demolishTile(5,5) called.
+// ============================================================================
+TEST_F(DemolitionInputTest, DemolishDrag_ConfirmOn_Accept_DemolishesTiles)
+{
+    uiManager_->setDemolishConfirm(true);
+    activateDemolishTool();
 
-    // demolishTile must NOT be called.
-    EXPECT_CALL(sim_, demolishTile(_, _)).Times(0);
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillRepeatedly(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+    // Override SetUp catch-all: tile (5,5) is zoned (occupied).
+    EXPECT_CALL(sim_, queryTile(5, 5))
+        .WillRepeatedly([]{ QueryResult q; q.isZoned = true; return q; });
 
-    uiManager_->closeModal();
+    uiManager_->onEvent(mouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(mouseMove(500, 500));
+    uiManager_->onEvent(mouseButtonUp(0, 500, 500));
 
-    // Poll modal result via update() — cancel path should not call demolishTile.
+    ASSERT_TRUE(uiManager_->hasActiveModal());
+
+    EXPECT_CALL(sim_, demolishTile(5, 5)).Times(1);
+    EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(renderer_, clearDemolishHighlight()).Times(AnyNumber());
+
+    // Accept the modal.
+    uiManager_->acceptModal();
     uiManager_->update(0.016f);
 }
 
 // ============================================================================
-// DemolitionInput_ZoneTool_MouseDown_DoesNotTriggerDemolish
+// DemolishDrag_ConfirmOn_Cancel_NoDemolish
 //
-// While the Zone tool is active, left-mouse-down on any tile must NOT:
-//   - Set m_demolishPendingTileX/Z
-//   - Open a demolition confirmation modal
+// Confirm ON, cancel modal → demolishTile NOT called.
+//
+// Sequence:
+//   1. Demolish tool active, confirm ON.
+//   2. Drag over occupied tile (3,7) → modal opens.
+//   3. Close modal (Cancel / Escape) → no demolishTile; highlight cleared.
+// ============================================================================
+TEST_F(DemolitionInputTest, DemolishDrag_ConfirmOn_Cancel_NoDemolish)
+{
+    uiManager_->setDemolishConfirm(true);
+    activateDemolishTool();
+
+    EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
+        .WillRepeatedly(DoAll(SetArgReferee<2>(3), SetArgReferee<3>(7), Return(true)));
+    // Override SetUp catch-all: tile (3,7) is a road (occupied).
+    EXPECT_CALL(sim_, queryTile(3, 7))
+        .WillRepeatedly([]{ QueryResult q; q.isRoad = true; return q; });
+
+    uiManager_->onEvent(mouseButtonDown(0, 500, 500));
+    uiManager_->onEvent(mouseMove(500, 500));
+    uiManager_->onEvent(mouseButtonUp(0, 500, 500));
+
+    ASSERT_TRUE(uiManager_->hasActiveModal());
+
+    EXPECT_CALL(sim_, demolishTile(_, _)).Times(0);
+    EXPECT_CALL(renderer_, clearDemolishHighlight()).Times(AtLeast(1));
+
+    uiManager_->closeModal();
+    uiManager_->update(0.016f);
+}
+
+// ============================================================================
+// DemolishDrag_ZoneTool_DoesNotTrigger
+//
+// Zone tool must NOT enter demolish code path.
 //
 // Input arbitration: tool-mode is checked before any tile-interaction handler.
 // The Zone tool's onMouseButtonDown is the zone rect-select anchor, not demolish.
 // ============================================================================
-TEST_F(DemolitionInputTest, DemolitionInput_ZoneTool_MouseDown_DoesNotTriggerDemolish)
+TEST_F(DemolitionInputTest, DemolishDrag_ZoneTool_DoesNotTrigger)
 {
-    // Zone tool active — NOT demolish.
     activateZoneTool();
 
-    // Tile hit at (5,5).
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
-        .WillRepeatedly(DoAll(
-            SetArgReferee<2>(5),
-            SetArgReferee<3>(5),
-            Return(true)));
-
-    // demolishTile must never be called while Zone tool is active.
+        .WillRepeatedly(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
+    EXPECT_CALL(renderer_, setZoneHoverColour(_)).Times(AnyNumber());
     EXPECT_CALL(sim_, demolishTile(_, _)).Times(0);
-
-    // Zone drag: press and release — sets zone rect anchor, not demolish pending.
-    // getTreasuryBalance needed by earthworks guard in zone placement.
-    ON_CALL(sim_, getTreasuryBalance()).WillByDefault(Return(100000.0f));
-
-    // Zone placement calls placeZone on mouse-up — allow it (not the subject of this test).
     EXPECT_CALL(sim_, placeZone(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(sim_, isWithinRoadRange(_, _, _)).WillRepeatedly(Return(true));
+    EXPECT_CALL(sim_, getTreasuryBalance()).WillRepeatedly(Return(100000.0f));
 
     uiManager_->onEvent(mouseButtonDown(0, 500, 500));
-
-    // No demolish confirm modal must open on Zone tool left-click.
-    EXPECT_FALSE(uiManager_->hasActiveModal())
-        << "Zone tool mouse-down must NOT open demolish confirm modal";
-
+    uiManager_->onEvent(mouseMove(500, 500));
     uiManager_->onEvent(mouseButtonUp(0, 500, 500));
 
-    // After mouse-up (zone placement): still no demolish confirm modal.
-    EXPECT_FALSE(uiManager_->hasActiveModal())
-        << "Zone tool mouse-up must NOT trigger demolish confirm modal";
+    EXPECT_FALSE(uiManager_->hasActiveModal());
 }

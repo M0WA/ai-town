@@ -214,6 +214,10 @@ private:
     // Phase 11q3 — extracted helper for demolishTile (S3776)
     void removeTileFromScene(int tileX, int tileZ, bool wasRoad, bool hadServiceBuilding, const TileData& prev);
 
+    // Phase 11q9 — redirect non-origin zone/service building tile to origin for demolish
+    bool redirectToFootprintOrigin(int tileX, int tileZ,
+                                   std::unordered_map<int64_t, TileData>::iterator it);
+
     // Phase 11q3 — extracted helper for placeServiceBuilding (S3776 + S134)
     bool checkServiceFootprintClear(int tileX, int tileZ, int sN) const;
 

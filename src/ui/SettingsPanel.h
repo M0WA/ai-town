@@ -45,6 +45,11 @@ public:
     // Calls applyKeybindings internally; exposed for test observability.
     void applyKeybindings(const KeyBindings& b);
 
+    // Set callback invoked whenever the "Confirm before demolish" toggle changes.
+    void setDemolishConfirmChangeFn(std::function<void(bool)> fn) {
+        m_demolishConfirmChangeFn = fn;
+    }
+
 private:
     IUIBackend*       m_backend{nullptr};
     IAudioSystem*     m_audio{nullptr};
@@ -116,6 +121,9 @@ private:
 
     // Demolish confirm toggle state
     bool m_demolishConfirm{true};
+
+    // Callback invoked when demolish confirm toggle changes
+    std::function<void(bool)> m_demolishConfirmChangeFn;
 
     // --- Keybindings callback and state ---
     // Callback set by UIManager to persist keybindings on Controls Apply.

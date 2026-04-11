@@ -1,13 +1,10 @@
 # Modal Dialog System
 
 - A `ModalDialog` component owned by `UIManager`; blocks scene input while active
-- **Modal sizes** (virtual 1920×1080 space): Small = 480×240 px; Medium = 560×320 px; Large = 640×400 px. Use the smallest size that fits all required content without scrolling. The forced loan dialog uses **Large (640×400 px minimum)**; demolish confirmation uses Small; unsaved-changes confirmation uses Small; game-over modal uses Medium.
-
-  **Small modal (480×240 px) — demolish confirmation content layout**: 14px title, 12px body text (max 2 lines), 11px "Do not ask again" checkbox row, 32px button row with 8px gap — total content height ≈ 200 px, which fits within the 240 px height at default scaling. If a localized string exceeds 2 lines, the modal MUST be promoted to Medium (560×320 px).
+- **Modal sizes** (virtual 1920×1080 space): Small = 480×240 px; Medium = 560×320 px; Large = 640×400 px. Use the smallest size that fits all required content without scrolling. The forced loan dialog uses **Large (640×400 px minimum)**; unsaved-changes confirmation uses Small; game-over modal uses Medium.
 - **Background scrim**: A full-screen semi-transparent black overlay (50% opacity) is drawn above the 3D scene and above all HUD/panel elements, but below the ModalDialog content itself, when any blocking modal is active. The scrim is rendered as a single solid `IGUIElement` fill rect covering the full virtual 1920×1080 area. The scrim dims the city background to focus player attention on the modal, without hiding it entirely.
 - Structure: title, body text, up to four action buttons (primary + secondary + tertiary + cancel/back)
 - **Keyboard navigation** (required for desktop accessibility): All modal buttons are Tab-navigable in document order. The default-focused button is the least destructive action (Cancel/Decline). Enter activates the focused button. Escape activates the Cancel/safe-exit button where the modal is dismissible (consumed by the modal focus layer where it is not). Visual focus ring: 2px accent-color border on the focused button. This is a V1 requirement on all desktop platforms.
-- **Demolish confirmation** (V1): "Demolish [N] tiles? You can press Ctrl+Z to undo." — Yes / Cancel; checkbox "Do not ask again." When "Do not ask again" is active: (1) a small "no-confirm" badge icon is shown on the Demolish tool button in the toolbar as a persistent visual reminder that confirmations are suppressed; (2) a toggle "Confirm before demolish" appears in Settings > Gameplay tab to re-enable the prompt. This prevents silent accidental irreversible actions after the player has forgotten they disabled the confirmation.
 - **Forced loan dialog** (V1): Blocking modal (Large, 640×400 px) — **two-screen structure**:
   - **Screen 1 — Accept / Decline** (shown first): Title: "Budget Crisis — Loan Required". Body shows:
     - Single summary line: "Revenue: $X/month | Deficit: $Y/month"
@@ -28,6 +25,22 @@
   - **Auto-pause**: The simulation **must be automatically paused** when the forced loan dialog (or any blocking modal) becomes active. The simulation must not continue running behind a blocking modal. This prevents the cascade scenario at high simulation speeds (10×) where upkeep costs compound while the player interacts with the modal. The speed selector is grayed out while any blocking modal is active. **Resume condition**: The simulation remains paused until the blocking modal is fully dismissed, but ONLY if the modal was the entity that initiated the pause. The `ModalDialog` tracks whether it called `setPaused(true)` on open via a private boolean flag `m_didPauseSim`. On open: if the simulation is not already paused, the modal calls `m_sim->setPaused(true)` and sets `m_didPauseSim = true`; if the simulation is already paused (e.g., by user-pressed Pause key or by a CRITICAL-toast auto-pause), the modal does NOT call `setPaused(true)` and sets `m_didPauseSim = false`. On `closeModal()`: if `m_didPauseSim` is `true`, the modal calls `m_sim->setPaused(false)` and clears the flag; if `m_didPauseSim` is `false`, `closeModal()` does NOT call `setPaused(false)` — this prevents accidentally resuming a simulation that was paused for other reasons. **No auto-resume based on CRITICAL-queue state**: `closeModal()` never unconditionally calls `setPaused(false)` based on whether the CRITICAL toast queue is empty; the CRITICAL toast system manages its own pause state independently of `closeModal()`.
 
   **Session-ending modal dismiss (game-over modal)**: When a game-over modal is dismissed via "Load Last Save" or "Return to Main Menu", `closeModal()` is still called and the normal `m_didPauseSim` resume path executes (calling `setPaused(false)` if applicable). This brief resume call is harmless: the loading controller or main-menu transition that follows immediately destroys the current simulation session. `setPaused(false)` on a simulation that is about to be replaced has no observable effect. The caller (UIManager game-over handler) does NOT need to suppress the `setPaused(false)` call for game-over dismissals — the simulation teardown that follows renders the pause state irrelevant.
+
+- **Demolish confirmation modal** (V1, Small 480×240 px, dismissible): fires after the
+  player completes a demolish drag-select and releases the mouse button, when "Confirm
+  before demolish" is enabled in Settings > Gameplay. Title: "Confirm Demolish". Body:
+  "Confirm Demolish? [N] tile(s) will be demolished. You can press Ctrl+Z to undo." —
+  where N is the pre-counted number of occupied tiles (`isZoned || isRoad ||
+  serviceType != None`) in the selected rectangle. The modal is suppressed entirely if
+  N = 0 (empty selection, nothing to demolish). Two buttons: **Yes** (primary) and
+  **Cancel** (safe-exit, default Tab focus per global modal rule). Keyboard: Tab
+  navigates between buttons; Enter activates the focused button; Escape activates
+  Cancel. On **Yes**: `UIManager::updateModalDialogState()` iterates the stored
+  rectangle and calls `ICitySimulation::demolishTile()` for each occupied tile, then
+  updates the zone overlay and sets unsaved-changes. On **Cancel**: highlight and
+  selection state are cleared; no tiles are demolished. The "Confirm before demolish"
+  toggle in Settings > Gameplay controls whether this modal fires; when OFF, occupied
+  tiles are demolished immediately on mouse-up without any dialog.
 
 - **WASD camera preset confirmation modal** (triggered from Settings > Controls when player clicks the "WASD" preset button): Small modal (480×240 px). Title: "Apply WASD Preset?". Body: "This will change: W=Pan Up, A=Pan Left, S=Pan Down, D=Pan Right (Demolish moved to X). Any custom bindings for W/A/S/D will be overwritten." The modal also displays the current binding of each affected key (W, A, S, D) so the player understands what will be replaced before committing. Two buttons: **Apply** (primary) and **Cancel** (safe-exit). Escape activates Cancel. **Keyboard Tab order**: default focus on **Cancel** (least destructive per global modal rule). Tab moves to Apply. On Apply: atomically rebind PanUp=W, PanDown=S, PanLeft=A, PanRight=D and move Demolish from D to X; write `keybindings.json`; close modal. On Cancel: no change, close modal. This modal is dismissible (Escape closes it via Cancel action). **Note**: Q and E are independently reserved for future camera controls (displayed as non-rebindable in the Controls tab regardless of preset); this is a separate constraint unrelated to the WASD preset itself.
 

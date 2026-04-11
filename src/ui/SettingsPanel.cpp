@@ -550,6 +550,7 @@ bool SettingsPanel::onEvent(const InputEvent& event) {
         // Gameplay demolish toggle
         if (m_activeTab == 3 && hitTest(mx, my, m_gameplayDemolishToggle)) {
             m_demolishConfirm = !m_demolishConfirm;
+            if (m_demolishConfirmChangeFn) m_demolishConfirmChangeFn(m_demolishConfirm);
             return true;
         }
 

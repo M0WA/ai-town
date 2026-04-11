@@ -342,10 +342,10 @@ void ModalDialog::layoutDemolishConfirm(int tileCount) {
     m_backend->setElementVisible(m_btnTertiary, false);
     m_backend->setElementVisible(m_btnBack, false);
 
-    m_backend->setElementText(m_titleLabel, "Demolish Confirmation");
+    m_backend->setElementText(m_titleLabel, "Confirm Demolish");
 
-    std::string body = "Demolish " + std::to_string(tileCount)
-                       + " tile(s)? You can press Ctrl+Z to undo.";
+    std::string body = "Confirm Demolish? " + std::to_string(tileCount)
+                       + " tile(s) will be demolished. You can press Ctrl+Z to undo.";
     m_backend->setElementText(m_bodyLabel, body);
 
     m_backend->setElementText(m_btnPrimary, "Yes");
