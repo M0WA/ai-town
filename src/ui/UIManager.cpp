@@ -139,6 +139,11 @@ UIManager::UIManager(IUIBackend* backend, IAudioSystem* audio, ICitySimulation* 
     // Wire keybindings apply callback: SettingsPanel calls this on Controls Apply.
     m_settings->setKeybindingsApplyFn([this](const KeyBindings& b){ applyKeybindings(b); });
 
+    // Wire demolish confirm toggle: SettingsPanel notifies UIManager when the toggle changes.
+    m_settings->setDemolishConfirmChangeFn([this](bool enabled) {
+        m_demolishConfirmEnabled = enabled;
+    });
+
     // Seed SettingsPanel with the current (default) keybindings so the Controls tab
     // opens with the right state. (loadKeybindings() may not have been called yet —
     // setCurrentBindings is re-called after loadKeybindings() in main.cpp. The seeding
@@ -829,8 +834,9 @@ bool UIManager::onEvent(const InputEvent& event) {
         // is gated on m_world.activeTool != None, so without this call m_hoverVisible
         // stays true and the quad persists until the next MouseMove.
         if (m_renderer) m_renderer->clearDemolishHighlight();
-        m_world.demolishPendingTileX = -1;
-        m_world.demolishPendingTileZ = -1;
+        m_world.demolishAnchorX = -1;
+        m_world.demolishAnchorZ = -1;
+        m_world.demolishReleaseX = m_world.demolishReleaseZ = -1;
         if (m_renderer) m_renderer->setTileHoverHighlight(-1, -1);
         m_world.hoveredTileX = -1;
         m_world.hoveredTileZ = -1;
@@ -933,46 +939,9 @@ bool UIManager::onEvent(const InputEvent& event) {
                 m_renderer->setTilePlacementPreview({}, 0u, {});
             }
 
-            // Phase 11h: Demolish tool — mouse-up triggers confirmation modal or immediate demolish.
-            if (m_world.activeTool == ActiveTool::Demolish && m_world.demolishPendingTileX != -1) {
-                int upHitX = -1, upHitZ = -1;
-                bool hitTerrain = m_renderer->pickTerrainTile(event.physX, event.physY,
-                                                               upHitX, upHitZ);
-                if (hitTerrain &&
-                    upHitX == m_world.demolishPendingTileX && upHitZ == m_world.demolishPendingTileZ) {
-                    // Mouse released on same tile as press — confirm demolish.
-                    if (m_demolishConfirmEnabled && m_modal) {
-                        m_modal->showDemolishConfirm(1);
-                        m_world.demolishModalPending = true;
-                    } else {
-                        // Immediate demolish (confirm disabled).
-                        if (m_sim) {
-                            m_sim->demolishTile(m_world.demolishPendingTileX, m_world.demolishPendingTileZ);
-                            if (m_world.mapTilesX > 0 && m_world.mapTilesZ > 0) {
-                                int64_t key = static_cast<int64_t>(m_world.demolishPendingTileZ)
-                                              * m_world.mapTilesX
-                                              + m_world.demolishPendingTileX;
-                                m_world.overlayMap.erase(key);
-                                if (m_renderer) {
-                                    m_renderer->setZoneOverlay(m_world.mapTilesX, m_world.mapTilesZ,
-                                                               m_world.overlayMap);
-                                }
-                            }
-                            setUnsavedChanges(true);
-                        }
-                        m_renderer->clearDemolishHighlight();
-                        m_world.demolishPendingTileX = -1;
-                        m_world.demolishPendingTileZ = -1;
-                    }
-                } else {
-                    // Mouse released on a different tile — cancel.
-                    m_renderer->clearDemolishHighlight();
-                    m_world.demolishPendingTileX = -1;
-                    m_world.demolishPendingTileZ = -1;
-                }
-                m_world.lmbHeld = false;
-                return true;  // Consumed.
-            }
+            // Phase 11q8: Demolish mouse-up.
+            if (m_world.activeTool == ActiveTool::Demolish && m_world.demolishAnchorX != -1)
+                return onDemolishMouseUp();
 
             m_world.lmbHeld = false;
             return false;  // Up-events are never consumed by world-interaction.
@@ -1096,6 +1065,13 @@ bool UIManager::onEvent(const InputEvent& event) {
                     m_renderer->setTileHoverHighlight(-1, -1);
                     m_renderer->setTilePlacementPreview(freeTiles, colour, blockedTiles);
                 }
+                // Phase 11q8: Demolish drag preview — occupied tiles in demolish-red,
+                // empty tiles in blocked-grey.
+                else if (m_world.lmbHeld
+                         && m_world.activeTool == ActiveTool::Demolish
+                         && m_world.demolishAnchorX != -1) {
+                    onDemolishMouseMove(hitX, hitZ);
+                }
                 // All other cases: single-tile hover highlight (no drag preview).
                 else {
                     m_renderer->setTilePlacementPreview({}, 0u, {});
@@ -1171,21 +1147,129 @@ bool UIManager::onEvent(const InputEvent& event) {
                 return true;  // Consumed: anchor recorded; no placement yet.
             }
 
-            // Phase 11h: Demolish tool — record pending tile on mouse-down.
-            // The demolish confirmation modal (or immediate demolish) is triggered on mouse-up.
-            if (m_world.activeTool == ActiveTool::Demolish) {
-                m_world.demolishPendingTileX = hitX;
-                m_world.demolishPendingTileZ = hitZ;
-                // The renderer will use demolish red color (ToolMode::Demolish is already set).
-                m_renderer->setTileHoverHighlight(hitX, hitZ, 1);
-                return true;  // Consumed: pending tile recorded; no placement yet.
-            }
+            // Phase 11q8: record drag anchor on mouse-down.
+            if (m_world.activeTool == ActiveTool::Demolish)
+                return onDemolishMouseDown(hitX, hitZ);
 
             return doTerrainPlacement(hitX, hitZ);
         }
     }
 
     return false;
+}
+
+// ----------------------------------------------------------------
+// onDemolishMouseDown — Phase 11q8: record drag anchor on mouse-down.
+// ----------------------------------------------------------------
+bool UIManager::onDemolishMouseDown(int hitX, int hitZ) {
+    m_world.demolishAnchorX = hitX;
+    m_world.demolishAnchorZ = hitZ;
+    m_renderer->setTileHoverHighlight(hitX, hitZ, 1);
+    return true;
+}
+
+// ----------------------------------------------------------------
+// isTileOccupied — returns true when the tile has a zone, road, or service building.
+// ----------------------------------------------------------------
+bool UIManager::isTileOccupied(int tx, int tz) const {
+    if (!m_sim) return false;
+    QueryResult q = m_sim->queryTile(tx, tz);
+    return q.isZoned || q.isRoad || q.serviceType != ServiceBuildingType::None;
+}
+
+// ----------------------------------------------------------------
+// countOccupiedTilesInRect — count tiles with zones/roads/services in [x0..x1] x [z0..z1].
+// ----------------------------------------------------------------
+int UIManager::countOccupiedTilesInRect(int x0, int x1, int z0, int z1) const {
+    int count = 0;
+    for (int tz = z0; tz <= z1; ++tz)
+        for (int tx = x0; tx <= x1; ++tx)
+            if (isTileOccupied(tx, tz))
+                ++count;
+    return count;
+}
+
+// ----------------------------------------------------------------
+// demolishTilesInRect — demolish all occupied tiles and erase overlay entries.
+// ----------------------------------------------------------------
+void UIManager::demolishTilesInRect(int x0, int x1, int z0, int z1) {
+    if (!m_sim || m_world.mapTilesX <= 0) return;
+    for (int tz = z0; tz <= z1; ++tz) {
+        for (int tx = x0; tx <= x1; ++tx) {
+            if (!isTileOccupied(tx, tz)) continue;
+            m_sim->demolishTile(tx, tz);
+            int64_t key = static_cast<int64_t>(tz) * m_world.mapTilesX + tx;
+            m_world.overlayMap.erase(key);
+        }
+    }
+    if (m_renderer)
+        m_renderer->setZoneOverlay(m_world.mapTilesX, m_world.mapTilesZ,
+                                   m_world.overlayMap);
+    setUnsavedChanges(true);
+}
+
+// ----------------------------------------------------------------
+// clearDemolishVisuals — clear preview, highlight, and anchor/release state.
+// ----------------------------------------------------------------
+void UIManager::clearDemolishVisuals() {
+    if (m_renderer) {
+        m_renderer->setTilePlacementPreview({}, 0u, {});
+        m_renderer->clearDemolishHighlight();
+    }
+    m_world.demolishAnchorX = m_world.demolishAnchorZ = -1;
+    m_world.demolishReleaseX = m_world.demolishReleaseZ = -1;
+}
+
+// ----------------------------------------------------------------
+// onDemolishMouseMove — Phase 11q8: rectangular demolish preview while dragging.
+// Occupied tiles shown in demolish-red, empty tiles in blocked-grey.
+// ----------------------------------------------------------------
+void UIManager::onDemolishMouseMove(int hitX, int hitZ) {
+    int x0 = std::min(m_world.demolishAnchorX, hitX);
+    int x1 = std::max(m_world.demolishAnchorX, hitX);
+    int z0 = std::min(m_world.demolishAnchorZ, hitZ);
+    int z1 = std::max(m_world.demolishAnchorZ, hitZ);
+    std::vector<std::pair<int,int>> occupiedTiles;
+    std::vector<std::pair<int,int>> emptyTiles;
+    const size_t total = static_cast<size_t>((x1-x0+1)*(z1-z0+1));
+    occupiedTiles.reserve(total);
+    emptyTiles.reserve(total);
+    for (int tz = z0; tz <= z1; ++tz)
+        for (int tx = x0; tx <= x1; ++tx)
+            (isTileOccupied(tx, tz) ? occupiedTiles : emptyTiles).push_back({tx, tz});
+    m_renderer->setTileHoverHighlight(-1, -1);
+    m_renderer->setTilePlacementPreview(occupiedTiles, kHoverArgbDemolish, emptyTiles);
+}
+
+// ----------------------------------------------------------------
+// onDemolishMouseUp — Phase 11q8: show confirm modal (if enabled and
+// occupied tiles > 0), or demolish immediately (confirm disabled).
+// ----------------------------------------------------------------
+bool UIManager::onDemolishMouseUp() {
+    int releaseX = m_world.hoveredTileX;
+    int releaseZ = m_world.hoveredTileZ;
+    if (releaseX == -1) releaseX = m_world.demolishAnchorX;
+    if (releaseZ == -1) releaseZ = m_world.demolishAnchorZ;
+
+    int x0 = std::min(m_world.demolishAnchorX, releaseX);
+    int x1 = std::max(m_world.demolishAnchorX, releaseX);
+    int z0 = std::min(m_world.demolishAnchorZ, releaseZ);
+    int z1 = std::max(m_world.demolishAnchorZ, releaseZ);
+    int occupiedCount = countOccupiedTilesInRect(x0, x1, z0, z1);
+
+    if (occupiedCount == 0) {
+        clearDemolishVisuals();
+    } else if (m_demolishConfirmEnabled && m_modal) {
+        m_world.demolishReleaseX = releaseX;
+        m_world.demolishReleaseZ = releaseZ;
+        m_modal->showDemolishConfirm(occupiedCount);
+        m_world.demolishModalPending = true;
+    } else {
+        demolishTilesInRect(x0, x1, z0, z1);
+        clearDemolishVisuals();
+    }
+    m_world.lmbHeld = false;
+    return true;
 }
 
 // ----------------------------------------------------------------
@@ -1540,23 +1624,13 @@ bool UIManager::updateModalDialogState() {
         m_world.demolishModalPending = false;
         auto result = m_modal->pollResult();
         if (result == ModalDialog::DialogResult::Accept) {
-            if (m_sim && m_world.demolishPendingTileX != -1) {
-                m_sim->demolishTile(m_world.demolishPendingTileX, m_world.demolishPendingTileZ);
-                if (m_world.mapTilesX > 0 && m_world.mapTilesZ > 0 && m_renderer) {
-                    int64_t key = static_cast<int64_t>(m_world.demolishPendingTileZ)
-                                  * m_world.mapTilesX
-                                  + m_world.demolishPendingTileX;
-                    m_world.overlayMap.erase(key);
-                    m_renderer->setZoneOverlay(m_world.mapTilesX, m_world.mapTilesZ, m_world.overlayMap);
-                }
-                setUnsavedChanges(true);
-            }
-            if (m_renderer) m_renderer->clearDemolishHighlight();
-        } else {
-            if (m_renderer) m_renderer->clearDemolishHighlight();
+            int x0 = std::min(m_world.demolishAnchorX, m_world.demolishReleaseX);
+            int x1 = std::max(m_world.demolishAnchorX, m_world.demolishReleaseX);
+            int z0 = std::min(m_world.demolishAnchorZ, m_world.demolishReleaseZ);
+            int z1 = std::max(m_world.demolishAnchorZ, m_world.demolishReleaseZ);
+            demolishTilesInRect(x0, x1, z0, z1);
         }
-        m_world.demolishPendingTileX = -1;
-        m_world.demolishPendingTileZ = -1;
+        clearDemolishVisuals();
     }
 
     // Forward budget ticks from CitySimulation to SaveSystem (5-tick auto-save gate).
@@ -1850,6 +1924,10 @@ void UIManager::showGameOverModal(int64_t totalDebt, int monthsInDeficit) {
     }
 
     m_modal->showGameOver(totalDebt, monthsInDeficit);
+}
+
+void UIManager::acceptModal() {
+    if (m_modal) m_modal->acceptForTest();
 }
 
 void UIManager::closeModal() {

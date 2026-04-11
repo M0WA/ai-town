@@ -416,11 +416,15 @@ TEST_F(WorldInteractionTest, WorldInteraction_DemolishTool_SteepSlope_NoEarthwor
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
         .WillRepeatedly(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(7), Return(true)));
 
+    // Phase 11q8: queryTile must return occupied for demolish to proceed.
+    EXPECT_CALL(sim_, queryTile(5, 7))
+        .WillRepeatedly([]{ QueryResult q; q.isZoned = true; return q; });
+
     // Zone overlay may be called on demolish (erase entry).
     EXPECT_CALL(renderer_, setZoneOverlay(_, _, _)).Times(AtLeast(0));
 
     // Primary assertion: demolishTile IS called despite steep slope.
-    // New flow (phase-11h): down sets pending tile; up commits demolish.
+    // Phase 11q8 flow: down records anchor; up counts occupied tiles and demolishes.
     EXPECT_CALL(sim_, demolishTile(5, 7)).Times(1);
 
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
@@ -656,6 +660,10 @@ TEST_F(WorldInteractionTest, WorldInteraction_Demolish_SparseOverlay_ErasesEntry
     //  test the overlay erase path without modal interaction complexity.)
     activateDemolishTool();
 
+    // Phase 11q8: queryTile must return occupied for demolish to proceed.
+    EXPECT_CALL(sim_, queryTile(3, 4))
+        .WillRepeatedly([]{ QueryResult q; q.isZoned = true; return q; });
+
     EXPECT_CALL(sim_, demolishTile(3, 4)).Times(1);
 
     // Second setZoneOverlay call — after demolish (key 43 erased).
@@ -663,7 +671,7 @@ TEST_F(WorldInteractionTest, WorldInteraction_Demolish_SparseOverlay_ErasesEntry
     EXPECT_CALL(renderer_, setZoneOverlay(_, _, _))
         .WillOnce(SaveArg<2>(&capturedAfterDemolish));
 
-    // New flow (phase-11h): down sets pending tile; up commits demolish.
+    // Phase 11q8 flow: down records anchor; up counts occupied tiles and demolishes.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
     uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 
@@ -2293,17 +2301,20 @@ TEST_F(ValidHandleWorldInteractionTest, RoadDrag_ZDominant_ShowsZPreview)
 // ============================================================================
 // Test: Demolish drag to different tile calls demolishTile on both
 // ============================================================================
-TEST_F(ValidHandleWorldInteractionTest, DemolishDrag_DifferentTile_CallsPlacement)
+TEST_F(ValidHandleWorldInteractionTest, Demolish_SameTile_ConfirmOff_CallsDemolishTile)
 {
-    // Phase 11h: Demolish flow changed — down sets pending, up (same tile) triggers demolish.
+    // Phase 11q8: Demolish drag-select flow — down records anchor, up demolishes occupied.
     // This test verifies the full click cycle (down → up on same tile) calls demolishTile.
     goToGameplay();
     uiManager_->onEvent(makeKeyDown(68));  // Demolish tool
 
-    // Down picks (5,5): sets pending tile (no demolish yet in new flow).
+    // Down picks (5,5): records anchor (no demolish yet).
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
         .WillRepeatedly(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
     EXPECT_CALL(renderer_, setTileHoverHighlight(_, _, _)).Times(AnyNumber());
+    // Phase 11q8: queryTile must return occupied for demolish to proceed.
+    EXPECT_CALL(sim_, queryTile(5, 5))
+        .WillRepeatedly([]{ QueryResult q; q.isZoned = true; return q; });
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
 
     // Up on same tile (5,5): confirm disabled → demolishTile(5, 5) called immediately.
@@ -2404,10 +2415,14 @@ TEST_F(WorldInteractionTest, Coverage_DemolishWithConfirmModal_ShowsModal)
     EXPECT_CALL(renderer_, pickTerrainTile(_, _, _, _))
         .WillRepeatedly(DoAll(SetArgReferee<2>(5), SetArgReferee<3>(5), Return(true)));
 
+    // Phase 11q8: queryTile must return occupied for confirm modal to open.
+    EXPECT_CALL(sim_, queryTile(5, 5))
+        .WillRepeatedly([]{ QueryResult q; q.isZoned = true; return q; });
+
     // demolishTile must NOT be called — modal defers it.
     EXPECT_CALL(sim_, demolishTile(_, _)).Times(0);
 
-    // New flow (phase-11h): down sets pending tile; up shows modal (confirm=true).
+    // Phase 11q8 flow: down records anchor; up counts occupied tiles → modal opens.
     uiManager_->onEvent(makeMouseButtonDown(0, 500, 500));
     uiManager_->onEvent(makeMouseButtonUp(0, 500, 500));
 

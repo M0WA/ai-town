@@ -118,6 +118,10 @@ public:
     // Close the active modal dialog (if any) and resume normal input routing.
     void closeModal();
 
+    // acceptModal — test seam: simulate player clicking the primary/Accept button
+    // of the currently active modal.
+    void acceptModal();
+
     // Show the settings panel (e.g. from pause menu or toolbar button).
     void showSettings();
 
@@ -319,9 +323,11 @@ private:
         // Overlay refresh counter (Phase 11m)
         int overlayRefreshCounter{0};
 
-        // Demolish pending tile and modal gate (Phase 11h)
-        int  demolishPendingTileX{-1};
-        int  demolishPendingTileZ{-1};
+        // Demolish drag-select anchor/release and modal gate (Phase 11q8)
+        int  demolishAnchorX{-1};
+        int  demolishAnchorZ{-1};
+        int  demolishReleaseX{-1};
+        int  demolishReleaseZ{-1};
         bool demolishModalPending{false};
     };
     WorldInteractionState m_world;
@@ -428,6 +434,17 @@ private:
     // Performs earthworks cost computation, slope guard, sim dispatch, and overlay update.
     // Returns true if the event should be consumed (placement occurred or was blocked).
     bool doTerrainPlacement(int hitX, int hitZ);
+
+    // Demolish drag-select sub-handlers (Phase 11q8).
+    bool onDemolishMouseDown(int hitX, int hitZ);
+    void onDemolishMouseMove(int hitX, int hitZ);
+    bool onDemolishMouseUp();
+
+    // Demolish helpers — shared by onDemolishMouseUp and updateModalDialogState.
+    bool isTileOccupied(int tx, int tz) const;
+    int  countOccupiedTilesInRect(int x0, int x1, int z0, int z1) const;
+    void demolishTilesInRect(int x0, int x1, int z0, int z1);
+    void clearDemolishVisuals();
 
     // --- Owned panels (allocated in UIManager constructor, deleted in destructor) ---
     // Construction/destruction order is INVARIANT:

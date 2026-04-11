@@ -622,19 +622,19 @@ Full reduction of `onEvent` to ≤ 25 is deferred to a dedicated refactor phase.
 
 ### Exit Criteria
 
-- [ ] `make build` succeeds with no warnings.
-- [ ] `ctest -LE "integration|requires-opengl"` passes.
-- [ ] `ctest --test-dir build -R DemolishDrag --output-on-failure` discovers exactly
+- [x] `make build` succeeds with no warnings.
+- [x] `ctest -LE "integration|requires-opengl"` passes.
+- [x] `ctest --test-dir build -R DemolishDrag --output-on-failure` discovers exactly
       6 tests, all passing.
-- [ ] The four old `DemolitionInput_*` tests are **absent** from the test binary.
-- [ ] Manual play test: activate Demolish tool, drag over a mixed area — occupied
+- [x] The four old `DemolitionInput_*` tests are **absent** from the test binary.
+- [x] Manual play test: activate Demolish tool, drag over a mixed area — occupied
       tiles show red preview, mouse-up opens "Confirm Demolish? N tile(s)" modal;
       accepting demolishes them; cancelling does not. With confirm OFF, mouse-up
       demolishes immediately.
-- [ ] "Confirm before demolish" toggle in Settings > Gameplay takes effect
+- [x] "Confirm before demolish" toggle in Settings > Gameplay takes effect
       immediately (no restart required).
-- [ ] `python3 tools/cognitive_complexity.py src/ui/UIManager.cpp` —
+- [x] `python3 tools/cognitive_complexity.py src/ui/UIManager.cpp` —
       `onDemolishMouseDown` ≤ 4, `onDemolishMouseMove` ≤ 15,
       `onDemolishMouseUp` ≤ 20, `onEvent` < 728.
-- [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'`
+- [x] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'`
       reports no errors.

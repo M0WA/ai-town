@@ -286,6 +286,10 @@ TEST_F(ZoneOverlayTest, UIManager_Demolish_RemovesOverlayEntry)
     activateDemolishTool();
     stubPickTile(5, 5);
 
+    // Phase 11q8: queryTile must return occupied for demolish to proceed.
+    ON_CALL(sim_, queryTile(5, 5)).WillByDefault([]{
+        QueryResult q; q.isZoned = true; return q; });
+
     // Capture setZoneOverlay argument.
     ZoneOverlayMap capturedMap;
     ON_CALL(renderer_, setZoneOverlay(_, _, _))

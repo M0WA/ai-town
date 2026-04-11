@@ -46,6 +46,12 @@ public:
 
     // Result accessors for UIManager to check after dialog closes
     enum class DialogResult { None, Accept, Decline, Cancel };
+
+    // acceptForTest — test seam: record Accept result and close modal.
+    void acceptForTest() {
+        m_lastResult = DialogResult::Accept;
+        closeModal();
+    }
     DialogResult peekResult() const noexcept { return m_lastResult; }
 
     // Poll and consume the last dialog result. Returns the current result and then
