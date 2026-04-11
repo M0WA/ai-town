@@ -103,6 +103,7 @@ All files contain the full verbatim content from the master spec (`CLAUDE.md`).
 | Headless CI Testing | [testing/headless-ci-testing.md](testing/headless-ci-testing.md) |
 | Property-Based Test Invariants (RapidCheck) | [testing/property-based-tests.md](testing/property-based-tests.md) |
 | Procedural Generation Test Seeds | [testing/procedural-generation-seeds.md](testing/procedural-generation-seeds.md) |
+| Code Quality — Cognitive Complexity | [testing/code-quality.md](testing/code-quality.md) |
 
 ---
 
