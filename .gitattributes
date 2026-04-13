@@ -1,0 +1,9 @@
+# Git LFS tracking for binary assets
+assets/3d/**/*.b3d filter=lfs diff=lfs merge=lfs -text
+assets/3d/**/*.obj filter=lfs diff=lfs merge=lfs -text
+assets/3d/**/*.png filter=lfs diff=lfs merge=lfs -text
+assets/3d/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+assets/tripo3d/**/*.zip filter=lfs diff=lfs merge=lfs -text
+assets/tripo3d/**/*.fbx filter=lfs diff=lfs merge=lfs -text
+assets/audio/**/*.ogg filter=lfs diff=lfs merge=lfs -text
+assets/audio/**/*.wav filter=lfs diff=lfs merge=lfs -text
