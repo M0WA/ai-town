@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
      > /etc/apt/sources.list.d/nodesource.list \
   && apt-get update && apt-get install -y --no-install-recommends \
   aggregate \
+  git-lfs \
   assimp-utils \
   autoconf \
   automake \

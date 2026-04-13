@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++-13 \
     gcc-13 \
     git \
+    git-lfs \
     jq \
     lcov \
     libasound2-dev \
