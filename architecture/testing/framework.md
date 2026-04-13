@@ -305,6 +305,7 @@ target_sources(integration_tests PRIVATE tests/integration/SceneEntityManagerDes
 # Phase 11q6: VehicleReleaseTest — verifies AudioSystem releases AL sources on
 # releaseVehicleEnginePair(); uses real AudioSystem + null OpenAL backend (ALSOFT_DRIVERS=null).
 target_sources(integration_tests PRIVATE tests/integration/VehicleReleaseTest.cpp)
+# Phase 11q12: target_sources(integration_tests PRIVATE tests/integration/MeshFormatUtilsTest.cpp)
 # nlohmann_json::nlohmann_json: add to integration_tests PRIVATE if any integration test
 # source file uses `#include <nlohmann/json.hpp>` for programmatic JSON manipulation
 # (e.g., nlohmann::json::parse / j.dump() in serialize/deserialize assertions). This is

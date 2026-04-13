@@ -205,7 +205,19 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
     verify `resolveModelPath()` returns `.b3d` fallback path (caller handles
     load failure). This mirrors the nullptr "neither-present" case above but
     exercises the `IFileSystem::existFile()` code path.
-  - Drop the device after each test case (`device->drop()`).
+  - **TearDown fixture requirement**: these three `IFileSystem*` test cases
+    (cases 4--6) must use a GTest test fixture (e.g.
+    `class MeshFormatUtilsIFSTest : public ::testing::Test`) with a
+    `TearDown()` override that calls `device_->drop()` and sets
+    `device_ = nullptr` if non-null, preventing Irrlicht device resource
+    leaks when an `EXPECT` or `ASSERT` fails mid-test. This follows the
+    mandatory TearDown contract pattern established in
+    `architecture/testing/testability-architecture.md` (see
+    `UIManagerTest` and `CitySimulationUnitTest` fixture examples):
+    explicitly release the owned resource in `TearDown()` so cleanup is
+    guaranteed regardless of test outcome. The three `nullptr`-fallback
+    cases (cases 1--3) do not create a device and may remain as bare
+    `TEST()` functions or a separate fixture without device cleanup.
 - [ ] Register in `CMakeLists.txt`:
       `target_sources(integration_tests PRIVATE tests/integration/MeshFormatUtilsTest.cpp)`.
       `integration_tests` already links `aitown_render` and has `src/rendering/`
@@ -232,6 +244,13 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
       `resolveModelPath()` is a pure free function; tests use direct assertions
       (`EXPECT_EQ` / `EXPECT_THAT` with `EndsWith`) without a mock fixture. The
       project's `StrictMock`/`NiceMock` policy does not apply to this test.
+- [ ] Add Phase 11q12 Canonical Test Name Summary table to
+      `architecture/testing/testability-architecture.md` (ref:
+      architecture/testing/testability-architecture.md). This is tracked as a
+      discrete deliverable to ensure the spec update is not overlooked during
+      implementation. The table content is already specified in the Files
+      Changed entry for `testability-architecture.md` below (6 canonical test
+      names, columns: name, source file, CMake target, label, description).
 
 #### 6b. Update `tests/simulation/VehicleZoneTest.cpp` assertions
 
@@ -286,7 +305,20 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
     U/V within cell boundaries using `_parse_ply_uvs` (see Check 4c).
   - **Check 6** (LOD0 polygon budget per category): currently hardcodes
     `_lod0.b3d` for triangle-count validation; must discover `_lod0.ply`
-    via PLY-first path resolution.
+    via PLY-first path resolution. **Tripo3D budget branching note**: the
+    existing Check 6 thresholds (assembled LOD0 total ≤5,000 tris large /
+    ≤1,500 tris small) apply only to hand-modeled assembled-stack buildings.
+    Tripo3D building categories (`com_high_*`, `com_med_*`,
+    `res_high_01`/`02`/`03` -- identified via the asset's `.meta` sidecar
+    `category` field or the naming prefix `com_high`/`com_med`/`res_high_01`
+    through `res_high_03`) must use the Tripo3D
+    sub-row budget from the LOD Requirements table in
+    `architecture/asset-standards/3d-model-standards.md` (≤510,000 tris
+    LOD0). The implementation must branch on the asset's `.meta` category
+    or naming prefix to select the correct threshold before comparing the
+    parsed triangle count. Without this branching, Check 6 would
+    incorrectly reject all Tripo3D LOD0 meshes (~489K–502K tris) as
+    exceeding the assembled-stack 5,000/1,500-tri limit.
   - **Check 8** (pivot / origin): validate PLY mesh pivot (bounding-box
     center-bottom) within 5 mm tolerance.
   - **Note** (naming convention): `_lodN.ply` filenames are already validated
@@ -378,7 +410,7 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
 | `tests/simulation/VehicleZoneTest.cpp` | Update all 6 `vehicleMeshPath()` assertions to check extensionless base paths (e.g. `EndsWith("car_sedan_lod0")` instead of `EndsWith("car_sedan_lod0.b3d")`); no `IFileSystem*` parameter change needed -- `vehicleMeshPath()` signature is unchanged |
 | `CMakeLists.txt` | `target_sources(aitown_render PRIVATE src/rendering/mesh_format_utils.cpp)`; `target_sources(integration_tests PRIVATE tests/integration/MeshFormatUtilsTest.cpp)` — `simulation_tests` does NOT gain an `aitown_render` link dependency because `vehicleMeshPath()` no longer calls `resolveModelPath()` (extensionless base path design) |
 | `architecture/testing/framework.md` | Add `MeshFormatUtilsTest` to `integration_tests` file list in the `integration_tests` example block with comment `# Phase 11q12 — resolveModelPath() tests` |
-| `architecture/testing/testability-architecture.md` | Add note to the `simulation_tests` linkage constraint paragraph confirming that the `simulation_tests`-does-not-link-Irrlicht invariant is preserved: `vehicleMeshPath()` returns extensionless base paths with no `resolveModelPath()` call, so no `aitown_render` link is needed. `MeshFormatUtilsTest` lives in `integration_tests` (not `simulation_tests`). Add a "Phase 11q12 Canonical Test Name Summary" table listing all 6 test cases (3 nullptr-fallback: PLY-present / B3D-only / neither-present; 3 IFileSystem* via EDT_NULL: PLY-present / B3D-only / neither-present) with the following canonical test names: (1) `MeshFormatUtilsTest.NullFS_PLYPresent_ReturnsPLYPath`, (2) `MeshFormatUtilsTest.NullFS_B3DOnly_ReturnsB3DPath`, (3) `MeshFormatUtilsTest.NullFS_NeitherPresent_ReturnsB3DPath`, (4) `MeshFormatUtilsTest.IFileSystem_PLYPresent_ReturnsPLYPath`, (5) `MeshFormatUtilsTest.IFileSystem_B3DOnly_ReturnsB3DPath`, (6) `MeshFormatUtilsTest.IFileSystem_NeitherPresent_ReturnsB3DPath`; columns: canonical name, source file (`tests/integration/MeshFormatUtilsTest.cpp`), CMake target (`integration_tests`), label (`integration`), and one-sentence description — matching the per-phase convention at lines 2707--2718 |
+| `architecture/testing/testability-architecture.md` | Add note to the `simulation_tests` linkage constraint paragraph confirming that the `simulation_tests`-does-not-link-Irrlicht invariant is preserved: `vehicleMeshPath()` returns extensionless base paths with no `resolveModelPath()` call, so no `aitown_render` link is needed. `MeshFormatUtilsTest` lives in `integration_tests` (not `simulation_tests`). Add a "Phase 11q12 Canonical Test Name Summary" table listing all 6 test cases (3 nullptr-fallback: PLY-present / B3D-only / neither-present; 3 IFileSystem* via EDT_NULL: PLY-present / B3D-only / neither-present) with the following canonical test names: (1) `MeshFormatUtilsTest.NullFS_PLYPresent_ReturnsPLYPath`, (2) `MeshFormatUtilsTest.NullFS_B3DOnly_ReturnsB3DPath`, (3) `MeshFormatUtilsTest.NullFS_NeitherPresent_ReturnsB3DPath`, (4) `MeshFormatUtilsIFSTest.IFileSystem_PLYPresent_ReturnsPLYPath`, (5) `MeshFormatUtilsIFSTest.IFileSystem_B3DOnly_ReturnsB3DPath`, (6) `MeshFormatUtilsIFSTest.IFileSystem_NeitherPresent_ReturnsB3DPath`; columns: canonical name, source file (`tests/integration/MeshFormatUtilsTest.cpp`), CMake target (`integration_tests`), label (`integration`), and one-sentence description — matching the per-phase convention at lines 2707--2718 |
 | `tools/validate_assets.py` | Checks 1, 2, 3, 4, 4b, 4c, 6, 8, 10, 11, 15, 32 updated to discover and validate `.ply` files |
 | `architecture/asset-standards/3d-model-standards.md` | Update LOD Requirements table row for "Small buildings / props (height_floors >= 4)" (spec line 17) to read `_lod2.b3d` or `_lod2.ply` geometry shell (currently B3D-only); update checks 2 and 11 to include `_lod2.ply` alongside `_lod2.b3d` for floor-count conditional LOD2 prohibition and billboard co-existence; update Check #3 (Large building `_lod2` presence/tri-budget — generalize file reference to `.b3d` or `.ply`); update `BuildingAssetLoader` LOD Loading Contract section (lines 208--223) to describe PLY-first loading via `resolveModelPath()` for steps 2/3/5 (replace hardcoded `_lod0.b3d`/`_lod1.b3d`/`_lod2.b3d` paths with PLY-first resolution); annotate Multi-buffer split paragraph (line 344) as the root-cause limitation that PLY format resolves for high-poly LOD0 meshes; update Building LOD File Naming Convention (lines 319--332) to accept `.ply` alongside `.b3d` for all building LOD levels; add PLY exemption to LOD2 shell lightmap requirement (line 542) and LOD2 blend mode (line 544) — generalize these annotations to clarify that the UV1 lightmap exemption applies to `.ply` assets at **all** LOD levels (LOD0, LOD1, LOD2), not only LOD2, matching the check #5 validation exemption and the Notes section of this plan; update V1 Minimum Building Coverage section (lines 442--455) to accept `_lod0.ply`/`_lod1.ply`/`_lod2.ply` alongside `.b3d` in the three mesh bullet points; update Vehicle LOD File Naming Convention section (lines 395--403) to include `_lod0.ply` / `_lod1.ply` alongside `.b3d` examples; update Service Building Model Standards naming convention (lines 464--471) to note that `.ply` format is technically supported by the loader and validator but is not expected for service buildings in V1 (their LOD0 budgets of 2,000--4,000 tris are far below the B3D 65,535-vertex-per-buffer limit, so service buildings retain `.b3d` only); update Commercial High Skyscraper Standards LOD2 strategy bullet (spec line 163) to read `_lod2.b3d` or `_lod2.ply`; update `.meta` Sidecar `height_floors` field description (spec line 307) to say `_lod2.b3d` or `_lod2.ply` in all six occurrences; update Service Building LOD strategy narrative (line 482) to read "No `_lod2.b3d` geometry shell" (B3D-only — no `.ply` addition, consistent with the service building B3D-retention policy); update Commercial Medium Tripo3D Buildings pipeline section (line 380) to add a LOD2 pipeline difference: "LOD2: billboard baking only (no geometry shell) — all com_med variants have height_floors 2--3, triggering the floor-count conditional LOD2 prohibition (check #2) and the billboard imposter path; skip the voxel-remesh LOD2 geometry shell step inherited from Commercial High"; update Tripo3D Asset Processing Pipeline section (lines 350--396): annotate pipeline steps 8 (line 363) and 9 (line 378) to note that PLY export via `convert_tripo3d_to_ply.py` replaces B3DWriter export for LOD0 meshes exceeding the 65K-vertex-per-buffer B3D limit, and add a brief PLY pipeline subsection documenting the tool's usage; append check #32 (vehicle LOD0/LOD1 triangle budget with PLY-first file discovery and PLY header face-count parsing) to the Export Validation Script Required Checks list after check #20 (line 589), and update the Phase assignment note (line 591) to include "Check #32 (vehicle triangle budget with PLY discovery) is a Phase 11q12 addition."; extend LOD Requirements table: (a) expand the "Commercial Medium Tripo3D variants" row from "(com_med_01/02)" to "(com_med_01–04)" to cover all four variants that have PLY LOD0 files and change its LOD2 column from "≤500 tris shell" to "Billboard (point-sprite only)" to match the floor-count conditional LOD2 prohibition (all com_med variants have height_floors 2–3, so check #2 mandates billboard-only — the previous "≤500 tris shell" annotation was inconsistent), (b) add a new "Residential High Tripo3D variants (res_high_01/02/03)" row with the same elevated Tripo3D budget structure as Commercial High (≤510,000 LOD0 / ≤8,000 LOD1 / ≤600 LOD2), (c) add actual tri counts for res_high, com_med_03/04, and com_high_04 to the "Actual V1 Tripo3D tri counts" table (com_high_04 is in the PLY commit scope but has no binding limit row yet); also update existing com_med_01 and com_med_02 LOD2 entries from `500` to `N/A (billboard)` to match the updated LOD Requirements billboard-only strategy (all com_med variants have height_floors 2--3, so check #2 mandates billboard-only -- no geometry shell LOD2 is produced), and set com_med_03/04 LOD2 to `N/A (billboard)` as well, (d) extend the Tripo3D pipeline narrative (line 352) to include res_high alongside existing vehicle and commercial categories, and add a cross-reference for res_high noting that it follows the same pipeline as Commercial High (footprint_tiles=3, same scale/orientation conventions); update Residential High Building Variant Geometry Standards section (line ~727) to annotate that res_high_01/02/03 are subject to the Residential High Tripo3D sub-row budgets in the LOD Requirements table (same cross-reference pattern as the Commercial High section at line ~144: "These assets are subject to the Residential High Tripo3D sub-row budgets in the LOD Requirements table"), while noting that res_high_04 retains the general large-building budget |
 | `architecture/graphics-architecture/model-validator-tool.md` | Update lines referencing `.b3d`-only to include PLY-first loading; adjust Phase 11d Asset Inventory table to note LOD0 may be `.ply` |

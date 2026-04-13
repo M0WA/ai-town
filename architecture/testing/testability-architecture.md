@@ -2763,6 +2763,42 @@ protected:
 **CTest filter** for all Phase 11q6 tests:
 `-R "AgentDespawnRenderTest|SharedMeshRefCountTest|SceneEntityManagerDestroyOrderTest|AudioSystemVehicleReleaseTest|QueryPanelIntegrationTest.Populate_ServiceBuilding_ShowsType_NotUnzoned"`
 
+### Phase 11q12 Canonical Test Name Summary
+
+| Test Suite | Test Case | Source File | CMake Target | Label |
+| --- | --- | --- | --- | --- |
+| `MeshFormatUtilsTest` | `NullFS_PLYPresent_ReturnsPLYPath` | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
+| `MeshFormatUtilsTest` | `NullFS_B3DOnly_ReturnsB3DPath` | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
+| `MeshFormatUtilsTest` | `NullFS_NeitherPresent_ReturnsB3DPath` | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
+| `MeshFormatUtilsIFSTest` | `IFileSystem_PLYPresent_ReturnsPLYPath` | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
+| `MeshFormatUtilsIFSTest` | `IFileSystem_B3DOnly_ReturnsB3DPath` | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
+| `MeshFormatUtilsIFSTest` | `IFileSystem_NeitherPresent_ReturnsB3DPath` | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
+
+**Test details**:
+
+- `NullFS_PLYPresent_ReturnsPLYPath` -- calls `resolveModelPath()` with `nullptr`
+  for `IFileSystem*` and a base path where a `.ply` file exists. Asserts the
+  returned path has the `.ply` extension, confirming PLY-first resolution priority.
+- `NullFS_B3DOnly_ReturnsB3DPath` -- calls `resolveModelPath()` with `nullptr`
+  for `IFileSystem*` and a base path where only a `.b3d` file exists (no `.ply`).
+  Asserts the returned path has the `.b3d` extension, confirming fallback to
+  legacy format.
+- `NullFS_NeitherPresent_ReturnsB3DPath` -- calls `resolveModelPath()` with
+  `nullptr` for `IFileSystem*` and a base path where neither `.ply` nor `.b3d`
+  exists. Asserts the returned path ends with `.b3d`, confirming B3D fallback
+  when neither format file exists (caller handles load failure).
+- `IFileSystem_PLYPresent_ReturnsPLYPath` -- same as the nullptr variant but uses
+  the Irrlicht `IFileSystem` overload with an EDT_NULL device. Validates that the
+  IFileSystem-backed path resolution finds `.ply` files correctly.
+- `IFileSystem_B3DOnly_ReturnsB3DPath` -- IFileSystem overload variant; confirms
+  `.b3d` fallback works through the Irrlicht file system layer.
+- `IFileSystem_NeitherPresent_ReturnsB3DPath` -- IFileSystem overload variant.
+  Asserts the returned path ends with `.b3d`, confirming B3D fallback when
+  neither format file exists (caller handles load failure).
+
+**CTest filter** for all Phase 11q12 tests:
+`-R "MeshFormatUtilsTest\.|MeshFormatUtilsIFSTest\."`
+
 ### `AITOWN_TESTING_ENABLED` Guarded Test Seams
 
 Every test-only method guarded by `#ifdef AITOWN_TESTING_ENABLED` is catalogued here
