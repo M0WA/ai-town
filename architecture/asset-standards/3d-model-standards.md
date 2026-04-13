@@ -8,20 +8,21 @@
 
 ## LOD Requirements (mandatory for all city assets)
 
-| Asset category | LOD0 (near) | LOD1 (mid) | LOD2 (far) |
-|---|---|---|---|
-| Large buildings (general) | 4,000–8,000 tris | 1,000–1,500 tris | 400–600 tris |
-| Large buildings — Commercial High only (skyscrapers) | ≤510,000 tris (full-fidelity Tripo3D source; no LOD0 decimation) | ≤8,000 tris (DECIMATE COLLAPSE to ~5,000 tris target) | ≤600 tris (voxel remesh + DECIMATE shell) |
-| Large buildings — Commercial Medium Tripo3D variants (`com_med_01/02`) | ≤510,000 tris (full-fidelity Tripo3D source; no LOD0 decimation) | ≤5,500 tris (DECIMATE COLLAPSE to ~5,000 tris target) | ≤500 tris (voxel remesh + DECIMATE shell) |
-| Small buildings / props (height\_floors <= 3) | 1,500–3,000 tris | 200–400 tris | Billboard (point-sprite only) |
-| Small buildings / props (height\_floors >= 4) | 1,500–3,000 tris | 200–400 tris | 400–600 tris (`_lod2.b3d` or `_lod2.ply` geometry shell) |
-| Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) | 2,000–4,000 tris | 200–400 tris | Billboard |
-| Vehicles (cars) | ≤510,000 tris | ≤12,000 tris | Point/sprite |
-| Vehicles (bus, truck) | ≤510,000 tris | ≤12,000 tris | Point/sprite |
-| Vehicles (general indicative range) | ≤510,000 tris (full-fidelity Tripo3D source; see per-class table in § Vehicle Polygon Budget for binding limits) | ≤12,000 tris (per-part DECIMATE; see per-class table for binding limits) | Point/sprite |
-| Terrain chunk (64×64 m) | 32×32 quad grid | 16×16 quad grid | 8×8 quad grid |
-| Road tile (10×10 m) | ≤50 tris (flat quad + kerb geometry + center-line strip; Phase-11h adds a 2-tri center-line quad bringing the total from the prior ≤48 to ≤50) | ≤16 tris (flat quad only) | ≤8 tris (single quad) |
-| Infrastructure props (lamp posts, signs) | ≤300 tris | ≤75 tris | Billboard (same system as small buildings) |
+| Asset category                                                                     | LOD0 (near)                                                                                                                                    | LOD1 (mid)                                                               | LOD2 (far)                                               |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------- |
+| Large buildings (general)                                                          | 4,000–8,000 tris                                                                                                                               | 1,000–1,500 tris                                                         | 400–600 tris                                             |
+| Large buildings — Commercial High only (skyscrapers)                               | ≤510,000 tris (full-fidelity Tripo3D source; no LOD0 decimation)                                                                               | ≤8,000 tris (DECIMATE COLLAPSE to ~5,000 tris target)                    | ≤600 tris (voxel remesh + DECIMATE shell)                |
+| Large buildings — Commercial Medium Tripo3D variants (`com_med_01-04`)             | ≤510,000 tris (full-fidelity Tripo3D source; no LOD0 decimation)                                                                               | ≤5,500 tris (DECIMATE COLLAPSE to ~5,000 tris target)                    | Billboard (point-sprite only)                            |
+| Large buildings — Residential High Tripo3D variants (`res_high_01/02/03`)          | ≤510,000 tris (full-fidelity Tripo3D source; no LOD0 decimation)                                                                               | ≤8,000 tris (DECIMATE COLLAPSE to ~8,000 tris target)                    | ≤600 tris (voxel remesh + DECIMATE shell)                |
+| Small buildings / props (height_floors <= 3)                                       | 1,500–3,000 tris                                                                                                                               | 200–400 tris                                                             | Billboard (point-sprite only)                            |
+| Small buildings / props (height_floors >= 4)                                       | 1,500–3,000 tris                                                                                                                               | 200–400 tris                                                             | 400–600 tris (`_lod2.b3d` or `_lod2.ply` geometry shell) |
+| Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) | 2,000–4,000 tris                                                                                                                               | 200–400 tris                                                             | Billboard                                                |
+| Vehicles (cars)                                                                    | ≤510,000 tris                                                                                                                                  | ≤12,000 tris                                                             | Point/sprite                                             |
+| Vehicles (bus, truck)                                                              | ≤510,000 tris                                                                                                                                  | ≤12,000 tris                                                             | Point/sprite                                             |
+| Vehicles (general indicative range)                                                | ≤510,000 tris (full-fidelity Tripo3D source; see per-class table in § Vehicle Polygon Budget for binding limits)                               | ≤12,000 tris (per-part DECIMATE; see per-class table for binding limits) | Point/sprite                                             |
+| Terrain chunk (64×64 m)                                                            | 32×32 quad grid                                                                                                                                | 16×16 quad grid                                                          | 8×8 quad grid                                            |
+| Road tile (10×10 m)                                                                | ≤50 tris (flat quad + kerb geometry + center-line strip; Phase-11h adds a 2-tri center-line quad bringing the total from the prior ≤48 to ≤50) | ≤16 tris (flat quad only)                                                | ≤8 tris (single quad)                                    |
+| Infrastructure props (lamp posts, signs)                                           | ≤300 tris                                                                                                                                      | ≤75 tris                                                                 | Billboard (same system as small buildings)               |
 
 **Commercial High skyscraper sub-row**: The `com_high_*` row (7,000–10,000 tris LOD0) applies
 exclusively to V1 skyscrapers — glass towers with `height_floors` 15–30. These buildings feature
@@ -29,6 +30,21 @@ stepped or tapered forms, glass curtain-wall facades, and distinctive crown trea
 antenna cluster, or setback pyramid) that require a higher polygon budget to preserve their
 silhouette fidelity at LOD0 and LOD1 viewing distances. See the **Commercial High Skyscraper
 Standards** section below for full design requirements.
+
+**Residential High Tripo3D sub-row**: The `res_high_01/02/03` row applies to Tripo3D-sourced
+residential high-rise variants only. `res_high_04` is hand-modeled (not Tripo3D) and retains
+the general "Large buildings" LOD budget (4,000--8,000 tris LOD0, 1,000--1,500 tris LOD1,
+400--600 tris LOD2).
+
+**Commercial Medium Tripo3D sub-row (Billboard LOD2)**: The `com_med_01-04` row appears
+under "Large buildings" because these assets carry a full Tripo3D LOD0/LOD1 polygon budget
+(up to 510 K tris LOD0, ~5 K tris LOD1). However, Commercial Medium buildings are only
+2--3 storeys (`height_floors` 2 or 3), placing them in the `height_floors <= 3` tier. Per
+the `BuildingAssetLoader` LOD Loading Contract (step 4), `height_floors <= 3` assets use
+billboard LOD2 (`_billboard.dds`), not a `_lod2.b3d` geometry shell. The "Large buildings"
+label in this row refers exclusively to the LOD0/LOD1 poly budget tier, not the LOD2
+strategy. The LOD2 strategy is always determined by `height_floors`, not by row label or
+`.meta` `category`.
 
 **Road tile LOD thresholds**: Road tiles use the same LOD distance thresholds as small buildings/props (LOD0→LOD1 at 30 m / 25 m; LOD1→LOD2 at 100 m / 90 m). At LOD2 (>100 m), road tiles are rendered as flat coloured quads with no kerb or road marking geometry — road marking decals from the road atlas are disabled at LOD2. **Road LOD2 color source**: The LOD2 road quad color is sampled from the road tileable texture's average color, computed at asset pipeline generation time and stored as a named constant `RenderConstants::road_lod2_color` (type `irr::video::SColor`) in `src/rendering/render_constants.h`. This value must be a perceptual match of the center region of `road_asphalt_tileable.dds` when viewed in linear space (approximately a mid-dark gray, e.g. SColor(255, 60, 60, 60) for standard asphalt). Do NOT hardcode a magic color literal inline in rendering code — always use `RenderConstants::road_lod2_color` so that the color is updated in one place when the road texture changes. The LOD2 road quad does NOT bind a texture — it is drawn as a flat-shaded quad using the material's vertex color channel, set to `road_lod2_color` at entity construction time.
 
@@ -80,15 +96,15 @@ The road kerb geometry vertices are authored inline in `IrrlichtRenderer` as a u
 
 **Hysteresis bands are mandatory** to prevent LOD thrashing (continuous mesh rebind stutter) when the camera sits near a threshold:
 
-| Asset category | LOD0→LOD1 switch-out | LOD0→LOD1 switch-in | LOD1→LOD2 switch-out | LOD1→LOD2 switch-in |
-|---|---|---|---|---|
-| Large buildings | > 50 m | < 45 m | > 200 m | < 185 m |
-| Small buildings / props | > 30 m | < 25 m | > 100 m | < 90 m |
-| Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) | > 30 m | < 25 m | > 100 m | < 90 m |
-| Vehicles | > 40 m | < 35 m | > 100 m | < 90 m |
-| Terrain chunk | > 100 m | < 92 m | > 300 m | < 285 m |
-| Road tile | > 30 m | < 25 m | > 100 m | < 90 m |
-| Infrastructure props | > 30 m | < 25 m | > 100 m | < 90 m |
+| Asset category                                                                     | LOD0→LOD1 switch-out | LOD0→LOD1 switch-in | LOD1→LOD2 switch-out | LOD1→LOD2 switch-in |
+| ---------------------------------------------------------------------------------- | -------------------- | ------------------- | -------------------- | ------------------- |
+| Large buildings                                                                    | > 50 m               | < 45 m              | > 200 m              | < 185 m             |
+| Small buildings / props                                                            | > 30 m               | < 25 m              | > 100 m              | < 90 m              |
+| Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) | > 30 m               | < 25 m              | > 100 m              | < 90 m              |
+| Vehicles                                                                           | > 40 m               | < 35 m              | > 100 m              | < 90 m              |
+| Terrain chunk                                                                      | > 100 m              | < 92 m              | > 300 m              | < 285 m             |
+| Road tile                                                                          | > 30 m               | < 25 m              | > 100 m              | < 90 m              |
+| Infrastructure props                                                               | > 30 m               | < 25 m              | > 100 m              | < 90 m              |
 
 **Service buildings thresholds**: Service buildings (`fire_station`, `police_station`, `power_plant`, `water_tower`) are treated as a subtype of small buildings (`height_floors <= 3`) and use identical LOD distance thresholds. All four V1 service building types have `height_floors = 2`.
 
@@ -159,7 +175,7 @@ Tripo3D source; ≤8,000 tris LOD1 DECIMATE COLLAPSE to ~5,000 tris target; ≤6
   - Setback pyramid (faceted glass cap)
   - Antenna cluster (multi-element broadcast or cellular array)
   - Flat mechanical penthouse (equipment enclosure with parapet)
-  No two `com_high_*` variants may share the same crown type.
+    No two `com_high_*` variants may share the same crown type.
 - **LOD2 strategy**: `height_floors >= 4` — all `com_high_*` variants must ship
   `_lod2.b3d` geometry shells (500–700 tris). No `_billboard.dds` is used at LOD2 for
   these assets. The geometry shell must preserve the crown silhouette and overall
@@ -244,21 +260,21 @@ Z = tileZ * kTileSize
 
 **Tile footprint by density tier** (binding):
 
-| Density tier | Tile footprint | World footprint |
-|---|---|---|
-| `low` (res/com/ind) | 1×1 tiles | 10 m × 10 m |
-| `med` (res/com/ind) | 2×2 tiles | 20 m × 20 m |
-| `high` (res/com/ind) | 3×3 tiles | 30 m × 30 m |
-| Service buildings | 2×2 tiles | 20 m × 20 m |
+| Density tier         | Tile footprint | World footprint |
+| -------------------- | -------------- | --------------- |
+| `low` (res/com/ind)  | 1×1 tiles      | 10 m × 10 m     |
+| `med` (res/com/ind)  | 2×2 tiles      | 20 m × 20 m     |
+| `high` (res/com/ind) | 3×3 tiles      | 30 m × 30 m     |
+| Service buildings    | 2×2 tiles      | 20 m × 20 m     |
 
 **Native-size authoring convention**: Zone buildings and service buildings are authored at real-world scale (1 Blender unit = 1 m). Each density tier has its own correctly-sized model. **No runtime `setScale()` is applied** — `placeBuildingMesh()` and `placeServiceBuildingMesh()` place nodes at scale 1.0. The old ±2 m authoring convention is **retired**; Phase 9 assets must be re-exported at native world size.
 
-| Density tier | Local-space half-extent | World footprint |
-|---|---|---|
-| `low` (res/com/ind) | ±5 m | 10 m × 10 m |
-| `med` (res/com/ind) | ±10 m | 20 m × 20 m |
-| `high` (res/com/ind) | ±15 m | 30 m × 30 m |
-| Service (2×2) | ±10 m | 20 m × 20 m |
+| Density tier         | Local-space half-extent | World footprint |
+| -------------------- | ----------------------- | --------------- |
+| `low` (res/com/ind)  | ±5 m                    | 10 m × 10 m     |
+| `med` (res/com/ind)  | ±10 m                   | 20 m × 20 m     |
+| `high` (res/com/ind) | ±15 m                   | 30 m × 30 m     |
+| Service (2×2)        | ±10 m                   | 20 m × 20 m     |
 
 **Collision registration and simulation ownership**: All tiles in the footprint are marked occupied. The **origin tile** is the bottom-left corner (`tileX, tileZ`). The placed scene node's world origin is the **center of the full footprint**:
 
@@ -301,12 +317,12 @@ Every `.b3d` or `.ply` building or vehicle asset must ship a `<asset_name>.meta`
 }
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `category` | string | yes | One of `large_building`, `small_building`, `prop`, `vehicle`. Controls LOD2 strategy selection (billboard vs geometry shell) and export validation checks. |
-| `height_floors` | integer | yes | Total floor count. Used by export validation check #2 (billboard absent and `_lod2.b3d` absent when `height_floors <= 3`; `_lod2.b3d` required when `height_floors >= 4`), check #11 (geometry shell required for `height_floors >= 4`; `_lod2.b3d` prohibited for `height_floors <= 3`), and the C++ `LODNode` runtime upgrade path (billboard ↔ geometry shell switch on density tier change). Also used to compute building height (`height_floors × 3 m`) for collision mesh extrusion. The 4-floor threshold is the boundary: buildings with `height_floors >= 4` require a `_lod2.b3d` geometry shell for distant visibility; buildings with `height_floors <= 3` use the billboard imposter system at LOD2 (point-sprite only, no `_lod2.b3d`). |
-| `atlas_cell` | object | yes | `{ "row": R, "col": C }` — the asset's assigned cell in the 4096×4096 building atlas (phase-11e expansion with 8×8 grid of per-variant 512×512 cells; see `building-atlas-layout.md`). Used by export validation check #4 (UV channel 0 within atlas cell). |
-| `lod_distances` | array(3) | yes | `[lod0_to_lod1_distance, lod1_to_lod2_distance, cull_distance]` in world units (metres). These values are the canonical source for `LODNode` configuration at runtime. Field semantics: `lod_distances[0]` is the LOD0→LOD1 switch-in threshold (author-specified); `lod_distances[1]` is the LOD1→LOD2 switch-in threshold (author-specified); `lod_distances[2]` is the **cull distance** — the distance at which the entity is entirely removed from the scene graph. **`lod_distances[2]` is NOT the LOD1→LOD2 switch-out distance.** The LOD1→LOD2 switch-out distance is derived by the engine from `lod_distances[1]` plus a hysteresis band (5–10 m per the LOD Distance Thresholds table); the artist does not author this value directly. The export validation script check #9 validates: `lod1_to_lod2_distance − lod0_to_lod1_distance ≥ 5` (close hysteresis ≥ 5 m) and `cull_distance > lod1_to_lod2_distance` (the entity is not culled before LOD2 becomes visible — see check #9 note below). Small buildings with billboard imposters must set `lod_distances[1]` to their billboard swap distance (i.e., the distance at which `LODNode` transitions from the LOD1 mesh to the billboard quad). Example: `[30.0, 100.0, 200.0]` — LOD0→LOD1 switch-in at 30 m, LOD1→billboard switch-in at 100 m, cull at 200 m; the engine sets the LOD1→billboard switch-out at `100 + hysteresis_band` (e.g. 110 m), matching the LOD Distance Thresholds table. |
+| Field           | Type     | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| --------------- | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `category`      | string   | yes      | One of `large_building`, `small_building`, `prop`, `vehicle`. Controls LOD0/LOD1 polygon budgets, LOD distance thresholds, and export validation checks. LOD2 strategy (billboard vs geometry shell) is determined by `height_floors`, not `category`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `height_floors` | integer  | yes      | Total floor count. Used by export validation check #2 (billboard absent and `_lod2.b3d` absent when `height_floors <= 3`; `_lod2.b3d` required when `height_floors >= 4`), check #11 (geometry shell required for `height_floors >= 4`; `_lod2.b3d` prohibited for `height_floors <= 3`), and the C++ `LODNode` runtime upgrade path (billboard ↔ geometry shell switch on density tier change). Also used to compute building height (`height_floors × 3 m`) for collision mesh extrusion. The 4-floor threshold is the boundary: buildings with `height_floors >= 4` require a `_lod2.b3d` geometry shell for distant visibility; buildings with `height_floors <= 3` use the billboard imposter system at LOD2 (point-sprite only, no `_lod2.b3d`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `atlas_cell`    | object   | yes      | `{ "row": R, "col": C }` — the asset's assigned cell in the 4096×4096 building atlas (phase-11e expansion with 8×8 grid of per-variant 512×512 cells; see `building-atlas-layout.md`). Used by export validation check #4 (UV channel 0 within atlas cell).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `lod_distances` | array(3) | yes      | `[lod0_to_lod1_distance, lod1_to_lod2_distance, cull_distance]` in world units (metres). These values are the canonical source for `LODNode` configuration at runtime. Field semantics: `lod_distances[0]` is the LOD0→LOD1 switch-in threshold (author-specified); `lod_distances[1]` is the LOD1→LOD2 switch-in threshold (author-specified); `lod_distances[2]` is the **cull distance** — the distance at which the entity is entirely removed from the scene graph. **`lod_distances[2]` is NOT the LOD1→LOD2 switch-out distance.** The LOD1→LOD2 switch-out distance is derived by the engine from `lod_distances[1]` plus a hysteresis band (5–10 m per the LOD Distance Thresholds table); the artist does not author this value directly. The export validation script check #9 validates: `lod1_to_lod2_distance − lod0_to_lod1_distance ≥ 5` (close hysteresis ≥ 5 m) and `cull_distance > lod1_to_lod2_distance` (the entity is not culled before LOD2 becomes visible — see check #9 note below). Small buildings with billboard imposters must set `lod_distances[1]` to their billboard swap distance (i.e., the distance at which `LODNode` transitions from the LOD1 mesh to the billboard quad). Example: `[30.0, 100.0, 200.0]` — LOD0→LOD1 switch-in at 30 m, LOD1→billboard switch-in at 100 m, cull at 200 m; the engine sets the LOD1→billboard switch-out at `100 + hysteresis_band` (e.g. 110 m), matching the LOD Distance Thresholds table. |
 
 **Author guidance for `lod_distances` fields**:
 
@@ -326,18 +342,18 @@ Every `.b3d` or `.ply` building or vehicle asset must ship a `<asset_name>.meta`
   The LOD2 strategy for small buildings and props is determined by `height_floors` in `<asset_name>.meta`. The 4-floor threshold is the boundary: buildings with `height_floors >= 4` require a `_lod2.b3d` geometry shell for distant visibility; buildings with `height_floors <= 3` use the billboard imposter system at LOD2 (point-sprite only, no `_lod2.b3d`).
   - **height_floors <= 3**: These assets use the billboard imposter system at LOD2 and must **NOT** ship a `_lod2.b3d` file. They require a pre-baked imposter atlas named `<asset_name>_billboard.dds` (see `2d-texture-standards.md — Billboard Imposter Atlas` for the full format, mip chain, and sRGB upload path specification). The C++ `LODNode` loads `_lod0.b3d`, `_lod1.b3d`, and `_billboard.dds`. No `_lod2.b3d` is loaded or expected. The export validation script must flag any small building or prop asset with `height_floors <= 3` that has a `_lod2.b3d` file as an error.
   - **height_floors >= 4**: These assets are tall enough that a flat 128×128 px billboard frame cannot reproduce rooftop details and setbacks visible from the valid camera pitch range [−70°, −20°]. They must ship a `_lod2.b3d` geometry shell (300–500 tris) and must **NOT** rely solely on `_billboard.dds` at LOD2. The C++ `LODNode` loads `_lod0.b3d`, `_lod1.b3d`, and `_lod2.b3d`. No `_billboard.dds` is loaded or expected for LOD2 rendering (a `_billboard.dds` may still be authored for a lower-tier variant of the same zone slot if that variant has `height_floors <= 3`). The export validation script must flag any small building or prop asset with `height_floors >= 4` that lacks a `_lod2.b3d` file as an error (see check #11).
-  - Large buildings always use `_lod2.b3d` (geometry shell), regardless of floor count. The validation script distinguishes asset categories via `<asset_name>.meta` which specifies `category: large_building | small_building | prop`.
+  - Large buildings with `height_floors >= 4` always use `_lod2.b3d` (geometry shell). Large buildings with `height_floors <= 3` (e.g. `com_med_01-04`, which carry a high Tripo3D LOD0/LOD1 poly budget but are only 2–3 storeys) use billboard LOD2 — the same `_billboard.dds` path as small buildings. The `BuildingAssetLoader` `height_floors` check (step 4/5) is the single authoritative LOD2 dispatch rule; the `.meta` `category` field (`large_building | small_building | prop`) determines LOD0/LOD1 polygon budgets and distance thresholds, NOT the LOD2 strategy. The validation script distinguishes LOD2 expectations by `height_floors`, not by `category`.
 - The C++ `LODNode` (`src/rendering/LODNode.h`) loads all LOD variants at load time and swaps mesh buffers based on camera distance thresholds
 - Billboard LOD (small buildings 100m+): camera-facing quad with a **pre-baked imposter atlas** rendered from the LOD1 mesh using **8 bake angles** (every 45°). The camera-facing quad UV is selected at runtime based on the angle between the camera and the building's facing direction (snapped to nearest 45°). See [`2d-texture-standards.md` — Billboard Imposter Atlas](../asset-standards/2d-texture-standards.md#billboard-imposter-atlas) for the full format, dimensions, mip chain, bake elevation, bake lighting, wrap mode, and sRGB upload path specification.
   - **Billboard floor count limit**: Billboard impostors are only valid for buildings with **height_floors <= 3** (≤ 9 m total height). Buildings with height_floors >= 4 exhibit unacceptable silhouette mismatch at billboard scale (the flat 128×128 px frame cannot reproduce rooftop details, setbacks, or step changes visible from the valid camera pitch range [−70°, −20°] for tall buildings). The 4-floor threshold is the boundary: buildings with `height_floors >= 4` require a `_lod2.b3d` geometry shell for distant visibility; buildings with `height_floors <= 3` use the billboard imposter system at LOD2 (point-sprite only, no `_lod2.b3d`). **Runtime category reassignment rule**: When a zone tile auto-upgrades to a higher density tier (e.g., Low → Medium) and the new density tier's building variant has height_floors >= 4, the C++ `LODNode` must automatically switch from the billboard LOD2 path to the geometry-shell LOD2 path. The asset pipeline must provide a `_lod2.b3d` geometry shell for any building variant with height_floors >= 4. The `<asset_name>.meta` file must specify `height_floors` per variant; `LODNode` reads this at tile upgrade time and selects the correct LOD2 strategy. Buildings with height_floors >= 4 at any density tier must use the full LOD2 geometry shell (`_lod2.b3d`) at the 100 m distance threshold. The export validation script must check the `height_floors` field in `<asset_name>.meta` and flag small-building/prop assets with `height_floors >= 4` that do NOT have a `_lod2.b3d` file as an error (see check #11), and flag small-building/prop assets with `height_floors <= 3` that DO have a `_lod2.b3d` file as an error (see check #2).
 
 #### Vehicle Polygon Budget (LOD0 / LOD1)
 
-| Vehicle class | LOD0 budget | LOD1 budget | Actual (V1 source) |
-|---|---|---|---|
+| Vehicle class               | LOD0 budget   | LOD1 budget  | Actual (V1 source)                  |
+| --------------------------- | ------------- | ------------ | ----------------------------------- |
 | Car (sedan, hatchback, SUV) | ≤510,000 tris | ≤12,000 tris | 489,029–497,478 LOD0 / ~10,000 LOD1 |
-| Bus | ≤510,000 tris | ≤12,000 tris | 502,258 LOD0 / 10,112 LOD1 |
-| Truck | ≤510,000 tris | ≤12,000 tris | 501,372 LOD0 / 9,998 LOD1 |
+| Bus                         | ≤510,000 tris | ≤12,000 tris | 502,258 LOD0 / 10,112 LOD1          |
+| Truck                       | ≤510,000 tris | ≤12,000 tris | 501,372 LOD0 / 9,998 LOD1           |
 
 Vehicle assets are full-fidelity Tripo3D photogrammetry-style meshes. The LOD0 budget is intentionally large to preserve maximum visual quality. LOD1 is produced by per-part DECIMATE COLLAPSE targeting ~10,000 tris total.
 
@@ -370,7 +386,7 @@ All V1 Tripo3D-sourced assets (vehicles, commercial high buildings, and commerci
 4. UV: remap original Tripo3D FBX UV coordinates into assigned building atlas cell (8×8 grid,
    256×256 px cell). **Do NOT smart_unwrap** — FBX UVs correctly map faces to the basecolor
    texture; discarding them destroys the texture mapping
-5. Basecolor JPG baked into buildings\_atlas\_d.png at atlas cell; DDS regenerated from PNG
+5. Basecolor JPG baked into buildings_atlas_d.png at atlas cell; DDS regenerated from PNG
 6. LOD0: no decimation — full Tripo3D mesh + 30 m × 30 m ground plate (ground plate UVs
    remapped to atlas cell before joining)
 7. LOD1: DECIMATE COLLAPSE targeting ~5,000 tris; re-remap UVs to atlas cell
@@ -386,13 +402,19 @@ Same pipeline as Commercial High with the following differences:
 
 **Actual V1 Tripo3D tri counts** (binding upper limits for `validate_assets.py`):
 
-| Asset | LOD0 | LOD1 | LOD2 |
-|---|---|---|---|
-| com\_high\_01 | 495,414 | 7,104 | 500 |
-| com\_high\_02 | 212,079 | 4,999 | 500 |
-| com\_high\_03 | 229,704 | 5,000 | 500 |
-| com\_med\_01 | 501,000 | 5,000 | 500 |
-| com\_med\_02 | 500,877 | 4,999 | 500 |
+| Asset       | LOD0    | LOD1  | LOD2 |
+| ----------- | ------- | ----- | ---- |
+| com_high_01 | 495,414 | 7,104 | 500  |
+| com_high_02 | 212,079 | 4,999 | 500  |
+| com_high_03 | 229,704 | 5,000 | 500  |
+| com_high_04 | TBD     | TBD   | TBD  |
+| com_med_01  | 501,000 | 5,000 | Billboard |
+| com_med_02  | 500,877 | 4,999 | Billboard |
+| com_med_03  | TBD     | TBD   | Billboard |
+| com_med_04  | TBD     | TBD   | Billboard |
+| res_high_01 | TBD     | TBD   | TBD  |
+| res_high_02 | TBD     | TBD   | TBD  |
+| res_high_03 | TBD     | TBD   | TBD  |
 
 #### Vehicle LOD File Naming Convention
 
@@ -486,12 +508,12 @@ bay insets). This means:
 
 **LOD distance thresholds** (small buildings/props category):
 
-| Threshold | Distance |
-|---|---|
-| LOD0→LOD1 switch-out | > 30 m |
-| LOD0→LOD1 switch-in | < 25 m |
-| LOD1→LOD2 switch-out | > 100 m |
-| LOD1→LOD2 switch-in | < 90 m |
+| Threshold            | Distance |
+| -------------------- | -------- |
+| LOD0→LOD1 switch-out | > 30 m   |
+| LOD0→LOD1 switch-in  | < 25 m   |
+| LOD1→LOD2 switch-out | > 100 m  |
+| LOD1→LOD2 switch-in  | < 90 m   |
 
 **`.meta` sidecar fields** (mandatory for all four service building types):
 
@@ -544,16 +566,16 @@ delivery. No 3D model asset is on the Phase 10 critical path.
 - **LOD2 baked shell lightmap blend mode**: The lightmap texture (UV channel 1, `_lod2_lm.dds`) is blended using **multiply blend mode at 100% opacity** over the diffuse. The runtime shader samples UV0 for diffuse and UV1 for lightmap, then multiplies: `finalColor = diffuseColor * lightmapColor`. No directional lighting is applied to LOD2 shell meshes (V1 scope) — the baked lightmap encodes all static shading. This is consistent with the flat ambient-only bake used for billboard LODs at similar distances. **PLY exemption**: `.ply` LOD2 assets have no UV channel 1; the shader falls back to diffuse-only rendering (`finalColor = diffuseColor`) — lightmap multiply is skipped when UV1 is absent.
 - **Per-module polygon caps**:
   Per-module polygon caps (LOD0):
-    Wall tile (mid-floor):       ≤300 triangles
-    Base module (ground floor):  ≤400 triangles (lobby entry detail; slightly higher than mid-floor)
-    Roof module:                 ≤500 triangles (parapets, HVAC, cornices within 3 m budget)
-    Facade detail (snap-on):     ≤100 triangles per piece (balcony, pilaster, window bay)
+  Wall tile (mid-floor): ≤300 triangles
+  Base module (ground floor): ≤400 triangles (lobby entry detail; slightly higher than mid-floor)
+  Roof module: ≤500 triangles (parapets, HVAC, cornices within 3 m budget)
+  Facade detail (snap-on): ≤100 triangles per piece (balcony, pilaster, window bay)
 
   Per-module polygon caps (LOD1):
-    Wall tile (mid-floor):       ≤75 triangles
-    Base module:                 ≤100 triangles
-    Roof module:                 ≤125 triangles
-    Facade detail:               ≤25 triangles per piece
+  Wall tile (mid-floor): ≤75 triangles
+  Base module: ≤100 triangles
+  Roof module: ≤125 triangles
+  Facade detail: ≤25 triangles per piece
 
   LOD2: single hand-authored baked shell mesh (not assembled from modules) — ≤500 tris total for large building (300–500 tris range allows meaningful silhouette features)
 
@@ -561,8 +583,8 @@ delivery. No 3D model asset is on the Phase 10 critical path.
 
   **Compositional budget check (mandatory export validation)**:
   A fully assembled building (base + N floor tiles + roof + facade details) must not exceed:
-    LOD0 assembled total: 5,000 triangles (large building), 1,500 triangles (small/prop building)
-    LOD1 assembled total: 1,000 triangles (large building), 300 triangles (small/prop building)
+  LOD0 assembled total: 5,000 triangles (large building), 1,500 triangles (small/prop building)
+  LOD1 assembled total: 1,000 triangles (large building), 300 triangles (small/prop building)
   The export validation script must measure assembled totals for a representative N-floor stack at
   each density tier and reject any combination that exceeds these limits.
 
@@ -580,13 +602,13 @@ delivery. No 3D model asset is on the Phase 10 critical path.
   11. Small building / prop assets with `height_floors >= 4` must have a `_lod2.b3d` or `_lod2.ply` geometry shell (not just billboard). Conversely, small building / prop assets with `height_floors <= 3` must NOT have a `_lod2.b3d` or `_lod2.ply` file — they use point-sprite LOD2 only. The 4-floor threshold is the boundary: buildings with `height_floors >= 4` require a `_lod2.b3d` or `_lod2.ply` geometry shell for distant visibility; buildings with `height_floors <= 3` use the billboard imposter system at LOD2 (point-sprite only, no `_lod2.b3d` or `_lod2.ply`).
   12. Vehicle normal map UV channel 0 coordinates fall within the asset's assigned atlas cell in `vehicles_normal_atlas_n.dds` (8×8 grid of 256×256 cells in 2048×2048; vehicle row/column assignments match the diffuse atlas registry in `vehicle_atlas_registry.json` — same row R and column C, but cell UV range is `U ∈ [C/8, (C+1)/8]`, `V ∈ [R/8, (R+1)/8]` since the normal atlas has an 8×8 grid). The V-axis origin convention (OpenGL, V=0 at bottom, row 0 is the bottom row) applies identically to normal atlas UV verification — artists must apply V-flip (`V_opengl = 1 − V_blender`) when authoring UV islands for the normal atlas in Blender, using the same convention documented in the Vehicle Atlas Cell Registry.
   13. Facade atlas cell pixels — all non-transparent pixel content falls within the [8, 504] texel range on both U and V axes per 512×512 cell (496×496 usable zone; 8-texel border on each edge). Validate by reading pixel alpha values in the border zone for each cell in the 4096×4096 building atlas (phase-11e expansion).
-  Note: Check #14 is the music JSON sidecar validation (`validate_assets.py` checks all `music_*.ogg` files have co-located `.json` sidecars matching `tools/music_sidecar_schema.json`) — defined in `architecture/audio-architecture/v1-audio-asset-manifest.md` and implemented in Phase 5.
-  15. `.meta` sidecar file presence — every `.b3d` or `.ply` building or vehicle file must have a corresponding `<asset_name>.meta` sidecar file. Missing sidecar: validation error. This check is a stub in Phase 5 (`# TODO Phase 9` comment); replaced with full implementation in Phase 9.
-  16. `music_*.ogg` must be stereo (channels == 2), 44100 Hz; `ambient_*.ogg` must be stereo, 44100 Hz. Hard error on mismatch. Graceful no-op if no matching files exist. Requires `mutagen`. Implemented in Phase 5.
-  17. `sfx_vehicle_engine_*.ogg` must have duration ≥ 6.0 s, mono (channels == 1), 44100 Hz. Hard error if duration < 6.0 s. Graceful no-op if no matching files exist. Requires `mutagen`. Implemented in Phase 5.
-  18. `sfx_zone_*.ogg` must have duration ≤ 18.0 s, mono, 44100 Hz. Hard error if duration > 18 s. Graceful no-op if no matching files exist. Requires `mutagen`. Implemented in Phase 5.
-  19. `stinger_*.wav` must be mono WAV PCM (1 channel, uncompressed). Hard error on stereo or compressed WAV. Graceful no-op if no matching files exist. Requires `mutagen`. Implemented in Phase 5.
-  20. Road LOD2 color validation — read `RenderConstants::road_lod2_color` from `src/rendering/render_constants.h`; decode `road_asphalt_tileable.dds` (DXT5) and compute the linear-space average RGB; verify the constant matches the computed average within a per-channel tolerance of ±3/255. Fail build on mismatch. Added in Phase 9 alongside the road tile LOD2 deliverable.
+      Note: Check #14 is the music JSON sidecar validation (`validate_assets.py` checks all `music_*.ogg` files have co-located `.json` sidecars matching `tools/music_sidecar_schema.json`) — defined in `architecture/audio-architecture/v1-audio-asset-manifest.md` and implemented in Phase 5.
+  14. `.meta` sidecar file presence — every `.b3d` or `.ply` building or vehicle file must have a corresponding `<asset_name>.meta` sidecar file. Missing sidecar: validation error. This check is a stub in Phase 5 (`# TODO Phase 9` comment); replaced with full implementation in Phase 9.
+  15. `music_*.ogg` must be stereo (channels == 2), 44100 Hz; `ambient_*.ogg` must be stereo, 44100 Hz. Hard error on mismatch. Graceful no-op if no matching files exist. Requires `mutagen`. Implemented in Phase 5.
+  16. `sfx_vehicle_engine_*.ogg` must have duration ≥ 6.0 s, mono (channels == 1), 44100 Hz. Hard error if duration < 6.0 s. Graceful no-op if no matching files exist. Requires `mutagen`. Implemented in Phase 5.
+  17. `sfx_zone_*.ogg` must have duration ≤ 18.0 s, mono, 44100 Hz. Hard error if duration > 18 s. Graceful no-op if no matching files exist. Requires `mutagen`. Implemented in Phase 5.
+  18. `stinger_*.wav` must be mono WAV PCM (1 channel, uncompressed). Hard error on stereo or compressed WAV. Graceful no-op if no matching files exist. Requires `mutagen`. Implemented in Phase 5.
+  19. Road LOD2 color validation — read `RenderConstants::road_lod2_color` from `src/rendering/render_constants.h`; decode `road_asphalt_tileable.dds` (DXT5) and compute the linear-space average RGB; verify the constant matches the computed average within a per-channel tolerance of ±3/255. Fail build on mismatch. Added in Phase 9 alongside the road tile LOD2 deliverable.
 
   **Phase assignment**: Checks #1–#13 are the Phase 5 implementation scope. Check #14 (music JSON sidecar) is also a Phase 5 check — it is defined in `architecture/audio-architecture/v1-audio-asset-manifest.md`. Checks #15–#19 are Phase 5 additions (Check #15: .meta sidecar stub; Checks #16–#19: audio format/duration checks). Check #20 (road LOD2 color validation) is a Phase 9 addition added when the road tile LOD2 deliverable is complete. Phase 5 implementers should implement checks #1–#19; Check #20 is reserved for Phase 9.
 
@@ -612,7 +634,6 @@ delivery. No 3D model asset is on the Phase 10 critical path.
   **Vehicle Atlas Cell Registry**: Each vehicle type must be assigned a unique atlas cell in `vehicles_diffuse_atlas_d.dds` (2048×2048 DDS DXT1, 4×4 grid of 16 cells at 512×512 px each). The registry is maintained in `tools/vehicle_atlas_registry.json` and must be updated whenever a new vehicle type is added.
 
   **Vehicle Atlas Registry sign-off**: Before Phase 6 vehicle UV authoring begins, `graphics-artist-3d-model` must review and co-sign `tools/vehicle_atlas_registry.json` alongside `graphics-dev-irrlicht`. Specifically, `graphics-artist-3d-model` must confirm:
-
   1. The V-flip convention (`V_opengl = 1 - V_blender`) is documented correctly for each vehicle type
   2. The atlas cell boundary UV formulas for the 4×4 diffuse grid and 8×8 normal grid are correct
   3. All five V1 vehicle type assignments (car_sedan, car_hatchback, car_suv, bus_standard, truck_cargo) are in the correct cell positions
@@ -645,11 +666,11 @@ delivery. No 3D model asset is on the Phase 10 critical path.
       "upload_path": "linear"
     },
     "assignments": [
-      { "vehicle_id": "car_sedan",     "row": 0, "col": 0 },
+      { "vehicle_id": "car_sedan", "row": 0, "col": 0 },
       { "vehicle_id": "car_hatchback", "row": 0, "col": 1 },
-      { "vehicle_id": "car_suv",       "row": 0, "col": 2 },
-      { "vehicle_id": "bus_standard",  "row": 1, "col": 0 },
-      { "vehicle_id": "truck_cargo",   "row": 1, "col": 1 }
+      { "vehicle_id": "car_suv", "row": 0, "col": 2 },
+      { "vehicle_id": "bus_standard", "row": 1, "col": 0 },
+      { "vehicle_id": "truck_cargo", "row": 1, "col": 1 }
     ]
   }
   ```
