@@ -142,7 +142,7 @@ Do not suggest alternative engines, languages, or platforms.
 - A Tripo3D model is replaced or removed (update or remove the corresponding row)
 - A new third-party asset from a different source is added (add a new section with the appropriate license)
 
-The CC BY 4.0 attribution table must always list every asset file (or glob pattern) derived from a Tripo3D source, the human-readable description, and the path to the original source zip under `assets/tripo3d.ai/`.
+The CC BY 4.0 attribution table must always list every asset file (or glob pattern) derived from a Tripo3D source, the human-readable description, and the path to the original source zip under `assets/tripo3d/free/`.
 
 ## README Maintenance
 
