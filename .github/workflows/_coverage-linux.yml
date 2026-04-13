@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     container:
-      image: ghcr.io/m0wa/aitown-ci-linux@sha256:fdf5a354a1a16166aad2448bdf157ae711aad11f83815e3d3792100caae4cdf1
+      image: ghcr.io/m0wa/aitown-ci-linux@sha256:0e26fa87818f7874827e0ef2c1286cb44d72da7429645766718aa1b3be6236a4
     permissions:
       packages: read    # pull from GHCR
       checks: write     # required by dorny/test-reporter
