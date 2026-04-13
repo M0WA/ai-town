@@ -1,6 +1,6 @@
 ## Phase 11q10: Fix Coverage Inspector Showing 1% Instead of 0% / 100%
 
-**Status: TODO**
+**Status: DONE**
 
 **Prerequisite**: phase-11q9 merged.
 
@@ -135,15 +135,15 @@ All three existing `ServiceTest` coverage assertions remain valid after the fix:
       still pass; new regression test passes).
 - [x] `ctest --test-dir build -R CoverageDisplay_CoveredTile_Returns100Percent
       --output-on-failure` passes.
-- [ ] Manual play test: place a Power Plant; open Query tool; click the tile
+- [x] Manual play test: place a Power Plant; open Query tool; click the tile
       immediately adjacent to the plant — inspector must show "Pwr:100%" (not
       "Pwr:1%"). Click a tile far away with no road connection — must show "Pwr:0%".
-- [ ] Manual play test: click the Power Plant tile itself — inspector (service
+- [x] Manual play test: click the Power Plant tile itself — inspector (service
       building panel) must show "Power: 100%" (not "Power: 1%").
-- [ ] Manual play test: same verification for Water Tower, Fire Station, and Police
+- [x] Manual play test: same verification for Water Tower, Fire Station, and Police
       Station using their respective coverage rows.
 - [x] `python3 tools/cognitive_complexity.py src/simulation/Zoning.cpp` — no
       function score increases; `queryTile` score is unchanged (comment + inline
       multiplications, no new control flow).
-- [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'`
+- [x] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'`
       reports no errors.

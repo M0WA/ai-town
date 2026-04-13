@@ -1,6 +1,6 @@
 # CI base image — extends ghcr.io/m0wa/aitown-ci-linux.
 # Both this file and ci.yml MUST pin identical digests (Atomicity Contract item 5).
-FROM ghcr.io/m0wa/aitown-ci-linux@sha256:fdf5a354a1a16166aad2448bdf157ae711aad11f83815e3d3792100caae4cdf1
+FROM ghcr.io/m0wa/aitown-ci-linux@sha256:0e26fa87818f7874827e0ef2c1286cb44d72da7429645766718aa1b3be6236a4
 # The CI base image ends with USER ci. Switch to root for all build-time
 # installs below; switch back to ci (with NOPASSWD sudo) at the end.
 USER root
@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
      > /etc/apt/sources.list.d/nodesource.list \
   && apt-get update && apt-get install -y --no-install-recommends \
   aggregate \
+  git-lfs \
   assimp-utils \
   autoconf \
   automake \

@@ -231,7 +231,7 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
   | `_splat` | **PNG only** (not DDS) — Terrain splat map: blending weights for terrain texture layers |
   | `_tileable` | DDS DXT1 sRGB — Road surface tileable texture (e.g. `road_asphalt_tileable.dds`) |
 
-  All suffixes are lowercase. No other suffix patterns are valid. `validate_assets.py` must reject any DDS file whose name does not end with one of these eight suffixes. The `_billboard` suffix applies exclusively to LOD2 imposter atlases — small building and prop assets that ship a `_billboard.dds` must NOT also ship a `_lod2.b3d` mesh.
+  All suffixes are lowercase. No other suffix patterns are valid. `validate_assets.py` must reject any DDS file whose name does not end with one of these eight suffixes. The `_billboard` suffix applies exclusively to LOD2 imposter atlases — small building and prop assets that ship a `_billboard.dds` must NOT also ship a `_lod2.b3d` or `_lod2.ply` mesh.
 
   **`_splat` note**: Splat maps are loaded as PNG at runtime via `IVideoDriver::getTexture()`. `validate_assets.py` MUST accept `.png` files ending in `_splat` and MUST NOT require them to be DDS. The canonical filename pattern is `terrain_splat.png`.
 
@@ -270,6 +270,7 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
 #### UV & Atlas Strategy
 
 - **2 UV channels per mesh**: Channel 0 = diffuse/albedo atlas; Channel 1 = lightmap baking. **Lightmap strategy**: Per-asset lightmaps (one `_lm` texture per building asset) for V1 — atlased lightmaps are preferred for VRAM efficiency post-V1. UV channel 1 unwrap must be non-overlapping across the entire mesh for correct lightmap baking.
+  - **PLY exemption**: Externally-generated PLY meshes (Tripo3D high-poly assets) carry only UV channel 0 and are exempt from the UV channel 1 (lightmap) requirement. This exemption applies to all PLY LOD levels (`_lod0.ply`, `_lod1.ply`, `_lod2.ply`). Lightmap re-baking requires future decimation-then-B3D re-export.
 - **KNOWN V1 LIMITATION — Lightmap UV repacking**: Per-asset lightmap UVs (UV channel 1) will require repacking when transitioning to atlased lightmaps post-V1. This is expected and planned rework. Artists must author UV channel 1 with uniform padding and non-rotated islands to ease atlas-friendliness. Do not optimize per-asset UV packing in ways that would require manual re-unwrap for atlasing. Post-V1 atlased `_lm` files will use a separate naming convention defined at that milestone.
 - **City building atlas**: Primary = **4096×4096** DXT1 sRGB (`buildings_atlas_d.dds`), 5 mip levels (4096→2048→1024→512→256, `GL_TEXTURE_MAX_LEVEL = 4`). This is the default on hardware where `GL_MAX_TEXTURE_SIZE ≥ 4096`. A `buildings_atlas_d_2k.dds` (2048×2048, 4 mip levels, `GL_TEXTURE_MAX_LEVEL = 3`) is also required as a fallback for GPUs where `GL_MAX_TEXTURE_SIZE < 4096`; the fallback strategy (runtime query and atlas selection) is documented in `architecture/graphics-architecture/irrlicht-device-lifecycle.md`. The fallback atlas uses the same 8×8 cell grid with 256×256 px cells (half the primary cell resolution); the same Cell Assignment Table in `building-atlas-layout.md` applies.
 
@@ -336,7 +337,7 @@ Small buildings and props use a pre-baked imposter atlas at LOD2 (beyond 100 m).
   - Mip 2: 256×32 — 8 × 32×32, usable **28×28 px** per frame
   - Mip 3: 128×16 — 8 × 16×16, usable **14×14 px** per frame (border shrinks to 1 px/side at this mip level; effective content is 14×14 px)
   At mip level 3 (used beyond ~400 m view distance), each building imposter is represented by 14×14 usable pixels. **Authoring requirement**: The primary silhouette of the building must be recognisable at 14×14 px — verified by downscaling a single frame to 14×14 in the DCC tool before finalising LOD2 billboard art. Fine details (windows, ledges) are not required to be legible at mip 3; gross building form (tower vs low-rise, vertical vs horizontal dominant shape) must remain distinguishable.
-- **Naming**: `<asset_name>_billboard.dds`. Small building / prop assets must NOT ship a `_lod2.b3d` file — the billboard DDS is the LOD2 asset for these categories.
+- **Naming**: `<asset_name>_billboard.dds`. Small building / prop assets must NOT ship a `_lod2.b3d` or `_lod2.ply` file — the billboard DDS is the LOD2 asset for these categories.
 
 **Phase 1 dated sign-off record** (required before Phase 1 exit):
 

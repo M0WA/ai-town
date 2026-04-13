@@ -214,10 +214,13 @@ QueryResult Zoning::queryTile(int tileX, int tileZ) const {
         }
     }
 
-    result.coverage.fire   = hasFireStation ? computeRadialCoverage(tileX, tileZ, ServiceBuildingType::FireStation)   : -1.0f;
-    result.coverage.police = hasPolice      ? computeRadialCoverage(tileX, tileZ, ServiceBuildingType::PoliceStation) : -1.0f;
-    result.coverage.water  = hasWater       ? computeRadialCoverage(tileX, tileZ, ServiceBuildingType::WaterTower)    : -1.0f;
-    result.coverage.power  = hasPower       ? computePowerCoverage(tileX, tileZ)                                     : -1.0f;
+    // computeRadialCoverage / computePowerCoverage return a boolean float
+    // (0.0 = not covered, 1.0 = covered).  ServiceCoverage stores percentages
+    // (0–100); multiply by 100 so the inspector displays "0%" / "100%".
+    result.coverage.fire   = hasFireStation ? computeRadialCoverage(tileX, tileZ, ServiceBuildingType::FireStation)   * 100.0f : -1.0f;
+    result.coverage.police = hasPolice      ? computeRadialCoverage(tileX, tileZ, ServiceBuildingType::PoliceStation) * 100.0f : -1.0f;
+    result.coverage.water  = hasWater       ? computeRadialCoverage(tileX, tileZ, ServiceBuildingType::WaterTower)    * 100.0f : -1.0f;
+    result.coverage.power  = hasPower       ? computePowerCoverage(tileX, tileZ)                                     * 100.0f : -1.0f;
 
     result.isAbandoned = tile->isAbandoned;
     result.underConstruction = tile->underConstruction;

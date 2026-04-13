@@ -234,9 +234,9 @@ TEST_F(ServiceTest, PowerCoverage_MultipleBuildings_NoStacking) {
     runTicks(1);
 
     QueryResult r = sim_->queryTile(5, 0);
-    // Coverage is either covered (1.0) or a normalized fraction; must NOT exceed 1.0.
-    EXPECT_LE(r.coverage.power, 1.0f)
-        << "Power coverage must not exceed 1.0f (no stacking from multiple plants)";
+    // Coverage is 0–100 percentage; must NOT exceed 100.0 (no stacking).
+    EXPECT_LE(r.coverage.power, 100.0f)
+        << "Power coverage must not exceed 100.0f (no stacking from multiple plants)";
     EXPECT_GT(r.coverage.power, 0.0f)
         << "Tile within range of two plants must be covered";
 }
@@ -860,4 +860,32 @@ TEST_F(ServiceTest, QueryTile_WithWaterTower_ReturnsCoverageData)
     EXPECT_TRUE(qr.isZoned);
     // Water coverage should be >= 0 (WaterTower is close enough).
     EXPECT_GE(qr.coverage.water, 0.0f);
+}
+
+// Phase 11q10: Regression test — coverage values in QueryResult must be on a
+// 0–100 scale so the inspector displays "100%" for covered tiles, not "1%".
+TEST_F(ServiceTest, CoverageDisplay_CoveredTile_Returns100Percent)
+{
+    cs()->addServiceBuilding(0, 0, 3);  // PowerPlant at (0,0)
+
+    // Road within 3 tiles of zone tile (2,0): place at (3,0).
+    sim_->placeRoad(3, 0, 0);
+    sim_->placeZone(2, 0, ZoneType::Residential, DensityTier::Low);
+
+    // Place a second residential tile far from the plant so it is NOT covered.
+    // Power plant radial fallback = ~80 tiles (800 m / 10 m). Tile at (200,0) is
+    // well beyond that range. Road at (201,0) satisfies road-within-3 proximity.
+    sim_->placeRoad(201, 0, 0);
+    sim_->placeZone(200, 0, ZoneType::Residential, DensityTier::Low);
+
+    runTicks(1);
+
+    QueryResult covered   = sim_->queryTile(2, 0);
+    QueryResult uncovered = sim_->queryTile(200, 0);
+
+    EXPECT_FLOAT_EQ(covered.coverage.power, 100.0f)
+        << "Covered tile must report coverage.power == 100.0f, not 1.0f";
+
+    EXPECT_FLOAT_EQ(uncovered.coverage.power, 0.0f)
+        << "Uncovered tile must report coverage.power == 0.0f";
 }

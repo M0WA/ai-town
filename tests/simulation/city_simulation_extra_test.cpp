@@ -717,7 +717,7 @@ TEST_F(DegradationCoverageTest, RadialCoverage_DegradedBuilding_HalvedRadius) {
     // Confirm within normal radius before any degradation.
     runTicks(1);
     QueryResult r1 = sim_->queryTile(50, 0);
-    EXPECT_FLOAT_EQ(r1.coverage.fire, 1.0f)
+    EXPECT_FLOAT_EQ(r1.coverage.fire, 100.0f)
         << "Within normal radius (500 m < 800 m), tile must be covered before degradation.";
 
     // Force budget deficit: add many service buildings creating upkeep, no revenue.
@@ -757,7 +757,7 @@ TEST_F(NiceCoverageTest, PowerCoverage_DisconnectedTile_RadialFallback) {
     // 5 tiles * 10 m/tile = 50 m << 800 m → within radial fallback coverage.
     runTicks(1);
     QueryResult r = sim_->queryTile(5, 0);
-    EXPECT_FLOAT_EQ(r.coverage.power, 1.0f)
+    EXPECT_FLOAT_EQ(r.coverage.power, 100.0f)
         << "Disconnected tile within radial fallback distance must be covered.";
 }
 
@@ -1233,7 +1233,7 @@ TEST_F(NiceCoverageTest, IsBuildableTile_NonExistentTile_ReturnsFalse) {
 
     // Just verify no crash and that the coverage query works.
     QueryResult r = sim_->queryTile(50, 50);
-    EXPECT_GE(r.coverage.power, -1.0f) << "Coverage must be -1 (N/A) or [0,1], not crash.";
+    EXPECT_GE(r.coverage.power, -1.0f) << "Coverage must be -1 (N/A) or [0,100], not crash.";
 }
 
 // ===========================================================================

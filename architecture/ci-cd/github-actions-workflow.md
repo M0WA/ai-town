@@ -1196,6 +1196,47 @@ markdown-lint:
             echo "PASS: check_31 present"
     ```
 
+  - Phase 11q12: Checks #1, #2, #3, #4, #4b, #6, #8, #10, #11, #15, and #32 (check #5
+    skips PLY files per UV1 exemption) are **extended** to discover and validate `.ply`
+    files alongside `.b3d`. The PLY-first mesh loading path introduced in Phase 11q12
+    requires the asset validator to accept `_lodN.ply` filenames, read PLY geometry for
+    triangle-count / UV / pivot validation, and treat a model set as complete when
+    LOD0/1/2 are present in either format. Check #32 is extended (vehicle triangle budget
+    extended for PLY path discovery). `check_32` is added to the numbered guard loop in
+    `_validate-assets.yml` (after `check_31`); the header comment is updated from
+    `check_31` to `check_32`. The checkout step in `_validate-assets.yml` must
+    **not** use blanket `lfs: true` (that downloads ALL LFS objects including
+    Tripo3D source zips/FBXs, bloating the job). Instead, add a selective LFS
+    fetch step **after** checkout: `git lfs pull -I "assets/3d/**/*.ply"` — this
+    fetches only the PLY geometry files tracked by Git LFS (`.gitattributes`:
+    `assets/3d/**/*.ply filter=lfs ...`) as real geometry data. Without this
+    step, content-parsing checks (3, 4, 4b, 6, 8, 32) receive ~130-byte LFS
+    pointer stubs instead of actual PLY geometry. The same selective-fetch
+    pattern applies to `_package-linux-deb.yml` and `_package-windows.yml` —
+    use `git lfs pull -I "assets/3d/**/*.ply"` after checkout instead of
+    blanket `lfs: true`. No change to `all-checks-pass` wiring.
+
+    Guard steps (add to `validate-assets` job after the existing check_31 guard, before
+    `Run asset validation`):
+
+    ```yaml
+        - name: Verify check_32 present in validate_assets.py
+          # check_32: vehicle per-class triangle budget (LOD0/LOD1) — extended in Phase 11q12 for PLY path discovery.
+          # A missing check_32 allows over-budget vehicle meshes to pass CI silently.
+          run: |
+            grep -q "check_32" tools/validate_assets.py || \
+              (echo "FAIL: check_32 not found in validate_assets.py — Phase 11q12 vehicle triangle budget gate missing" && exit 1)
+            echo "PASS: check_32 present"
+
+        - name: Verify PLY validation present in validate_assets.py
+          # Phase 11q12: checks 1-4, 4b, 6, 8, 10, 11, 15, 32 extended for PLY format discovery (check 5 skips PLY per UV1 exemption).
+          # A missing PLY path allows .ply assets to bypass validation silently.
+          run: |
+            grep -q '\.ply' tools/validate_assets.py || \
+              (echo "FAIL: PLY validation not found in validate_assets.py — Phase 11q12 PLY discovery gate missing" && exit 1)
+            echo "PASS: PLY validation present"
+    ```
+
 ### PHASE 0 FORM (validate-assets not yet introduced)
 
 ```yaml
@@ -1892,8 +1933,14 @@ path: `/opt/vcpkg/packages`, key includes `${{ matrix.codename }}` for distro-le
 
 **Step sequence** (after apt-get):
 
-1. (apt-get install — git + build deps)
+1. (apt-get install — git + build deps + `git-lfs` from Phase 11q12 onward:
+   bare Debian/Ubuntu containers do not ship `git-lfs`; it must be added to the
+   same `apt-get install` step so that the selective LFS fetch in step 2a works)
 2. Checkout
+2a. (Phase 11q12) Selective LFS fetch: `git lfs pull -I "assets/3d/**/*.ply"` —
+    fetches only PLY geometry files; blanket `lfs: true` must NOT be used because
+    it downloads all LFS objects (including Tripo3D source zips/FBXs), which would
+    be packaged into the `.deb` via the `install(DIRECTORY assets/ ...)` CPack rule
 3. Cache vcpkg packages
 4. vcpkg bootstrap from source + install (`--overlay-ports=vcpkg-overlays` for openal-soft 1.23.1 pin)
 5. CMake configure (for CPack metadata only — no build step); uses `ci-linux` preset
