@@ -1970,6 +1970,12 @@ which writes UTF-16 LE with BOM in PowerShell 5.1, corrupting `$GITHUB_PATH`).
 **Step sequence**:
 
 1. Checkout
+1a. (Phase 11q12) Selective LFS fetch: `git lfs pull -I "assets/3d/**/*.ply"` —
+    fetches only PLY geometry files; blanket `lfs: true` must NOT be used because
+    it downloads all LFS objects (including Tripo3D source zips/FBXs), which would
+    be packaged into the NSIS installer via the `install(DIRECTORY assets/ ...)`
+    CPack rule. No `git-lfs` install step is needed — `windows-latest` runners
+    ship git-lfs pre-installed (unlike bare Debian/Ubuntu containers)
 2. `choco install nsis --no-progress -y` (only workflow using Chocolatey)
 3. `ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c` — vcvarsall
 4. `lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1` — restore vcpkg
