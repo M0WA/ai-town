@@ -211,7 +211,7 @@ For static buildings, `addMeshSceneNode(static_cast<IMesh*>(lod0))` must be used
 |---|---|---|---|---|
 | Procedural terrain / runtime | `SMesh*` | `IMeshSceneNode` | `recalculateBoundingBox()` then `setMesh()` | Yes — caller owns ref |
 | B3D file (buildings, vehicles) | `IAnimatedMesh*` | `IMeshSceneNode` (via `addMeshSceneNode`) | `setMesh(static_cast<IMesh*>(lod))` | No — borrowed from cache |
-| PLY file (point cloud / props) | `IAnimatedMesh*` (concrete: `SAnimatedMesh` wrapping `CDynamicMeshBuffer`) | `IMeshSceneNode` (via `addMeshSceneNode`) | `setMesh(static_cast<IMesh*>(lod))` | No — borrowed from cache |
+| PLY file (Tripo3D buildings, vehicles) | `IAnimatedMesh*` (concrete: `SAnimatedMesh` wrapping `CDynamicMeshBuffer`) | `IMeshSceneNode` (via `addMeshSceneNode`) | `setMesh(static_cast<IMesh*>(lod))` | No — borrowed from cache |
 
 ### PLY Mesh Ownership Contract (Phase 11q12)
 

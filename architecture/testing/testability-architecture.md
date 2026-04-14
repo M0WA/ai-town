@@ -1446,7 +1446,7 @@ the audio playback path, not a unit test with strict call-count expectations on 
   This is the same 3-item atomicity rule applied for Phase 10b `setTileHeight()`.
 
   **Phase 11q12 extension — `vehicleMeshPath()` and the extensionless-path invariant**:
-  Phase 11q12 adds `vehicleMeshPath()` (declared in `src/simulation/vehicle_mesh_path.h`) as
+  Phase 11q12 adds `vehicleMeshPath()` (declared in `src/rendering/vehicle_mesh_path.h`) as
   a pure string-construction helper that returns extensionless base paths such as
   `"assets/3d/vehicles/car_sedan_lod0"` — with no `.b3d` or `.ply` suffix. This design
   deliberately preserves the `simulation_tests`-does-not-link-Irrlicht invariant: because
@@ -1455,8 +1455,8 @@ the audio playback path, not a unit test with strict call-count expectations on 
 
   Format resolution is handled by `resolveModelPath()` (declared in
   `src/rendering/mesh_format_utils.h`, implemented in `src/rendering/mesh_format_utils.cpp`),
-  which appends the correct extension (`.b3d` for runtime, `.ply` for offline tools) by
-  probing the runtime environment. Because `mesh_format_utils.cpp` compiles into
+  which tries `.ply` first and falls back to `.b3d`, regardless of whether called at runtime
+  (via `IFileSystem*`) or by offline tools (via `std::filesystem`). Because `mesh_format_utils.cpp` compiles into
   `aitown_render`, format resolution only occurs at `IrrlichtRenderer` call sites, which
   already link that target. `simulation_tests` never calls `resolveModelPath()` and therefore
   never links `aitown_render`.
