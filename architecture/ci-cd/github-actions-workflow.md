@@ -1204,25 +1204,11 @@ markdown-lint:
     LOD0/1/2 are present in either format. Check #32 is extended (vehicle triangle budget
     extended for PLY path discovery). `check_32` is added to the numbered guard loop in
     `_validate-assets.yml` (after `check_31`); the header comment is updated from
-    `check_31` to `check_32`. The checkout step in `_validate-assets.yml` must
-    **not** use blanket `lfs: true` (that downloads ALL LFS objects including
-    Tripo3D source zips/FBXs, bloating the job). Instead, add a selective LFS
-    fetch step **after** checkout: `git lfs pull -I "assets/3d/**/*.ply"` — this
-    fetches only the PLY geometry files tracked by Git LFS (`.gitattributes`:
-    `assets/3d/**/*.ply filter=lfs ...`) as real geometry data. Without this
-    step, content-parsing checks (3, 4, 4b, 6, 8, 32) receive ~130-byte LFS
-    pointer stubs instead of actual PLY geometry. The same selective-fetch
-    pattern applies to `_package-linux-deb.yml` and `_package-windows.yml` —
-    use `git lfs pull -I "assets/3d/**/*.ply"` after checkout instead of
-    blanket `lfs: true`. No change to `all-checks-pass` wiring.
-
-    Selective LFS fetch step (add to `validate-assets` job immediately after the
-    `actions/checkout` step and before the Python/pip install step):
-
-    ```yaml
-        - name: Fetch PLY geometry files from Git LFS
-          run: git lfs pull -I "assets/3d/**/*.ply"
-    ```
+    `check_31` to `check_32`. PLY files under `assets/3d/` are regular
+    git-tracked files (NOT Git LFS objects — only `assets/tripo3d/**/*.zip` is
+    tracked by LFS). No `lfs: true` or `git lfs pull` step is needed; PLY files
+    are present in the working tree after a normal `actions/checkout`. No change
+    to `all-checks-pass` wiring.
 
     Guard steps (add to `validate-assets` job after the existing check_31 guard, before
     `Run asset validation`):
@@ -1941,14 +1927,8 @@ path: `/opt/vcpkg/packages`, key includes `${{ matrix.codename }}` for distro-le
 
 **Step sequence** (after apt-get):
 
-1. (apt-get install — git + build deps + `git-lfs` from Phase 11q12 onward:
-   bare Debian/Ubuntu containers do not ship `git-lfs`; it must be added to the
-   same `apt-get install` step so that the selective LFS fetch in step 2a works)
+1. (apt-get install — git + build deps)
 2. Checkout
-2a. (Phase 11q12) Selective LFS fetch: `git lfs pull -I "assets/3d/**/*.ply"` —
-    fetches only PLY geometry files; blanket `lfs: true` must NOT be used because
-    it downloads all LFS objects (including Tripo3D source zips/FBXs), which would
-    be packaged into the `.deb` via the `install(DIRECTORY assets/ ...)` CPack rule
 3. Cache vcpkg packages
 4. vcpkg bootstrap from source + install (`--overlay-ports=vcpkg-overlays` for openal-soft 1.23.1 pin)
 5. CMake configure (for CPack metadata only — no build step); uses `ci-linux` preset
@@ -1978,12 +1958,6 @@ which writes UTF-16 LE with BOM in PowerShell 5.1, corrupting `$GITHUB_PATH`).
 **Step sequence**:
 
 1. Checkout
-1a. (Phase 11q12) Selective LFS fetch: `git lfs pull -I "assets/3d/**/*.ply"` —
-    fetches only PLY geometry files; blanket `lfs: true` must NOT be used because
-    it downloads all LFS objects (including Tripo3D source zips/FBXs), which would
-    be packaged into the NSIS installer via the `install(DIRECTORY assets/ ...)`
-    CPack rule. No `git-lfs` install step is needed — `windows-latest` runners
-    ship git-lfs pre-installed (unlike bare Debian/Ubuntu containers)
 2. `choco install nsis --no-progress -y` (only workflow using Chocolatey)
 3. `ilammy/msvc-dev-cmd@a102174a2b586eec2ea151a69e6fd14404a8ce7c` — vcvarsall
 4. `lukka/run-vcpkg@5e0cab206a5ea620130caf672fce3e4a6b5666a1` — restore vcpkg

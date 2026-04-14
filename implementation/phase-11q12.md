@@ -398,17 +398,11 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
       `Current highest check number: check_32`. This is separate from the generic
       PLY guard step (`grep -qi "ply" ...`) which validates PLY-format discovery
       across multiple checks.
-- [ ] **`_validate-assets.yml` Git LFS checkout**: add a selective LFS
-      fetch step after checkout (do NOT use blanket `lfs: true` — that
-      downloads ALL LFS objects including Tripo3D source zips/FBXs under
-      `assets/tripo3d/`, which are not needed and could exceed the
-      10-minute job timeout). Use `git lfs pull -I "assets/3d/**/*.ply"`
-      to fetch only the PLY geometry files that content-parsing checks
-      (3, 4, 4b, 6, 8, 32) require. Without this step, `.ply` files
-      tracked by Git LFS (see `.gitattributes`:
-      `assets/3d/**/*.ply filter=lfs ...`) remain as ~130-byte LFS
-      pointer stubs — content-parsing checks will produce incorrect
-      results or crash.
+- [ ] **`_validate-assets.yml` checkout**: no LFS-related changes needed.
+      PLY files under `assets/3d/` are regular git-tracked files (only
+      `assets/tripo3d/**/*.zip` is tracked by Git LFS per `.gitattributes`).
+      A standard `actions/checkout` produces the full PLY file content;
+      no `git lfs pull` step is required.
 - [ ] **`_validate-assets.yml` PLY guard step**: add a new CI step
       "Verify PLY validation present in validate_assets.py" that runs
       `grep -q '\.ply' tools/validate_assets.py` (literal `.ply` extension,
@@ -421,23 +415,14 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
       four-item atomicity rule: C++ source + test + `validate_assets.py` +
       CI must all be consistent in the same commit.
 
-#### 8. Update packaging workflows for PLY LFS fetch
+#### 8. Packaging workflows — no changes needed
 
-(ref: architecture/ci-cd/github-actions-workflow.md lines 1936-1944, 1973-1978)
-
-- [ ] Add `git-lfs` to `_package-linux-deb.yml` `apt-get install` step
-      (bare Debian/Ubuntu containers do not ship `git-lfs`; it must be
-      present before the selective LFS fetch in the next step)
-- [ ] Add `git lfs pull -I "assets/3d/**/*.ply"` after checkout in
-      `_package-linux-deb.yml` (do NOT use blanket `lfs: true` -- that
-      downloads all LFS objects including Tripo3D source zips/FBXs, which
-      would be packaged into the `.deb` via the `install(DIRECTORY assets/
-      ...)` CPack rule)
-- [ ] Add `git lfs pull -I "assets/3d/**/*.ply"` after checkout in
-      `_package-windows.yml` (do NOT use blanket `lfs: true` -- prevents
-      Tripo3D source zips from being included in the NSIS installer; no
-      `git-lfs` install step needed on Windows -- `windows-latest` runners
-      ship git-lfs pre-installed)
+PLY files under `assets/3d/` are regular git-tracked files (only
+`assets/tripo3d/**/*.zip` is tracked by Git LFS per `.gitattributes`).
+Both `_package-linux-deb.yml` and `_package-windows.yml` use a standard
+`actions/checkout` which produces full PLY file content. No `git-lfs`
+install step and no `git lfs pull` step are required. No changes to either
+packaging workflow for this phase.
 
 ---
 
@@ -482,8 +467,8 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
 ~50 lines new (`mesh_format_utils.h` + `mesh_format_utils.cpp` + test), ~25 lines changed across
 existing C++ files, ~150–250 lines changed in `validate_assets.py` (13 checks
 updated for PLY discovery + 2 new PLY-parsing helpers + check #32 extension),
-~40 lines across CI workflow YAML files (`_validate-assets.yml`,
-`_package-linux-deb.yml`, `_package-windows.yml`), ~1 line in `.gitattributes`.
+~15 lines across CI workflow YAML files (`_validate-assets.yml` guard steps only;
+`_package-linux-deb.yml` and `_package-windows.yml` require no changes).
 No new dependencies (only `<filesystem>` added in the `.cpp`, which is already
 available in GCC 12+ with `-lstdc++fs` if needed).
 
@@ -583,14 +568,11 @@ available in GCC 12+ with `-lstdc++fs` if needed).
       `SAnimatedMesh` (concrete), not `IAnimatedMesh` (interface), and
       Irrlicht is compiled with `-fno-rtti` so downcasting is
       prohibited per `scene-graph-ownership.md` lines 153–164.
-- [ ] PLY files are real geometry (not LFS pointer stubs) in packaged
-      artifacts: after the `git lfs pull -I "assets/3d/**/*.ply"` step in
-      both `_package-linux-deb.yml` and `_package-windows.yml`, committed
-      `.ply` files must contain binary vertex/face data (not the ~130-byte
-      `version https://git-lfs.github.com/spec/v1` pointer text). Verify
-      by inspecting a `.ply` file header in the packaging job workspace
-      (e.g. `head -1 assets/3d/buildings/com_high_01_lod0.ply` should
-      show `ply`, not `version https://git-lfs.github.com/spec/v1`).
+- [ ] PLY files in packaged artifacts contain real geometry: committed
+      `.ply` files are regular git objects (not LFS-tracked), so a standard
+      checkout always produces full binary vertex/face data. Verify by
+      inspecting a `.ply` file header: `head -1 assets/3d/buildings/com_high_01_lod0.ply`
+      should show `ply`.
 - [ ] Build succeeds on Linux (`make build`).
 - [ ] All existing tests pass (`make test`).
 
