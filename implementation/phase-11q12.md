@@ -145,13 +145,31 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
       validator. When `IFileSystem*` is nullptr, the fallback uses
       `std::filesystem::exists()` which handles absolute paths natively.
 - [ ] **Callers** in `IrrlichtRenderer.cpp` that pass the result to
-      `getMesh()` must wrap it:
+      `getMesh()` must wrap it using **Pattern B** (see contrast table below):
       `resolveModelPath(m_smgr->getFileSystem(), vehicleMeshPath(zone, variant), "")`
-      where the empty suffix means "already includes \_lodN" and
-      `resolveModelPath` appends `.ply` or `.b3d`.
+      The empty suffix `""` is mandatory because `vehicleMeshPath()` already
+      embeds `_lodN` in the returned base path (e.g. `car_sedan_lod0`);
+      `resolveModelPath` then appends only `.ply` or `.b3d`.
       **Note**: `IrrlichtRenderer` obtains `IFileSystem*` via
       `m_smgr->getFileSystem()` at each call site — same pattern as
       `BuildingAssetLoader` in Deliverable 2 (no new member needed).
+
+  **Two-pattern contrast — callers MUST choose the correct one:**
+
+  | Pattern | Caller | Example basePath | suffix arg | Resolved path |
+  |---------|--------|-----------------|------------|---------------|
+  | A | `BuildingAssetLoader` (Deliverable 2) | `"assets/3d/buildings/com_high_01"` (no LOD suffix) | `"_lod0"` | `com_high_01_lod0.ply` |
+  | B | `IrrlichtRenderer` via `vehicleMeshPath()` (Deliverable 4) | `"assets/3d/vehicles/car_sedan_lod0"` (LOD suffix already embedded) | `""` | `car_sedan_lod0.ply` |
+
+  > **WARNING — double-suffix bug**: Do NOT pass `"_lod0"` as suffix when
+  > calling via `vehicleMeshPath()`. Because `vehicleMeshPath()` already
+  > returns a path ending in `_lod0`, passing `"_lod0"` would produce
+  > `car_sedan_lod0_lod0.ply` — a file that does not exist. The `.ply`
+  > probe fails silently and `resolveModelPath` falls back to
+  > `car_sedan_lod0_lod0.b3d`, which also does not exist, so `getMesh()`
+  > returns nullptr and the vehicle model never loads. Always use `""` for
+  > Pattern B call sites.
+
 - [ ] Update the file-header docstring to mention extensionless return value.
 - [ ] **Design rationale**: `vehicleMeshPath()` lives in a header included by
       `simulation_tests`, which must NOT link `aitown_render` (per
@@ -213,7 +231,7 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
     leaks when an `EXPECT` or `ASSERT` fails mid-test. This follows the
     mandatory TearDown contract pattern established in
     `architecture/testing/testability-architecture.md` (see
-    `UIManagerTest` and `CitySimulationUnitTest` fixture examples):
+    `UIManagerDrawOrderTest` and `CitySimulationUnitTest` fixture examples):
     explicitly release the owned resource in `TearDown()` so cleanup is
     guaranteed regardless of test outcome. The three `nullptr`-fallback
     cases (cases 1--3) do not create a device and may remain as bare
@@ -547,8 +565,12 @@ available in GCC 12+ with `-lstdc++fs` if needed).
       (b) mesh-level — the wrapping `SAnimatedMesh` has its bounding box
       computed (either via explicit `recalculateBoundingBox()` or by
       `SAnimatedMesh` constructor aggregating buffer BBs into its `Box`
-      field). Both levels are required per the mandatory two-level
-      recalculation rule in `scene-graph-ownership.md` lines 34–36.
+      field). Both levels are verified per the PLY Mesh Ownership Contract in
+      `scene-graph-ownership.md` (PLY Mesh Ownership Contract section), which
+      documents that `CPLYMeshFileLoader` computes bounding boxes automatically
+      during load — no explicit `recalculateBoundingBox()` call is required;
+      this exit criterion is a verification step to confirm the loader's
+      internal behavior, not a requirement to add explicit calls.
       If either call is absent, add a defensive recalculation in the
       PLY loading path or immediately after `getMesh()` returns in
       `IrrlichtRenderer`: buffer-level via

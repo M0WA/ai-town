@@ -1445,6 +1445,27 @@ the audio playback path, not a unit test with strict call-count expectations on 
   Only once all three are present does the build and full test suite remain green.
   This is the same 3-item atomicity rule applied for Phase 10b `setTileHeight()`.
 
+  **Phase 11q12 extension — `vehicleMeshPath()` and the extensionless-path invariant**:
+  Phase 11q12 adds `vehicleMeshPath()` (declared in `src/simulation/vehicle_mesh_path.h`) as
+  a pure string-construction helper that returns extensionless base paths such as
+  `"assets/3d/vehicles/car_sedan_lod0"` — with no `.b3d` or `.ply` suffix. This design
+  deliberately preserves the `simulation_tests`-does-not-link-Irrlicht invariant: because
+  `vehicle_mesh_path.h` has zero Irrlicht dependencies, `simulation_tests` can `#include`
+  it freely without pulling in `aitown_render`.
+
+  Format resolution is handled by `resolveModelPath()` (declared in
+  `src/rendering/mesh_format_utils.h`, implemented in `src/rendering/mesh_format_utils.cpp`),
+  which appends the correct extension (`.b3d` for runtime, `.ply` for offline tools) by
+  probing the runtime environment. Because `mesh_format_utils.cpp` compiles into
+  `aitown_render`, format resolution only occurs at `IrrlichtRenderer` call sites, which
+  already link that target. `simulation_tests` never calls `resolveModelPath()` and therefore
+  never links `aitown_render`.
+
+  `MeshFormatUtilsTest` is placed in `integration_tests` (not `simulation_tests`) for two
+  reasons: (a) `resolveModelPath()` is compiled into `aitown_render`, which `integration_tests`
+  links; (b) the `EDT_NULL` device fixtures used in those tests satisfy the definition of an
+  integration test (they exercise a real renderer component, albeit without a display).
+
   **Y-position tests** (`MoveVehicleAgent_FlatTerrain_VehicleYIncludesBias` and
   `SpawnVehicleAgent_FlatTerrain_VehicleYIncludesBias`) require inspecting a real Irrlicht
   scene-node `getPosition().Y` after a renderer call and are therefore placed in
@@ -2765,13 +2786,13 @@ protected:
 
 ### Phase 11q12 Canonical Test Name Summary
 
-| Test Suite | Test Case | Source File | CMake Target | Label |
-| --- | --- | --- | --- | --- |
-| `MeshFormatUtilsTest` | `NullFS_PLYPresent_ReturnsPLYPath` | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
-| `MeshFormatUtilsTest` | `NullFS_B3DOnly_ReturnsB3DPath` | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
-| `MeshFormatUtilsTest` | `NullFS_NeitherPresent_ReturnsB3DPath` | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
-| `MeshFormatUtilsIFSTest` | `IFileSystem_PLYPresent_ReturnsPLYPath` | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
-| `MeshFormatUtilsIFSTest` | `IFileSystem_B3DOnly_ReturnsB3DPath` | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
+| Test Suite               | Test Case                                   | Source File                                 | CMake Target        | Label         |
+| ------------------------ | ------------------------------------------- | ------------------------------------------- | ------------------- | ------------- |
+| `MeshFormatUtilsTest`    | `NullFS_PLYPresent_ReturnsPLYPath`          | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
+| `MeshFormatUtilsTest`    | `NullFS_B3DOnly_ReturnsB3DPath`             | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
+| `MeshFormatUtilsTest`    | `NullFS_NeitherPresent_ReturnsB3DPath`      | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
+| `MeshFormatUtilsIFSTest` | `IFileSystem_PLYPresent_ReturnsPLYPath`     | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
+| `MeshFormatUtilsIFSTest` | `IFileSystem_B3DOnly_ReturnsB3DPath`        | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
 | `MeshFormatUtilsIFSTest` | `IFileSystem_NeitherPresent_ReturnsB3DPath` | `tests/integration/MeshFormatUtilsTest.cpp` | `integration_tests` | `integration` |
 
 **Test details**:

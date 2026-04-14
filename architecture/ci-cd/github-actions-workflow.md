@@ -1216,6 +1216,14 @@ markdown-lint:
     use `git lfs pull -I "assets/3d/**/*.ply"` after checkout instead of
     blanket `lfs: true`. No change to `all-checks-pass` wiring.
 
+    Selective LFS fetch step (add to `validate-assets` job immediately after the
+    `actions/checkout` step and before the Python/pip install step):
+
+    ```yaml
+        - name: Fetch PLY geometry files from Git LFS
+          run: git lfs pull -I "assets/3d/**/*.ply"
+    ```
+
     Guard steps (add to `validate-assets` job after the existing check_31 guard, before
     `Run asset validation`):
 

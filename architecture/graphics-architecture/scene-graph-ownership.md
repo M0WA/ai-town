@@ -211,6 +211,50 @@ For static buildings, `addMeshSceneNode(static_cast<IMesh*>(lod0))` must be used
 |---|---|---|---|---|
 | Procedural terrain / runtime | `SMesh*` | `IMeshSceneNode` | `recalculateBoundingBox()` then `setMesh()` | Yes — caller owns ref |
 | B3D file (buildings, vehicles) | `IAnimatedMesh*` | `IMeshSceneNode` (via `addMeshSceneNode`) | `setMesh(static_cast<IMesh*>(lod))` | No — borrowed from cache |
+| PLY file (point cloud / props) | `IAnimatedMesh*` (concrete: `SAnimatedMesh` wrapping `CDynamicMeshBuffer`) | `IMeshSceneNode` (via `addMeshSceneNode`) | `setMesh(static_cast<IMesh*>(lod))` | No — borrowed from cache |
+
+### PLY Mesh Ownership Contract (Phase 11q12)
+
+`ISceneManager::getMesh()` dispatches to the correct file loader based on the file extension:
+`.b3d` → `CB3DMeshFileLoader`; `.ply` → `CPLYMeshFileLoader`. Both return `IAnimatedMesh*`.
+
+The concrete type returned by `CPLYMeshFileLoader` is `SAnimatedMesh` wrapping one or more
+`CDynamicMeshBuffer` instances (one per material group in the PLY file). `CDynamicMeshBuffer`
+differs from `SSkinMeshBuffer` (used by the B3D loader) in one important way: it selects
+the index type at construction time based on vertex count:
+
+- Vertex count ≤ 65 535 → `EIT_16BIT` (16-bit index buffer, same as `SSkinMeshBuffer`)
+- Vertex count > 65 535 → `EIT_32BIT` (32-bit index buffer)
+
+**Upstream threshold bug (vendor patch required — Phase 11q12 Deliverable 6c):** The
+vendored `CPLYMeshFileLoader.cpp` line 233 uses `vertCount > 65565` (off-by-30 typo)
+instead of the correct `> 65535`. Meshes with vertex counts in the range [65 536–65 565]
+are therefore incorrectly assigned `EIT_16BIT`, causing silent index truncation and
+corrupt geometry at runtime. Phase 11q12 Deliverable 6c applies a one-line vendor patch
+to correct the threshold to `> 65535`. All current Tripo3D LOD0 assets are well above
+this range (~495 K vertices), so the bug does not affect existing assets; the patch
+prevents future edge-case corruption when new assets fall in the affected band.
+
+This automatic promotion to `EIT_32BIT` eliminates the 16-bit index overflow that can
+silently corrupt large meshes loaded via `SSkinMeshBuffer`. The caller never needs to
+inspect or override the index type.
+
+**Cache ownership for PLY assets is identical to B3D assets:**
+
+- `ISceneManager::getMesh()` returns a **borrowed** (non-owning) `IAnimatedMesh*`; the
+  Irrlicht mesh cache retains `ref_count == 1`.
+- Do **NOT** call `grab()` or `drop()` on the returned pointer in the normal load or LOD
+  swap path.
+- `CMeshSceneNode::setMesh()` internally drops the old mesh and grabs the new mesh;
+  the cache reference is not disturbed.
+- No explicit `recalculateBoundingBox()` is required: `CPLYMeshFileLoader` computes the
+  bounding box for each `CDynamicMeshBuffer` during load, and `SAnimatedMesh` aggregates
+  them.
+- As with B3D, never attempt a downcast on the returned `IAnimatedMesh*`. Work with
+  `IAnimatedMesh*` (or `IMesh*` via safe upcast) throughout.
+
+**Rule: `getMesh(".ply")` → `IAnimatedMesh*` → `static_cast<IMesh*>` → `addMeshSceneNode`.
+No grab, no drop, no recalculateBoundingBox.**
 
 ### CameraController — Preventing Animator Conflicts
 
