@@ -771,19 +771,18 @@ def convert_vehicle(fbx_path, asset_name, atlas_row, atlas_col, target_length):
     # Remove interior
     obj = remove_vehicle_interior(obj)
 
-    # UV remap
-    remap_uvs_to_atlas(obj, VEHICLE_ATLAS_GRID, atlas_row, atlas_col)
-
-    # Smooth shading
+    # Smooth shading (no UV dependency)
     select_only(obj)
     bpy.ops.object.shade_smooth()
 
-    # LOD0: full fidelity
+    # LOD0: duplicate from original obj (original UV), then remap to atlas.
+    # Do NOT modify obj's UV — each LOD gets remapped independently.
     print("\n  [LOD0] Full fidelity")
     lod0 = duplicate_obj(obj, f"{asset_name}_lod0")
+    remap_uvs_to_atlas(lod0, VEHICLE_ATLAS_GRID, atlas_row, atlas_col)
     export_ply(lod0, out_lod0)
 
-    # LOD1: decimated
+    # LOD1: decimate from original obj (original UV), then remap independently.
     print(f"\n  [LOD1] Decimate to ~{VEHICLE_LOD1_TRIS} tris")
     lod1, _ = decimate_per_part(obj, VEHICLE_LOD1_TRIS)
     remap_uvs_to_atlas(lod1, VEHICLE_ATLAS_GRID, atlas_row, atlas_col)
@@ -831,33 +830,30 @@ def convert_building(fbx_path, asset_name, atlas_row, atlas_col, footprint_tiles
     # Scale to footprint
     scale_building(obj, footprint_tiles)
 
-    atlas_png = os.path.join(_ASSETS_DIR, "textures", "buildings", "buildings_atlas_d.png")
+    # Paste the Tripo3D basecolor into the atlas cell once (shared by all LODs).
+    # remap_uvs_to_atlas below maps the original Tripo3D UV [0,1] -> atlas cell,
+    # preserving the UV-to-texture relationship from the source asset.
+    if basecolor_jpg and os.path.exists(basecolor_jpg):
+        bake_basecolor_to_atlas(basecolor_jpg, atlas_row, atlas_col)
 
-    # UV re-unwrap + bake + remap: replaces old remap_uvs_to_atlas + bake_basecolor_to_atlas.
-    # Uses Smart UV Project for a seam-minimised layout, then bakes the Tripo3D basecolor
-    # onto that layout so the texture aligns with the UVs.  Falls back to a direct paste
-    # if Cycles baking is unavailable.
-    rewrap_and_bake_to_atlas(obj, BUILDING_ATLAS_GRID, atlas_row, atlas_col,
-                             basecolor_jpg, atlas_png)
-
-    # LOD0: full fidelity
+    # LOD0: duplicate from original obj (with original Tripo3D UV), then remap.
+    # This preserves the correct UV-to-texture mapping — do NOT modify obj's UV.
     print("\n  [LOD0] Full fidelity")
     lod0 = duplicate_obj(obj, f"{asset_name}_lod0")
+    remap_uvs_to_atlas(lod0, BUILDING_ATLAS_GRID, atlas_row, atlas_col)
     export_ply(lod0, out_lod0)
 
-    # LOD1: decimated — re-unwrap independently (decimation destroys UV continuity)
+    # LOD1: decimate from original obj (original UV), then remap independently.
     print(f"\n  [LOD1] Decimate to ~{BUILDING_LOD1_TRIS} tris")
     lod1, _ = decimate_per_part(obj, BUILDING_LOD1_TRIS)
-    rewrap_and_bake_to_atlas(lod1, BUILDING_ATLAS_GRID, atlas_row, atlas_col,
-                             basecolor_jpg, atlas_png)
+    remap_uvs_to_atlas(lod1, BUILDING_ATLAS_GRID, atlas_row, atlas_col)
     export_ply(lod1, out_lod1)
 
     # LOD2: voxel remesh + collapse (only for tall buildings, height_floors > 3)
     if generate_lod2:
         print(f"\n  [LOD2] Voxel remesh + decimate to ~{BUILDING_LOD2_TRIS} tris")
         lod2, _ = decimate_voxel_then_collapse(obj, BUILDING_LOD2_TRIS)
-        rewrap_and_bake_to_atlas(lod2, BUILDING_ATLAS_GRID, atlas_row, atlas_col,
-                                 basecolor_jpg, atlas_png)
+        remap_uvs_to_atlas(lod2, BUILDING_ATLAS_GRID, atlas_row, atlas_col)
         export_ply(lod2, out_lod2)
     else:
         print(f"\n  [LOD2] Skipped (height_floors <= 3)")
