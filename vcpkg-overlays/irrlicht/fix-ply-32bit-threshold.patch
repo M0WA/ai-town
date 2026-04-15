@@ -1,0 +1,11 @@
+--- a/source/Irrlicht/CPLYMeshFileLoader.cpp	2026-04-15 03:45:54.248560469 -0700
++++ b/source/Irrlicht/CPLYMeshFileLoader.cpp	2026-04-15 03:45:54.252560488 -0700
+@@ -230,7 +230,7 @@
+ 		if (continueReading)
+ 		{
+ 			// create a mesh buffer
+-			CDynamicMeshBuffer *mb = new CDynamicMeshBuffer(video::EVT_STANDARD, vertCount > 65565 ? video::EIT_32BIT : video::EIT_16BIT);
++			CDynamicMeshBuffer *mb = new CDynamicMeshBuffer(video::EVT_STANDARD, vertCount > 65535 ? video::EIT_32BIT : video::EIT_16BIT);
+ 			mb->getVertexBuffer().reallocate(vertCount);
+ 			mb->getIndexBuffer().reallocate(vertCount);
+ 			mb->setHardwareMappingHint(EHM_STATIC);
