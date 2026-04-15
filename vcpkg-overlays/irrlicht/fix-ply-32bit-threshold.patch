@@ -9,7 +9,7 @@
  			mb->getVertexBuffer().reallocate(vertCount);
  			mb->getIndexBuffer().reallocate(vertCount);
  			mb->setHardwareMappingHint(EHM_STATIC);
-@@ -528,16 +528,17 @@
+@@ -528,16 +528,16 @@
 -	else if (strcmp(typeString, "uint") == 0 ||
 -		strcmp(typeString, "int16") == 0 ||
 +	else if (strcmp(typeString, "int16") == 0 ||

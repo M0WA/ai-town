@@ -40,7 +40,9 @@ DEBUG_DIR := build_debug
 ## Generate the CMake build configuration.
 ## Auto-selects ci-linux (Ninja+ccache) or local preset based on available tools.
 ## Override with: make config PRESET=ci-linux-coverage
+## Removes CMakeCache.txt first so switching presets (e.g. devcontainer → host) always works.
 config:
+	rm -f $(BUILD_DIR)/CMakeCache.txt
 	cmake --preset $(PRESET)
 
 ## Build all binaries (runs config first if build/ is missing).
