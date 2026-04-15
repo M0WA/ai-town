@@ -740,12 +740,30 @@ int main(int argc, char** argv)
                 : std::string(AITOWN_ASSETS_DIR) + "/textures/buildings/buildings_atlas_d.png";
             irr::video::ITexture* atlasTex = driver->getTexture(texPath.c_str());
 
+            // Compute spacing from the LOD0 mesh bounding box so large
+            // buildings (e.g. 30 m × 30 m "high" tier) don't visually
+            // overlap when all three LODs are shown side-by-side.
+            float effectiveSpacing = kSingleModelSpacing;
+            if (!slots.empty())
+            {
+                irr::scene::IAnimatedMesh* lod0 = smgr3->getMesh(slots[0].meshPath.c_str());
+                if (lod0)
+                {
+                    const irr::core::aabbox3df bb = lod0->getBoundingBox();
+                    const float extX = bb.MaxEdge.X - bb.MinEdge.X;
+                    const float extZ = bb.MaxEdge.Z - bb.MinEdge.Z;
+                    const float meshDiameter = std::max(extX, extZ);
+                    effectiveSpacing = std::max(kSingleModelSpacing,
+                                               meshDiameter + 5.0f);
+                }
+            }
+
             const int totalSlots = static_cast<int>(slots.size());
             for (int si = 0; si < totalSlots; ++si)
             {
                 float xPos = (static_cast<float>(si)
                               - static_cast<float>(totalSlots - 1) * 0.5f)
-                             * kSingleModelSpacing;
+                             * effectiveSpacing;
                 irr::scene::IAnimatedMesh* mesh = smgr3->getMesh(slots[si].meshPath.c_str());
                 if (!mesh)
                 {
@@ -776,6 +794,27 @@ int main(int argc, char** argv)
         {
             const int N = static_cast<int>(cat.names.size());
             BuildingAssetLoader loader(smgr3, driver);
+
+            // Pre-compute category spacing from the first model's LOD0 bounding
+            // box so large "high"-density buildings (30 m × 30 m footprint) don't
+            // overlap neighbours when four variants are shown in a row.
+            float catSpacing = kShowcaseSpacing;
+            if (N > 0)
+            {
+                std::string base0 = std::string(AITOWN_ASSETS_DIR) + "/"
+                                  + cat.pathPrefix + "/" + cat.names[0];
+                std::string lod0p = resolveModelPath(smgr3->getFileSystem(), base0, "_lod0");
+                irr::scene::IAnimatedMesh* m0 = smgr3->getMesh(lod0p.c_str());
+                if (m0)
+                {
+                    const irr::core::aabbox3df bb = m0->getBoundingBox();
+                    const float extX = bb.MaxEdge.X - bb.MinEdge.X;
+                    const float extZ = bb.MaxEdge.Z - bb.MinEdge.Z;
+                    catSpacing = std::max(kShowcaseSpacing,
+                                         std::max(extX, extZ) + 5.0f);
+                }
+            }
+
             for (int mi = 0; mi < N; ++mi)
             {
                 const std::string& name = cat.names[static_cast<size_t>(mi)];
@@ -792,7 +831,7 @@ int main(int argc, char** argv)
                 if (sn)
                 {
                     float xPos = (static_cast<float>(mi) - (static_cast<float>(N - 1) * 0.5f))
-                                 * kShowcaseSpacing;
+                                 * catSpacing;
                     sn->setPosition(irr::core::vector3df(xPos, 0.0f, 0.0f));
                     // PLY assets are already at world scale; only legacy B3D
                     // assets need the 10× correction.
@@ -840,11 +879,23 @@ int main(int argc, char** argv)
         // Vehicles are small (~4.4 m long) — use a much closer default radius than buildings.
         const bool catIsVehicle = (std::strcmp(cat.pathPrefix, "3d/vehicles") == 0);
         // PLY buildings are real-world scale (~77 m tall for com_high).  Use a
-        // 100 m orbit radius and mid-height orbit centre so the full building
-        // fits comfortably in a 60° vertical FOV.  B3D buildings are displayed
-        // at 10× tile-unit scale (~100 m) and already used kOrbitRadiusDefault.
+        // radius scaled to the loaded model span so all LODs / category variants
+        // fit comfortably in view.  Compute span from loadedXPositions (available
+        // after the loading block above).
+        float plyOrbitRadius = 100.0f;
+        if (!loadedXPositions.empty())
+        {
+            float spanHalf = 0.0f;
+            for (float xp : loadedXPositions)
+                if (std::abs(xp) > spanHalf) spanHalf = std::abs(xp);
+            // Add half a building width (estimate from first position step or 15 m)
+            float step = (loadedXPositions.size() > 1)
+                ? std::abs(loadedXPositions[1] - loadedXPositions[0]) : 30.0f;
+            spanHalf += step * 0.5f;
+            plyOrbitRadius = std::max(100.0f, spanHalf * 1.4f);
+        }
         float orbitRadius = (catIsVehicle && singleModelMode) ?  10.0f
-                          : catHasPLY                         ? 100.0f
+                          : catHasPLY                         ? plyOrbitRadius
                           : kOrbitRadiusDefault;
         float orbitPitch  = (catIsVehicle && singleModelMode) ?  22.0f : kOrbitPitchDefault;
         irr::core::vector3df orbitCenter = (catIsVehicle && singleModelMode)
