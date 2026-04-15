@@ -106,9 +106,9 @@ MANIFEST = {
     "medium_poly/buildings/svc_police_medium_1.zip": {"name": "svc_police_station", "type": "building", "atlas_row": 4, "atlas_col": 5, "footprint": 1},
     "medium_poly/buildings/svc_power_coal_medium_1.zip": {"name": "svc_power_plant", "type": "building", "atlas_row": 4, "atlas_col": 6, "footprint": 1},
     "medium_poly/buildings/svc_water_low_1.zip":     {"name": "svc_water_tower",   "type": "building", "atlas_row": 4, "atlas_col": 7, "footprint": 1},
-    # Additional svc variants (new assets, row 5)
-    "medium_poly/buildings/svc_fire_high_1.zip":          {"name": "svc_fire_high_01",          "type": "building", "atlas_row": 5, "atlas_col": 0, "footprint": 1},
-    "medium_poly/buildings/svc_power_coal_medium_2.zip":  {"name": "svc_power_coal_medium_02",  "type": "building", "atlas_row": 5, "atlas_col": 1, "footprint": 1},
+    # Additional svc variants (new assets, row 3 cols 5-6 to avoid collision with res_med_05/06 at 5,0/5,1)
+    "medium_poly/buildings/svc_fire_high_1.zip":          {"name": "svc_fire_high_01",          "type": "building", "atlas_row": 3, "atlas_col": 5, "footprint": 1},
+    "medium_poly/buildings/svc_power_coal_medium_2.zip":  {"name": "svc_power_coal_medium_02",  "type": "building", "atlas_row": 3, "atlas_col": 6, "footprint": 1},
     "medium_poly/buildings/svc_power_nuclear_medium_1.zip": {"name": "svc_power_nuclear_medium_01", "type": "building", "atlas_row": 5, "atlas_col": 2, "footprint": 1},
     "medium_poly/buildings/svc_power_nuclear_medium_2.zip": {"name": "svc_power_nuclear_medium_02", "type": "building", "atlas_row": 5, "atlas_col": 3, "footprint": 1},
     "medium_poly/buildings/svc_power_nuclear_medium_3.zip": {"name": "svc_power_nuclear_medium_03", "type": "building", "atlas_row": 5, "atlas_col": 4, "footprint": 1},
@@ -882,7 +882,7 @@ def bake_basecolor_to_atlas(basecolor_path, atlas_row, atlas_col):
         return
 
     import numpy as np
-    cell_px = 2048 // BUILDING_ATLAS_GRID  # 256
+    cell_px = 4096 // BUILDING_ATLAS_GRID  # 512 (spec: buildings atlas is 4096×4096)
 
     try:
         atlas_img = bpy.data.images.load(atlas_png, check_existing=False)
