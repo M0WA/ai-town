@@ -326,8 +326,175 @@ def remove_vehicle_interior(obj):
 # UV atlas remapping
 # ===========================================================================
 
+def rewrap_and_bake_to_atlas(obj, atlas_grid, row, col, basecolor_jpg, atlas_png, cell_px=256):
+    """Re-unwrap the mesh with Smart UV Project, bake the original texture onto the
+    new UV layout, write the baked cell into the atlas PNG, and update the object's
+    active UV map to the new atlas coordinates.
+
+    This replaces the old remap_uvs_to_atlas + bake_basecolor_to_atlas pair.  The
+    old approach suffered from visible UV-island seams because it kept the Tripo3D
+    UV layout (many tiny isolated islands) and pasted the basecolor image without
+    re-baking.  Smart UV Project produces a continuous, low-seam unwrap; baking
+    onto it fills every texel correctly.
+
+    Requires Blender's Cycles or EEVEE render engine (for texture baking).
+    Falls back to the old paste-and-remap approach when baking is unavailable.
+    """
+    import os
+
+    cell_u = 1.0 / atlas_grid
+    cell_v = 1.0 / atlas_grid
+    off_u  = col * cell_u
+    off_v  = row * cell_v
+
+    # --- Step 1: create a new UV map "atlas_uv" with Smart UV Project ---
+    select_only(obj)
+    # Remove any pre-existing atlas_uv layer so we start clean
+    existing = [l for l in obj.data.uv_layers if l.name == "atlas_uv"]
+    for l in existing:
+        obj.data.uv_layers.remove(l)
+    atlas_layer = obj.data.uv_layers.new(name="atlas_uv")
+    obj.data.uv_layers.active = atlas_layer
+
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.uv.smart_project(
+        angle_limit=math.radians(66),
+        island_margin=0.02,
+        scale_to_bounds=True,
+    )
+    bpy.ops.object.mode_set(mode='OBJECT')
+    print(f"  Smart UV Project done (new UV map 'atlas_uv')")
+
+    # --- Step 2: bake original texture onto the new atlas_uv layout ---
+    baked_ok = False
+    if basecolor_jpg and os.path.exists(basecolor_jpg):
+        try:
+            # Set up Cycles bake
+            bpy.context.scene.render.engine = 'CYCLES'
+            bpy.context.scene.cycles.samples = 1
+
+            # Create a bake target image
+            bake_img = bpy.data.images.new(
+                name="bake_target", width=cell_px, height=cell_px, alpha=False)
+            bake_img.file_format = 'PNG'
+
+            # Assign the original Tripo3D texture as the source material
+            mat_name = f"{obj.name}_bake_mat"
+            mat = bpy.data.materials.get(mat_name)
+            if mat is None:
+                mat = bpy.data.materials.new(name=mat_name)
+                mat.use_nodes = True
+            obj.data.materials.clear()
+            obj.data.materials.append(mat)
+
+            tree = mat.node_tree
+            tree.nodes.clear()
+
+            # Source texture node (original Tripo3D basecolor)
+            src_tex = tree.nodes.new('ShaderNodeTexImage')
+            src_tex.image = bpy.data.images.load(basecolor_jpg)
+            # The source UV is the original Tripo3D UV — use the first non-atlas_uv layer
+            orig_uv_name = next(
+                (l.name for l in obj.data.uv_layers if l.name != "atlas_uv"), None)
+            if orig_uv_name:
+                src_uv_node = tree.nodes.new('ShaderNodeUVMap')
+                src_uv_node.uv_map = orig_uv_name
+                tree.links.new(src_uv_node.outputs['UV'], src_tex.inputs['Vector'])
+
+            diffuse = tree.nodes.new('ShaderNodeBsdfDiffuse')
+            tree.links.new(src_tex.outputs['Color'], diffuse.inputs['Color'])
+            out = tree.nodes.new('ShaderNodeOutputMaterial')
+            tree.links.new(diffuse.outputs['BSDF'], out.inputs['Surface'])
+
+            # Target texture node — MUST be selected for Cycles bake target
+            tgt_tex = tree.nodes.new('ShaderNodeTexImage')
+            tgt_tex.image = bake_img
+            tgt_uv_node = tree.nodes.new('ShaderNodeUVMap')
+            tgt_uv_node.uv_map = "atlas_uv"
+            tree.links.new(tgt_uv_node.outputs['UV'], tgt_tex.inputs['Vector'])
+            tree.nodes.active = tgt_tex  # must be active for bake target
+
+            # Switch active UV to atlas_uv for the bake destination
+            obj.data.uv_layers.active = atlas_layer
+
+            bpy.ops.object.bake(
+                type='DIFFUSE',
+                pass_filter={'COLOR'},
+                use_selected_to_active=False,
+                margin=2,
+            )
+
+            # Paste baked cell into atlas using bpy.data.images + numpy (no Pillow needed).
+            # Blender stores pixel arrays bottom-up (Y=0 at bottom), so we flip the row
+            # index when computing the paste position so the PNG on disk stays top-down.
+            import numpy as np
+            try:
+                atlas_img = bpy.data.images.load(atlas_png, check_existing=False)
+                atlas_w, atlas_h = atlas_img.size
+                atlas_px = np.array(atlas_img.pixels[:]).reshape(atlas_h, atlas_w, 4)
+
+                baked_px = np.array(bake_img.pixels[:]).reshape(cell_px, cell_px, 4)
+
+                cell_x = col * cell_px
+                cell_y = (atlas_grid - 1 - row) * cell_px  # flip row: Blender Y=0 at bottom
+                atlas_px[cell_y:cell_y + cell_px, cell_x:cell_x + cell_px] = baked_px
+
+                atlas_img.pixels = atlas_px.flatten().tolist()
+                atlas_img.filepath_raw = atlas_png
+                atlas_img.file_format = 'PNG'
+                atlas_img.save()
+                bpy.data.images.remove(atlas_img)
+                print(f"  Baked texture pasted into atlas cell ({row},{col})")
+                baked_ok = True
+            except Exception as paste_err:
+                print(f"  WARNING: Atlas paste failed ({paste_err})")
+
+            # Cleanup
+            bpy.data.images.remove(bake_img)
+            bpy.data.images.remove(src_tex.image)
+
+        except Exception as e:
+            print(f"  WARNING: Cycles bake failed ({e}) — falling back to paste method")
+
+    if not baked_ok and basecolor_jpg:
+        # Fallback: paste basecolor directly (old behaviour)
+        bake_basecolor_to_atlas(basecolor_jpg, row, col)
+
+    # --- Step 3: remap atlas_uv [0,1]x[0,1] -> atlas cell, with V-flip ---
+    # After Smart UV Project, UVs span approximately [0,1]x[0,1].
+    # V-flip because Blender UV V=0 is at bottom but atlas PNG Y=0 is at top.
+    # Re-fetch atlas_layer: the original reference can become stale after
+    # Blender's edit-mode/object-mode round trips during baking and UV unwrap.
+    atlas_layer = obj.data.uv_layers.get("atlas_uv")
+    if atlas_layer is None:
+        print("  WARNING: atlas_uv layer not found — UV remap skipped")
+        return
+    obj.data.uv_layers.active = atlas_layer
+    uvs = atlas_layer.data
+    for i in range(len(uvs)):
+        u = uvs[i].uv.x
+        v = uvs[i].uv.y
+        uvs[i].uv.x = off_u + u * cell_u
+        uvs[i].uv.y = off_v + (1.0 - v) * cell_v   # V-flip
+
+    # Verify the remap was applied (sample first loop)
+    actual_u = uvs[0].uv.x
+    actual_v = uvs[0].uv.y
+    print(f"  UV remap -> atlas cell ({row},{col})"
+          f" U[{off_u:.3f},{off_u+cell_u:.3f}] V[{off_v:.3f},{off_v+cell_v:.3f}]"
+          f"  (sample: u={actual_u:.3f} v={actual_v:.3f})")
+
+
 def remap_uvs_to_atlas(obj, atlas_grid, row, col):
-    """Normalize UVs to [0,1], V-flip, remap into atlas cell."""
+    """Remap the active UV map into an atlas cell.
+
+    Maps UV [0,1]x[0,1] -> atlas cell with V-flip (Blender V=0-at-bottom ->
+    Irrlicht/DirectX V=0-at-top convention).  Does NOT normalise the bounding
+    box — the UV range is assumed to already span [0,1] (as produced by
+    Smart UV Project or equivalent).  This keeps UV coordinates consistent
+    with a directly-pasted basecolor texture in the atlas cell.
+    """
     uv_layer = obj.data.uv_layers.active
     if not uv_layer:
         print("  WARNING: no UV layer — skipping atlas remap")
@@ -339,19 +506,11 @@ def remap_uvs_to_atlas(obj, atlas_grid, row, col):
     off_v = row * cell_v
 
     uvs = uv_layer.data
-    us = [uvs[i].uv.x for i in range(len(uvs))]
-    vs = [uvs[i].uv.y for i in range(len(uvs))]
-    min_u, max_u = min(us), max(us)
-    min_v, max_v = min(vs), max(vs)
-    ru = (max_u - min_u) or 1.0
-    rv = (max_v - min_v) or 1.0
-
     for i in range(len(uvs)):
-        norm_u = (uvs[i].uv.x - min_u) / ru
-        norm_v = (uvs[i].uv.y - min_v) / rv
-        norm_v = 1.0 - norm_v  # V-flip: Blender -> OpenGL
-        uvs[i].uv.x = off_u + norm_u * cell_u
-        uvs[i].uv.y = off_v + norm_v * cell_v
+        u = uvs[i].uv.x
+        v = uvs[i].uv.y
+        uvs[i].uv.x = off_u + u * cell_u
+        uvs[i].uv.y = off_v + (1.0 - v) * cell_v   # V-flip: Blender -> Irrlicht
 
     print(f"  UV remap -> atlas cell ({row},{col})"
           f" U[{off_u:.3f},{off_u+cell_u:.3f}] V[{off_v:.3f},{off_v+cell_v:.3f}]")
@@ -362,43 +521,39 @@ def remap_uvs_to_atlas(obj, atlas_grid, row, col):
 # ===========================================================================
 
 def decimate_per_part(obj, target_tris):
-    """Decimate via DECIMATE COLLAPSE per loose part, then rejoin."""
-    before_names = {o.name for o in bpy.data.objects}
+    """Decimate via a single global DECIMATE COLLAPSE modifier.
 
+    The old per-loose-part approach was broken for Tripo3D meshes: they
+    contain thousands of tiny disconnected pieces (window frames, glass,
+    etc.) each with only a handful of triangles.  The max(4,...) floor
+    meant every micro-part kept 4 faces → total barely changed.
+
+    A single global modifier is simpler and reliably hits the target.
+    """
     work = obj.copy()
     work.data = obj.data.copy()
     bpy.context.collection.objects.link(work)
     select_only(work)
+
+    # Triangulate so polygon count == triangle count.
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.select_all(action='SELECT')
     bpy.ops.mesh.quads_convert_to_tris()
-    bpy.ops.mesh.separate(type='LOOSE')
     bpy.ops.object.mode_set(mode='OBJECT')
 
-    parts = [o for o in bpy.data.objects
-             if o.type == 'MESH' and o.name not in before_names]
-    n_total = sum(len(p.data.polygons) for p in parts)
-    print(f"  Decimating: {len(parts)} parts, {n_total} tris -> target {target_tris}")
+    n_total = len(work.data.polygons)
+    print(f"  Decimating: {n_total} tris -> target {target_tris}")
 
-    for p in parts:
-        n_part = len(p.data.polygons)
-        part_target = max(4, int(target_tris * n_part / n_total))
-        ratio = min(1.0, part_target / max(n_part, 1))
-        select_only(p)
-        mod = p.modifiers.new("Dec", 'DECIMATE')
+    if n_total > target_tris:
+        ratio = max(0.001, target_tris / n_total)
+        mod = work.modifiers.new("Dec", 'DECIMATE')
         mod.decimate_type = 'COLLAPSE'
         mod.ratio = ratio
         bpy.ops.object.modifier_apply(modifier="Dec")
 
-    bpy.ops.object.select_all(action='DESELECT')
-    for p in parts:
-        p.select_set(True)
-    bpy.context.view_layer.objects.active = parts[0]
-    bpy.ops.object.join()
-    result = bpy.context.active_object
-    n_result = len(result.data.polygons)
+    n_result = len(work.data.polygons)
     print(f"  Decimated to {n_result} tris")
-    return result, n_result
+    return work, n_result
 
 
 def decimate_voxel_then_collapse(obj, target_tris):
@@ -446,6 +601,53 @@ def triangulate_obj(obj):
     bpy.ops.object.mode_set(mode='OBJECT')
 
 
+def _fix_ply_for_irrlicht(filepath):
+    """Post-process a PLY binary file for Irrlicht's CPLYMeshFileLoader:
+
+    UV property names: Blender 4.x exports 's'/'t'; Irrlicht only reads 'u'/'v'.
+    Rename 'property float s' -> 'property float u' and 't' -> 'v' in header.
+
+    No axis swap is needed.  The PLY exporter is called with forward_axis='Z',
+    up_axis='Y', which maps Blender Y (height after orient_zup_to_yup) into PLY z
+    and Blender Z (depth) into PLY y — exactly matching Irrlicht's convention:
+    CPLYMeshFileLoader reads PLY z -> Pos.Y (up) and PLY y -> Pos.Z (depth).
+    """
+    with open(filepath, "rb") as f:
+        raw = f.read()
+
+    eoh_tag = b"end_header\n"
+    eoh = raw.find(eoh_tag)
+    assert eoh != -1, f"_fix_ply_for_irrlicht: no end_header in {filepath}"
+    header = bytearray(raw[:eoh])
+
+    # Rename UV property names s -> u, t -> v
+    header = header.replace(b"property float s\n", b"property float u\n")
+    header = header.replace(b"property float t\n", b"property float v\n")
+
+    # Parse vertex count for the log message
+    n_verts = None
+    props = []
+    in_vertex = False
+    for line in header.split(b"\n"):
+        if line.startswith(b"element vertex "):
+            in_vertex = True
+            n_verts = int(line.split()[-1])
+        elif line.startswith(b"element ") and not line.startswith(b"element vertex"):
+            in_vertex = False
+        elif in_vertex and line.startswith(b"property float "):
+            props.append(line.split()[-1].decode())
+
+    rest = raw[eoh + len(eoh_tag):]
+
+    with open(filepath, "wb") as f:
+        f.write(bytes(header))
+        f.write(eoh_tag)
+        f.write(rest)
+
+    print(f"  Irrlicht PLY fix: s/t->u/v renamed "
+          f"({n_verts} verts, props={props})")
+
+
 def export_ply(obj, filepath):
     """Export a single object as PLY with normals and UVs."""
     triangulate_obj(obj)
@@ -464,7 +666,11 @@ def export_ply(obj, filepath):
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-    # Blender 4.x PLY exporter (bpy.ops.export_mesh.ply was removed in 4.0)
+    # Blender 4.x PLY exporter (bpy.ops.export_mesh.ply was removed in 4.0).
+    # forward_axis='Z', up_axis='Y': maps Blender Y (height after orient_zup_to_yup)
+    # directly to PLY z, and Blender Z (depth) to PLY y.  Irrlicht's CPLYMeshFileLoader
+    # reads PLY z -> Pos.Y (height) and PLY y -> Pos.Z (depth), so no axis swap is
+    # needed in the post-processor — only the UV property rename (s/t -> u/v).
     bpy.ops.wm.ply_export(
         filepath=filepath,
         ascii_format=False,
@@ -472,9 +678,16 @@ def export_ply(obj, filepath):
         export_uv=True,
         export_colors='NONE',
         global_scale=1.0,
-        forward_axis='NEGATIVE_Z',
+        forward_axis='Z',
         up_axis='Y',
+        export_selected_objects=True,   # only the active/selected object, not entire scene
     )
+
+    # Post-process for Irrlicht compatibility: rename UV props s/t -> u/v.
+    # No axis swap needed — the forward_axis='Z' export already maps Blender Y
+    # (height) into PLY z and Blender Z (depth) into PLY y, matching Irrlicht's
+    # CPLYMeshFileLoader convention exactly.
+    _fix_ply_for_irrlicht(filepath)
 
     sz = os.path.getsize(filepath)
     n = len(obj.data.polygons)
@@ -618,35 +831,33 @@ def convert_building(fbx_path, asset_name, atlas_row, atlas_col, footprint_tiles
     # Scale to footprint
     scale_building(obj, footprint_tiles)
 
-    # UV remap
-    remap_uvs_to_atlas(obj, BUILDING_ATLAS_GRID, atlas_row, atlas_col)
+    atlas_png = os.path.join(_ASSETS_DIR, "textures", "buildings", "buildings_atlas_d.png")
 
-    # Bake basecolor to atlas if available
-    if basecolor_jpg:
-        bake_basecolor_to_atlas(basecolor_jpg, atlas_row, atlas_col)
+    # UV re-unwrap + bake + remap: replaces old remap_uvs_to_atlas + bake_basecolor_to_atlas.
+    # Uses Smart UV Project for a seam-minimised layout, then bakes the Tripo3D basecolor
+    # onto that layout so the texture aligns with the UVs.  Falls back to a direct paste
+    # if Cycles baking is unavailable.
+    rewrap_and_bake_to_atlas(obj, BUILDING_ATLAS_GRID, atlas_row, atlas_col,
+                             basecolor_jpg, atlas_png)
 
     # LOD0: full fidelity
     print("\n  [LOD0] Full fidelity")
     lod0 = duplicate_obj(obj, f"{asset_name}_lod0")
     export_ply(lod0, out_lod0)
 
-    # LOD1: decimated
+    # LOD1: decimated — re-unwrap independently (decimation destroys UV continuity)
     print(f"\n  [LOD1] Decimate to ~{BUILDING_LOD1_TRIS} tris")
     lod1, _ = decimate_per_part(obj, BUILDING_LOD1_TRIS)
-    remap_uvs_to_atlas(lod1, BUILDING_ATLAS_GRID, atlas_row, atlas_col)
+    rewrap_and_bake_to_atlas(lod1, BUILDING_ATLAS_GRID, atlas_row, atlas_col,
+                             basecolor_jpg, atlas_png)
     export_ply(lod1, out_lod1)
 
     # LOD2: voxel remesh + collapse (only for tall buildings, height_floors > 3)
     if generate_lod2:
         print(f"\n  [LOD2] Voxel remesh + decimate to ~{BUILDING_LOD2_TRIS} tris")
         lod2, _ = decimate_voxel_then_collapse(obj, BUILDING_LOD2_TRIS)
-        # Smart UV unwrap after voxel remesh (original UVs are destroyed)
-        select_only(lod2)
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_all(action='SELECT')
-        bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.01)
-        bpy.ops.object.mode_set(mode='OBJECT')
-        remap_uvs_to_atlas(lod2, BUILDING_ATLAS_GRID, atlas_row, atlas_col)
+        rewrap_and_bake_to_atlas(lod2, BUILDING_ATLAS_GRID, atlas_row, atlas_col,
+                                 basecolor_jpg, atlas_png)
         export_ply(lod2, out_lod2)
     else:
         print(f"\n  [LOD2] Skipped (height_floors <= 3)")
@@ -655,31 +866,43 @@ def convert_building(fbx_path, asset_name, atlas_row, atlas_col, footprint_tiles
 
 
 def bake_basecolor_to_atlas(basecolor_path, atlas_row, atlas_col):
-    """Paste basecolor into the building atlas PNG at the given cell."""
+    """Paste basecolor into the building atlas PNG at the given cell.
+
+    Uses bpy.data.images + numpy — no Pillow required.
+    Blender pixel arrays are bottom-up so the row index is flipped.
+    """
     atlas_png = os.path.join(_ASSETS_DIR, "textures", "buildings", "buildings_atlas_d.png")
     if not os.path.exists(atlas_png):
         print(f"  WARNING: Atlas not found at {atlas_png} — skipping bake")
         return
 
-    try:
-        # Try Pillow from system or Blender's bundled Python
-        for extra in ['/home/node/.local/lib/python3.11/site-packages',
-                      '/usr/lib/python3/dist-packages']:
-            if extra not in sys.path:
-                sys.path.insert(0, extra)
-        from PIL import Image
-    except ImportError:
-        print("  WARNING: Pillow not available — skipping atlas bake")
-        return
-
+    import numpy as np
     cell_px = 2048 // BUILDING_ATLAS_GRID  # 256
-    atlas = Image.open(atlas_png).convert("RGB")
-    bc = Image.open(basecolor_path).convert("RGB").resize((cell_px, cell_px), Image.LANCZOS)
-    x0 = atlas_col * cell_px
-    y0 = atlas_row * cell_px
-    atlas.paste(bc, (x0, y0, x0 + cell_px, y0 + cell_px))
-    atlas.save(atlas_png)
-    print(f"  Baked basecolor into atlas cell ({atlas_row},{atlas_col})")
+
+    try:
+        atlas_img = bpy.data.images.load(atlas_png, check_existing=False)
+        atlas_w, atlas_h = atlas_img.size
+        atlas_px = np.array(atlas_img.pixels[:]).reshape(atlas_h, atlas_w, 4)
+
+        bc_img = bpy.data.images.load(basecolor_path, check_existing=False)
+        # Scale to cell_px x cell_px if needed
+        if bc_img.size[0] != cell_px or bc_img.size[1] != cell_px:
+            bc_img.scale(cell_px, cell_px)
+        bc_px = np.array(bc_img.pixels[:]).reshape(cell_px, cell_px, 4)
+        bpy.data.images.remove(bc_img)
+
+        cell_x = atlas_col * cell_px
+        cell_y = (BUILDING_ATLAS_GRID - 1 - atlas_row) * cell_px  # flip: Blender Y=0 at bottom
+        atlas_px[cell_y:cell_y + cell_px, cell_x:cell_x + cell_px] = bc_px
+
+        atlas_img.pixels = atlas_px.flatten().tolist()
+        atlas_img.filepath_raw = atlas_png
+        atlas_img.file_format = 'PNG'
+        atlas_img.save()
+        bpy.data.images.remove(atlas_img)
+        print(f"  Baked basecolor into atlas cell ({atlas_row},{atlas_col})")
+    except Exception as e:
+        print(f"  WARNING: bake_basecolor_to_atlas failed ({e})")
 
 
 # ===========================================================================

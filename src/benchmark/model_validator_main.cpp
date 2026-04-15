@@ -687,6 +687,20 @@ int main(int argc, char** argv)
 
         const bool singleModelMode = !opts.filterModels.empty();
 
+        // Pre-detect whether this category's first asset resolves to PLY.
+        // PLY assets are at world scale (1 m/unit); B3D assets use legacy
+        // 0.1 m/unit and need the 10× correction + low orbit centre (Y=5).
+        bool catHasPLY = false;
+        if (!cat.names.empty())
+        {
+            const std::string& n0 = cat.names[0];
+            std::string base0 = std::string(AITOWN_ASSETS_DIR) + "/"
+                              + cat.pathPrefix + "/" + n0;
+            std::string lod0p = resolveModelPath(smgr3->getFileSystem(), base0, "_lod0");
+            catHasPLY = lod0p.size() >= 4 &&
+                        lod0p.compare(lod0p.size() - 4, 4, ".ply") == 0;
+        }
+
         if (singleModelMode)
         {
             // Collect all existing LOD files across all requested model names.
@@ -712,7 +726,7 @@ int main(int argc, char** argv)
             // Vehicle textures live in textures/vehicles/, not 3d/vehicles/.
             // Add the vehicle texture directory to Irrlicht's VFS so B3D-embedded
             // texture references (e.g. "vehicles_diffuse_atlas_d.dds") resolve correctly.
-            const bool isVehicleCat = (cat.pathPrefix == "3d/vehicles");
+            const bool isVehicleCat = (std::strcmp(cat.pathPrefix, "3d/vehicles") == 0);
             if (isVehicleCat)
             {
                 std::string vehicleTexDir = std::string(AITOWN_ASSETS_DIR) + "/textures/vehicles/";
@@ -745,7 +759,12 @@ int main(int argc, char** argv)
                 if (atlasTex)
                     sn->setMaterialTexture(0, atlasTex);
                 sn->setPosition(irr::core::vector3df(xPos, 0.f, 0.f));
-                if (cat.scaleBuilding)
+                // PLY assets are already at world scale (1 unit = 1 m); only
+                // legacy B3D assets need the 10× correction.
+                const bool isMeshPLY = slots[si].meshPath.size() >= 4 &&
+                    slots[si].meshPath.compare(
+                        slots[si].meshPath.size() - 4, 4, ".ply") == 0;
+                if (cat.scaleBuilding && !isMeshPLY)
                     sn->setScale(irr::core::vector3df(10.f, 10.f, 10.f));
                 sn->setMaterialFlag(irr::video::EMF_LIGHTING,          false);
                 sn->setMaterialFlag(irr::video::EMF_BACK_FACE_CULLING, false);
@@ -775,7 +794,13 @@ int main(int argc, char** argv)
                     float xPos = (static_cast<float>(mi) - (static_cast<float>(N - 1) * 0.5f))
                                  * kShowcaseSpacing;
                     sn->setPosition(irr::core::vector3df(xPos, 0.0f, 0.0f));
-                    if (cat.scaleBuilding)
+                    // PLY assets are already at world scale; only legacy B3D
+                    // assets need the 10× correction.
+                    std::string lod0chk = resolveModelPath(
+                        smgr3->getFileSystem(), basePath, "_lod0");
+                    const bool isBldPLY = lod0chk.size() >= 4 &&
+                        lod0chk.compare(lod0chk.size() - 4, 4, ".ply") == 0;
+                    if (cat.scaleBuilding && !isBldPLY)
                         sn->setScale(irr::core::vector3df(10.0f, 10.0f, 10.0f));
                     sn->setMaterialFlag(irr::video::EMF_LIGHTING,          false);
                     sn->setMaterialFlag(irr::video::EMF_BACK_FACE_CULLING, false);
@@ -813,12 +838,19 @@ int main(int argc, char** argv)
 
         // Per-category orbit state — reset each time so categories start clean.
         // Vehicles are small (~4.4 m long) — use a much closer default radius than buildings.
-        const bool catIsVehicle = (cat.pathPrefix == "3d/vehicles");
-        float orbitRadius = (catIsVehicle && singleModelMode) ?  10.0f : kOrbitRadiusDefault;
+        const bool catIsVehicle = (std::strcmp(cat.pathPrefix, "3d/vehicles") == 0);
+        // PLY buildings are real-world scale (~77 m tall for com_high).  Use a
+        // 100 m orbit radius and mid-height orbit centre so the full building
+        // fits comfortably in a 60° vertical FOV.  B3D buildings are displayed
+        // at 10× tile-unit scale (~100 m) and already used kOrbitRadiusDefault.
+        float orbitRadius = (catIsVehicle && singleModelMode) ?  10.0f
+                          : catHasPLY                         ? 100.0f
+                          : kOrbitRadiusDefault;
         float orbitPitch  = (catIsVehicle && singleModelMode) ?  22.0f : kOrbitPitchDefault;
         irr::core::vector3df orbitCenter = (catIsVehicle && singleModelMode)
             ? irr::core::vector3df(0.0f, 0.7f, 0.0f)
-            : kOrbitCentreDefault;
+            : (catHasPLY ? irr::core::vector3df(0.0f, 38.0f, 0.0f)
+                         : kOrbitCentreDefault);
 
         // --- Render loop for this category ---
         // In screenshot mode, start at a 35° orbit angle so the front face AND
