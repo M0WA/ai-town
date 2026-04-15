@@ -624,6 +624,15 @@ def _fix_ply_for_irrlicht(filepath):
     header = header.replace(b"property float s\n", b"property float u\n")
     header = header.replace(b"property float t\n", b"property float v\n")
 
+    # Fix face index type: Blender 4.x exports "uint" for face vertex indices.
+    # Irrlicht's unpatched CPLYMeshFileLoader maps "uint" -> EPLYPT_INT16 (2 bytes).
+    # Replace with "int32" which maps correctly to EPLYPT_INT32 (4 bytes).
+    # Binary data is unchanged — both are 4-byte little-endian integers.
+    header = header.replace(
+        b"property list uchar uint vertex_indices",
+        b"property list uchar int32 vertex_indices",
+    )
+
     # Parse vertex count for the log message
     n_verts = None
     props = []
