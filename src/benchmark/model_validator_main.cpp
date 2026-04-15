@@ -41,7 +41,8 @@ struct ValidatorOptions {
     std::string screenshotPath;             // --screenshot <file>: save PNG and exit
     int screenshotFrame = 3;                // --screenshot-frame N: frame to capture (3 = stable first pose)
     std::vector<float> screenshotAngles;    // --screenshot-angles a,b,...: capture at each orbit angle
-    bool softwareDriver = false;            // --driver burnings: software renderer (headless-safe)
+    bool softwareDriver = true;             // default: software renderer (no OpenGL required)
+    bool openglDriver   = false;            // --driver opengl: use OpenGL (requires 3D-accelerated display)
 };
 
 static void printUsage(const char* prog)
@@ -54,7 +55,8 @@ static void printUsage(const char* prog)
         "  --screenshot <file>    render --screenshot-frame frames, save PNG, exit\n"
         "  --screenshot-frame N   frame number to capture (default: 3)\n"
         "  --screenshot-angles A  comma-separated orbit angles, e.g. 35,125,215,305\n"
-        "  --driver burnings      use software renderer (headless/xvfb safe)\n"
+        "  --driver burnings      use software renderer — default, no GPU required\n"
+        "  --driver opengl        use OpenGL renderer (requires 3D-accelerated display)\n"
         "  --help                 print this usage message\n",
         prog
     );
@@ -112,10 +114,18 @@ static bool parseArgs(int argc, char** argv, ValidatorOptions& opts)
             ++i;
             if (std::strcmp(argv[i], "burnings") == 0 ||
                 std::strcmp(argv[i], "software") == 0)
+            {
                 opts.softwareDriver = true;
+                opts.openglDriver   = false;
+            }
+            else if (std::strcmp(argv[i], "opengl") == 0)
+            {
+                opts.openglDriver   = true;
+                opts.softwareDriver = false;
+            }
             else
             {
-                std::printf("Unknown driver: %s (supported: burnings, software)\n", argv[i]);
+                std::printf("Unknown driver: %s (supported: burnings, software, opengl)\n", argv[i]);
                 return false;
             }
         }
@@ -336,12 +346,14 @@ int main(int argc, char** argv)
     std::printf("Controls: SPACE = next category   ESC = exit\n\n");
 
     // -----------------------------------------------------------------------
-    // 1. Create Irrlicht device (EDT_OPENGL)
+    // 1. Create Irrlicht device.
+    //    Default: EDT_BURNINGSVIDEO (software renderer, no GPU required).
+    //    Use --driver opengl for the full OpenGL path (3D-accelerated display required).
     // -----------------------------------------------------------------------
     irr::SIrrlichtCreationParameters params;
-    params.DriverType    = opts.softwareDriver
-                           ? irr::video::EDT_BURNINGSVIDEO
-                           : irr::video::EDT_OPENGL;
+    params.DriverType    = opts.openglDriver
+                           ? irr::video::EDT_OPENGL
+                           : irr::video::EDT_BURNINGSVIDEO;
     params.WindowSize    = irr::core::dimension2d<irr::u32>(
                                static_cast<irr::u32>(opts.width),
                                static_cast<irr::u32>(opts.height));
@@ -356,8 +368,12 @@ int main(int argc, char** argv)
     irr::IrrlichtDevice* device = irr::createDeviceEx(params);
     if (!device)
     {
-        std::fprintf(stderr, "ERROR: Failed to create Irrlicht device (EDT_OPENGL). "
-                             "Ensure a display is available.\n");
+        if (opts.openglDriver)
+            std::fprintf(stderr, "ERROR: Failed to create OpenGL device. "
+                                 "Ensure a 3D-accelerated display is available, "
+                                 "or omit --driver opengl to use the default software renderer.\n");
+        else
+            std::fprintf(stderr, "ERROR: Failed to create Irrlicht device.\n");
         return 1;
     }
     device->setWindowCaption(L"AI Town Model Validator");
@@ -368,7 +384,7 @@ int main(int argc, char** argv)
     // -----------------------------------------------------------------------
     // 2. Init GLEW (OpenGL mode only; skip for software renderer).
     // -----------------------------------------------------------------------
-    if (!opts.softwareDriver)
+    if (opts.openglDriver)
     {
         GLenum glewErr = glewInit();
         if (glewErr != GLEW_OK)
