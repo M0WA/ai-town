@@ -8,7 +8,7 @@ vcpkg_from_sourceforge(
         fix-encoding.patch
         fix-osx-compilation.patch
         fix-osx-compilation-2.diff
-        fix-ply-32bit-threshold.patch  # AI Town: fix off-by-30 typo in CPLYMeshFileLoader EIT_32BIT threshold
+        fix-ply-32bit-threshold.patch  # AI Town: fix EIT_32BIT threshold (65565→65535) + "uint" type mapped to INT32 not INT16
 )
 
 if(VCPKG_TARGET_IS_LINUX)

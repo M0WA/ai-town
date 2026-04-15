@@ -70,21 +70,21 @@ MANIFEST = {
     "medium_poly/buildings/com_high_5.zip": {"name": "com_high_05", "type": "building", "atlas_row": 3, "atlas_col": 4, "footprint": 3},
 
     # --- Commercial Medium (2x2 tiles) ---
-    "medium_poly/buildings/com_med_1.zip": {"name": "com_med_01", "type": "building", "atlas_row": 1, "atlas_col": 4, "footprint": 2},
-    "medium_poly/buildings/com_med_2.zip": {"name": "com_med_02", "type": "building", "atlas_row": 1, "atlas_col": 5, "footprint": 2},
-    "medium_poly/buildings/com_med_3.zip": {"name": "com_med_03", "type": "building", "atlas_row": 1, "atlas_col": 6, "footprint": 2},
-    "medium_poly/buildings/com_med_4.zip": {"name": "com_med_04", "type": "building", "atlas_row": 1, "atlas_col": 7, "footprint": 2},
+    "medium_poly/buildings/com_med_1.zip": {"name": "com_med_01", "type": "building", "atlas_row": 2, "atlas_col": 0, "footprint": 2},
+    "medium_poly/buildings/com_med_2.zip": {"name": "com_med_02", "type": "building", "atlas_row": 2, "atlas_col": 1, "footprint": 2},
+    "medium_poly/buildings/com_med_3.zip": {"name": "com_med_03", "type": "building", "atlas_row": 2, "atlas_col": 2, "footprint": 2},
+    "medium_poly/buildings/com_med_4.zip": {"name": "com_med_04", "type": "building", "atlas_row": 2, "atlas_col": 3, "footprint": 2},
 
     # --- Commercial Low (1x1 tile) ---
-    "medium_poly/buildings/com_low_1.zip": {"name": "com_low_01", "type": "building", "atlas_row": 1, "atlas_col": 0, "footprint": 1},
-    "medium_poly/buildings/com_low_2.zip": {"name": "com_low_02", "type": "building", "atlas_row": 1, "atlas_col": 1, "footprint": 1},
-    "medium_poly/buildings/com_low_3.zip": {"name": "com_low_03", "type": "building", "atlas_row": 1, "atlas_col": 2, "footprint": 1},
-    "medium_poly/buildings/com_low_4.zip": {"name": "com_low_04", "type": "building", "atlas_row": 1, "atlas_col": 3, "footprint": 1},
+    "medium_poly/buildings/com_low_1.zip": {"name": "com_low_01", "type": "building", "atlas_row": 1, "atlas_col": 4, "footprint": 1},
+    "medium_poly/buildings/com_low_2.zip": {"name": "com_low_02", "type": "building", "atlas_row": 1, "atlas_col": 5, "footprint": 1},
+    "medium_poly/buildings/com_low_3.zip": {"name": "com_low_03", "type": "building", "atlas_row": 1, "atlas_col": 6, "footprint": 1},
+    "medium_poly/buildings/com_low_4.zip": {"name": "com_low_04", "type": "building", "atlas_row": 1, "atlas_col": 7, "footprint": 1},
 
     # --- Residential High (3x3 tiles) ---
-    "medium_poly/buildings/res_high_1.zip": {"name": "res_high_01", "type": "building", "atlas_row": 4, "atlas_col": 0, "footprint": 3},
-    "medium_poly/buildings/res_high_2.zip": {"name": "res_high_02", "type": "building", "atlas_row": 4, "atlas_col": 1, "footprint": 3},
-    "medium_poly/buildings/res_high_3.zip": {"name": "res_high_03", "type": "building", "atlas_row": 4, "atlas_col": 2, "footprint": 3},
+    "medium_poly/buildings/res_high_1.zip": {"name": "res_high_01", "type": "building", "atlas_row": 1, "atlas_col": 0, "footprint": 3},
+    "medium_poly/buildings/res_high_2.zip": {"name": "res_high_02", "type": "building", "atlas_row": 1, "atlas_col": 1, "footprint": 3},
+    "medium_poly/buildings/res_high_3.zip": {"name": "res_high_03", "type": "building", "atlas_row": 1, "atlas_col": 2, "footprint": 3},
 
     # --- Residential Medium (2x2 tiles) ---
     "medium_poly/buildings/res_med_1.zip":  {"name": "res_med_01", "type": "building", "atlas_row": 0, "atlas_col": 4, "footprint": 2},

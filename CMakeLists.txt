@@ -228,6 +228,7 @@ add_library(aitown_render STATIC
     src/rendering/BuildingShaderCallback.cpp
     src/rendering/RoadShaderCallback.cpp
     src/rendering/BuildingAssetLoader.cpp
+    src/rendering/mesh_format_utils.cpp
 )
 target_include_directories(aitown_render
     PRIVATE   src/rendering/       # RenderSystem/IrrlichtRenderer internal headers
@@ -1028,6 +1029,10 @@ target_sources(integration_tests PRIVATE
 # releaseVehicleEnginePair(); uses real AudioSystem + null-backend thread.
 target_sources(integration_tests PRIVATE
     tests/integration/VehicleReleaseTest.cpp
+)
+# Phase 11q12: resolveModelPath() integration tests (PLY-first mesh loading)
+target_sources(integration_tests PRIVATE
+    tests/integration/MeshFormatUtilsTest.cpp
 )
 
 # ----------------------------------------------------------------------------

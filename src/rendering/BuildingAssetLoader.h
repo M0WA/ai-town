@@ -2,15 +2,15 @@
 
 // BuildingAssetLoader.h — Phase 9 building asset loader.
 //
-// Loads building asset families (LOD0.b3d, LOD1.b3d, LOD2.b3d or billboard) and
-// their .meta sidecar JSON, then creates and returns a LODNode wrapping the scene
+// Loads building asset families (LOD0 .ply/.b3d, LOD1 .ply/.b3d, LOD2 .ply/.b3d or billboard)
+// and their .meta sidecar JSON, then creates and returns a LODNode wrapping the scene
 // node with the full LOD distance chain configured.
 //
 // Asset naming convention (per architecture/asset-standards/3d-model-standards.md):
-//   <basePath>_lod0.b3d    — highest-detail mesh (LOD0)
-//   <basePath>_lod1.b3d    — medium-detail mesh (LOD1)
-//   <basePath>_lod2.b3d    — low-detail geometry shell (height_floors >= 4 only)
-//   <basePath>.meta        — JSON sidecar: height_floors, category, lod_distances[]
+//   <basePath>_lod0.ply / _lod0.b3d    — highest-detail mesh (LOD0)
+//   <basePath>_lod1.ply / _lod1.b3d    — medium-detail mesh (LOD1)
+//   <basePath>_lod2.ply / _lod2.b3d    — low-detail geometry shell (height_floors >= 4 only)
+//   <basePath>.meta                     — JSON sidecar: height_floors, category, lod_distances[]
 //
 // For buildings with height_floors <= 3, LOD2 is a billboard (DDS path stored but
 // no geometry mesh — LODNode is created with lod2 = nullptr).
@@ -21,7 +21,8 @@
 //   [2] = cull distance (metres)
 //
 // Mesh loading:
-//   m_smgr->getMesh() loads the .b3d file and returns IAnimatedMesh*.
+//   m_smgr->getMesh() loads the mesh file (.ply preferred, .b3d fallback via
+//   resolveModelPath()) and returns IAnimatedMesh*.
 //   The first frame of the animated mesh is used as a static SMesh via
 //   dynamic_cast<scene::SMesh*>(animMesh->getMesh(0)).
 //
@@ -75,12 +76,13 @@ public:
     //
     // basePath — filesystem path prefix (without suffix), e.g.:
     //   "assets/3d/buildings/res_low_01"
-    // The loader appends "_lod0.b3d", "_lod1.b3d", "_lod2.b3d", and ".meta".
+    // The loader resolves LOD mesh paths via resolveModelPath() (PLY preferred,
+    // B3D fallback), then appends ".meta".
     //
     // Returns a new LODNode on success (unique_ptr). The caller owns the returned pointer.
     // Returns nullptr if:
     //   - The .meta sidecar is not found or cannot be parsed.
-    //   - _lod0.b3d or _lod1.b3d cannot be loaded.
+    //   - LOD0 or LOD1 mesh cannot be loaded.
     //   - The LOD0 mesh is not an SMesh (cannot call recalculateBoundingBox).
     std::unique_ptr<LODNode> load(const std::string& basePath);
 

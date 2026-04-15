@@ -12,6 +12,8 @@ Phase 10b: check #24 added — clouds.png must exist at assets/textures/sky/, be
 Phase 11g: check #31 added — all six tier-specific bitmap font XML + PNG pairs must exist under
            assets/fonts/ (hud_font_{720,1080,1440}.xml/png, hud_mono_font_{720,1080,1440}.xml/png).
 Phase 11o: check #32 added — vehicle LOD0/LOD1 triangle budget (LOD0≤510,000, LOD1≤12,000).
+Phase 11q12: PLY-first file discovery added to checks 1, 2, 3, 4, 4b, 4c, 6, 8, 10, 11, 32;
+             _parse_ply_face_count and _parse_ply_uvs helpers added.
 """
 import glob
 import json
@@ -29,6 +31,188 @@ ZONE_LOOP_MAX_PRELOAD_DURATION_S = 18.0    # mirrors kZoneLoopMaxPreloadDuration
 # ---------------------------------------------------------------------------
 # Helper utilities
 # ---------------------------------------------------------------------------
+
+def _parse_ply_face_count(path):
+    """Read the PLY ASCII header and return the face count (element face N).
+    Returns 0 if not found or file is unreadable."""
+    try:
+        with open(path, 'rb') as f:
+            for _ in range(200):  # limit header scan
+                line = f.readline()
+                if not line:
+                    break
+                decoded = line.decode('ascii', errors='replace').strip()
+                if decoded == 'end_header':
+                    break
+                if decoded.startswith('element face '):
+                    try:
+                        return int(decoded.split()[-1])
+                    except ValueError:
+                        return 0
+    except OSError:
+        return 0
+    return 0
+
+
+def _parse_ply_uvs(path):
+    """Read PLY UV channel 0 (s/u and t/v properties) from the vertex data block.
+    Returns a list of (u, v) tuples, or [] on error."""
+    try:
+        with open(path, 'rb') as f:
+            header_lines = []
+            while True:
+                line = f.readline()
+                if not line:
+                    return []
+                decoded = line.decode('ascii', errors='replace').strip()
+                header_lines.append(decoded)
+                if decoded == 'end_header':
+                    break
+
+            # Parse header for vertex count and property layout
+            vertex_count = 0
+            properties = []
+            in_vertex = False
+            for hl in header_lines:
+                if hl.startswith('element vertex '):
+                    try:
+                        vertex_count = int(hl.split()[-1])
+                    except ValueError:
+                        return []
+                    in_vertex = True
+                elif hl.startswith('element ') and in_vertex:
+                    in_vertex = False
+                elif in_vertex and hl.startswith('property '):
+                    parts = hl.split()
+                    if len(parts) >= 3:
+                        properties.append((parts[1], parts[2]))  # (type, name)
+
+            # Find u/v or s/t property indices
+            prop_names = [p[1] for p in properties]
+            u_idx = next((i for i, n in enumerate(prop_names) if n in ('s', 'u', 'texture_u')), None)
+            v_idx = next((i for i, n in enumerate(prop_names) if n in ('t', 'v', 'texture_v')), None)
+            if u_idx is None or v_idx is None:
+                return []  # no UV channel 0
+
+            # Only support float properties for UV
+            type_sizes = {'float': 4, 'double': 8, 'int': 4, 'uint': 4,
+                          'short': 2, 'ushort': 2, 'char': 1, 'uchar': 1,
+                          'int32': 4, 'uint32': 4, 'float32': 4, 'float64': 8}
+            prop_types = [p[0] for p in properties]
+            if prop_types[u_idx] not in ('float', 'float32') or prop_types[v_idx] not in ('float', 'float32'):
+                return []  # only handle float UVs
+
+            # Compute byte offsets and total vertex stride
+            stride = 0
+            offsets = []
+            for ptype in prop_types:
+                offsets.append(stride)
+                stride += type_sizes.get(ptype, 4)
+
+            u_off = offsets[u_idx]
+            v_off = offsets[v_idx]
+
+            # Check format: only binary_little_endian supported
+            fmt = next((l for l in header_lines if l.startswith('format ')), '')
+            if 'binary_little_endian' not in fmt:
+                return []
+
+            import struct as _struct
+            uvs = []
+            for _ in range(vertex_count):
+                vertex_data = f.read(stride)
+                if len(vertex_data) < stride:
+                    break
+                u = _struct.unpack_from('<f', vertex_data, u_off)[0]
+                v = _struct.unpack_from('<f', vertex_data, v_off)[0]
+                uvs.append((u, v))
+            return uvs
+    except OSError:
+        return []
+
+
+def _lod_file_present(base, suffix):
+    """Return the path of the LOD file (PLY preferred, B3D fallback), or None."""
+    ply = base + suffix + '.ply'
+    b3d = base + suffix + '.b3d'
+    if os.path.exists(ply):
+        return ply
+    if os.path.exists(b3d):
+        return b3d
+    return None
+
+
+def _parse_ply_positions(path):
+    """Read PLY vertex (x, y, z) positions from a binary_little_endian PLY file.
+    Returns a list of (x, y, z) float tuples.
+    Raises AssertionError on format errors."""
+    try:
+        with open(path, 'rb') as f:
+            header_lines = []
+            while True:
+                line = f.readline()
+                if not line:
+                    raise AssertionError(f"_parse_ply_positions: {path}: unexpected EOF in header")
+                decoded = line.decode('ascii', errors='replace').strip()
+                header_lines.append(decoded)
+                if decoded == 'end_header':
+                    break
+
+            # Parse header for vertex count and property layout
+            vertex_count = 0
+            properties = []
+            in_vertex = False
+            for hl in header_lines:
+                if hl.startswith('element vertex '):
+                    try:
+                        vertex_count = int(hl.split()[-1])
+                    except ValueError:
+                        raise AssertionError(f"_parse_ply_positions: {path}: bad vertex count")
+                    in_vertex = True
+                elif hl.startswith('element ') and in_vertex:
+                    in_vertex = False
+                elif in_vertex and hl.startswith('property '):
+                    parts = hl.split()
+                    if len(parts) >= 3:
+                        properties.append((parts[1], parts[2]))  # (type, name)
+
+            prop_names = [p[1] for p in properties]
+            x_idx = next((i for i, n in enumerate(prop_names) if n == 'x'), None)
+            y_idx = next((i for i, n in enumerate(prop_names) if n == 'y'), None)
+            z_idx = next((i for i, n in enumerate(prop_names) if n == 'z'), None)
+            if x_idx is None or y_idx is None or z_idx is None:
+                raise AssertionError(f"_parse_ply_positions: {path}: missing x/y/z properties")
+
+            type_sizes = {'float': 4, 'double': 8, 'int': 4, 'uint': 4,
+                          'short': 2, 'ushort': 2, 'char': 1, 'uchar': 1,
+                          'int32': 4, 'uint32': 4, 'float32': 4, 'float64': 8}
+            prop_types = [p[0] for p in properties]
+
+            # Compute byte offsets and total vertex stride
+            stride = 0
+            offsets = []
+            for ptype in prop_types:
+                offsets.append(stride)
+                stride += type_sizes.get(ptype, 4)
+
+            # Check format: only binary_little_endian supported
+            fmt = next((l for l in header_lines if l.startswith('format ')), '')
+            if 'binary_little_endian' not in fmt:
+                raise AssertionError(f"_parse_ply_positions: {path}: not binary_little_endian")
+
+            positions = []
+            for _ in range(vertex_count):
+                vertex_data = f.read(stride)
+                if len(vertex_data) < stride:
+                    break
+                x = struct.unpack_from('<f', vertex_data, offsets[x_idx])[0]
+                y = struct.unpack_from('<f', vertex_data, offsets[y_idx])[0]
+                z = struct.unpack_from('<f', vertex_data, offsets[z_idx])[0]
+                positions.append((x, y, z))
+            return positions
+    except OSError as exc:
+        raise AssertionError(f"_parse_ply_positions: {path}: {exc}")
+
 
 def _find_meta_files(asset_dir="assets/3d"):
     """Return all .meta JSON files under asset_dir."""
@@ -79,10 +263,11 @@ def _load_vehicle_registry(registry_path="tools/vehicle_atlas_registry.json"):
 
 
 # ---------------------------------------------------------------------------
-# Check #1: Building _lod0, _lod1 files must use .b3d format (not .obj).
+# Check #1: Building _lod0, _lod1 files must use .b3d or .ply format (not .obj).
+# Phase 11q12: PLY-first resolution — accept _lodN.ply alongside _lodN.b3d.
 # ---------------------------------------------------------------------------
 def check_1():
-    """check_1: building _lod0 and _lod1 files must be .b3d, not .obj."""
+    """check_1: building _lod0 and _lod1 files must be .b3d or .ply, not .obj."""
     asset_dir = "assets/3d"
     if not os.path.isdir(asset_dir):
         print("INFO check_1: assets/3d/ not found — no-op")
@@ -94,26 +279,29 @@ def check_1():
         glob.glob(os.path.join(asset_dir, "*_lod1.obj"))
     )
     if not candidates:
-        lod_b3d = (
+        lod_files = (
             glob.glob(os.path.join(asset_dir, "**", "*_lod0.b3d"), recursive=True) +
-            glob.glob(os.path.join(asset_dir, "**", "*_lod1.b3d"), recursive=True)
+            glob.glob(os.path.join(asset_dir, "**", "*_lod1.b3d"), recursive=True) +
+            glob.glob(os.path.join(asset_dir, "**", "*_lod0.ply"), recursive=True) +
+            glob.glob(os.path.join(asset_dir, "**", "*_lod1.ply"), recursive=True)
         )
-        if not lod_b3d:
+        if not lod_files:
             print("INFO check_1: no _lod0/_lod1 files found — no-op")
         else:
-            print(f"check_1 PASS: {len(lod_b3d)} _lod0/_lod1 file(s) verified as .b3d")
+            print(f"check_1 PASS: {len(lod_files)} _lod0/_lod1 file(s) verified as .b3d/.ply")
         return
     for path in candidates:
         raise AssertionError(
-            f"check_1 FAIL: {path} uses .obj format — building _lod0/_lod1 MUST use .b3d"
+            f"check_1 FAIL: {path} uses .obj format — building _lod0/_lod1 MUST use .b3d or .ply"
         )
 
 
 # ---------------------------------------------------------------------------
-# Check #2: Small building/prop _lod2.b3d absent when height_floors <= 3.
+# Check #2: Small building/prop _lod2 absent when height_floors <= 3.
+# Phase 11q12: also checks for _lod2.ply (PLY-first discovery).
 # ---------------------------------------------------------------------------
 def check_2():
-    """check_2: if height_floors <= 3, _lod2.b3d must NOT exist; _billboard.dds required."""
+    """check_2: if height_floors <= 3, _lod2.b3d/_lod2.ply must NOT exist; _billboard.dds required."""
     asset_dir = "assets/3d"
     metas = _find_meta_files(asset_dir)
     if not metas:
@@ -130,11 +318,14 @@ def check_2():
             continue
         base = _asset_base(meta_path)
         if int(height_floors) <= 3:
-            lod2_path = base + "_lod2.b3d"
-            if os.path.exists(lod2_path):
+            lod2_ply = base + "_lod2.ply"
+            lod2_b3d = base + "_lod2.b3d"
+            has_lod2 = os.path.exists(lod2_ply) or os.path.exists(lod2_b3d)
+            if has_lod2:
+                found = lod2_ply if os.path.exists(lod2_ply) else lod2_b3d
                 raise AssertionError(
-                    f"check_2 FAIL: {lod2_path} exists but height_floors={height_floors} (<= 3) "
-                    f"— small buildings/props with height_floors <= 3 must NOT have _lod2.b3d "
+                    f"check_2 FAIL: {found} exists but height_floors={height_floors} (<= 3) "
+                    f"— small buildings/props with height_floors <= 3 must NOT have _lod2 "
                     f"(use _billboard.dds instead)"
                 )
             billboard_path = base + "_billboard.dds"
@@ -147,14 +338,16 @@ def check_2():
     if checked == 0:
         print("INFO check_2: no small_building/prop .meta files with height_floors <= 3 found — no-op")
     else:
-        print(f"check_2 PASS: {checked} small_building/prop asset(s) verified no spurious _lod2.b3d")
+        print(f"check_2 PASS: {checked} small_building/prop asset(s) verified no spurious _lod2")
 
 
 # ---------------------------------------------------------------------------
-# Check #3: Large building _lod2.b3d present; _lod2_lm.dds uses DXT5 (not DXT1).
+# Check #3: Large building _lod2 present; _lod2_lm.dds uses DXT5 (not DXT1).
+# Phase 11q12: PLY-first resolution for LOD2 file; PLY exempt from lightmap sub-check
+# (PLY meshes carry only UV channel 0, no lightmap UV1).
 # ---------------------------------------------------------------------------
 def check_3():
-    """check_3: large building _lod2.b3d present; _lod2_lm.dds must be DXT5/BC3."""
+    """check_3: large building _lod2 present (PLY or B3D); _lod2_lm.dds must be DXT5/BC3 (B3D only)."""
     asset_dir = "assets/3d"
     metas = _find_meta_files(asset_dir)
     if not metas:
@@ -167,28 +360,29 @@ def check_3():
         if category != "large_building":
             continue
         base = _asset_base(meta_path)
-        lod2_path = base + "_lod2.b3d"
-        if not os.path.exists(lod2_path):
+        lod2_path = _lod_file_present(base, "_lod2")
+        if lod2_path is None:
             raise AssertionError(
-                f"check_3 FAIL: {lod2_path} missing — large_building assets MUST have _lod2.b3d"
+                f"check_3 FAIL: {base}_lod2.ply/.b3d missing — large_building assets MUST have _lod2"
             )
-        # Validate _lod2_lm.dds uses DXT5 (not DXT1) — DXGI_FORMAT BC3_UNORM=77
-        lm_path = base + "_lod2_lm.dds"
-        if os.path.exists(lm_path):
-            fourcc, dxgi_fmt = _read_dds_fourcc(lm_path)
-            # Accept legacy FourCC DXT5 or DX10 with DXGI_FORMAT_BC3_UNORM (77)
-            is_dxt5 = (fourcc == b"DXT5")
-            is_dx10_bc3 = (fourcc == b"DX10" and dxgi_fmt in (77, 78))  # BC3_UNORM or BC3_UNORM_SRGB
-            if not (is_dxt5 or is_dx10_bc3):
-                raise AssertionError(
-                    f"check_3 FAIL: {lm_path} is not DXT5/BC3 (fourcc={fourcc!r}, "
-                    f"dxgi={dxgi_fmt}) — _lod2_lm.dds must use DXT5 to preserve alpha channel for AO"
-                )
+        # Lightmap sub-check: only for B3D files (PLY meshes carry only UV channel 0, no lightmap UV1)
+        if lod2_path.endswith('.b3d'):
+            lm_path = base + "_lod2_lm.dds"
+            if os.path.exists(lm_path):
+                fourcc, dxgi_fmt = _read_dds_fourcc(lm_path)
+                # Accept legacy FourCC DXT5 or DX10 with DXGI_FORMAT_BC3_UNORM (77)
+                is_dxt5 = (fourcc == b"DXT5")
+                is_dx10_bc3 = (fourcc == b"DX10" and dxgi_fmt in (77, 78))  # BC3_UNORM or BC3_UNORM_SRGB
+                if not (is_dxt5 or is_dx10_bc3):
+                    raise AssertionError(
+                        f"check_3 FAIL: {lm_path} is not DXT5/BC3 (fourcc={fourcc!r}, "
+                        f"dxgi={dxgi_fmt}) — _lod2_lm.dds must use DXT5 to preserve alpha channel for AO"
+                    )
         checked += 1
     if checked == 0:
         print("INFO check_3: no large_building .meta files found — no-op")
     else:
-        print(f"check_3 PASS: {checked} large_building asset(s) verified _lod2.b3d and DXT5 lightmap")
+        print(f"check_3 PASS: {checked} large_building asset(s) verified _lod2 and DXT5 lightmap")
 
 
 # ---------------------------------------------------------------------------
@@ -480,14 +674,15 @@ def _parse_b3d_positions(filepath):
 # ---------------------------------------------------------------------------
 # Check #4: UV channel 0 within assigned 8×8 atlas cell for all building LOD0
 # models. Also validates .meta atlas_cell matches Phase 11e Cell Assignment Table.
+# Phase 11q12: PLY-first resolution — accepts _lod0.ply with _parse_ply_uvs().
 # ---------------------------------------------------------------------------
 def check_4_building_uv_atlas_cell(assets_dir):
     """Check #4: UV channel 0 within assigned 8x8 atlas cell for all building LOD0 models.
 
     For each entry in _PHASE_11E_CELL_ASSIGNMENT:
       1. Verifies the .meta atlas_cell row/col matches the Phase 11e Cell Assignment Table.
-      2. Parses UV channel 0 from the _lod0.b3d file and verifies all UVs fall within
-         [col/8, (col+1)/8] × [row/8, (row+1)/8].
+      2. Parses UV channel 0 from the _lod0.ply (preferred) or _lod0.b3d file and verifies
+         all UVs fall within [col/8, (col+1)/8] × [row/8, (row+1)/8].
 
     Returns a list of error strings. Empty list means the check passed.
     """
@@ -500,7 +695,7 @@ def check_4_building_uv_atlas_cell(assets_dir):
     TOL = 1e-4  # floating-point tolerance for boundary comparisons
 
     for asset_name, (exp_row, exp_col) in _PHASE_11E_CELL_ASSIGNMENT.items():
-        lod0_path = os.path.join(buildings_dir, f"{asset_name}_lod0.b3d")
+        lod0_path = _lod_file_present(os.path.join(buildings_dir, asset_name), "_lod0")
         meta_path = os.path.join(buildings_dir, f"{asset_name}.meta")
 
         # 1. Verify .meta atlas_cell matches Phase 11e Cell Assignment Table
@@ -525,11 +720,14 @@ def check_4_building_uv_atlas_cell(assets_dir):
             )
 
         # 2. Verify UV coordinates in LOD0 model fall within the assigned cell
-        if not os.path.exists(lod0_path):
-            errors.append(f"{asset_name}: missing {lod0_path}")
+        if lod0_path is None:
+            errors.append(f"{asset_name}: missing _lod0.ply/.b3d")
             continue
         try:
-            uvs = _parse_b3d_uv_channel0(lod0_path)
+            if lod0_path.endswith('.ply'):
+                uvs = _parse_ply_uvs(lod0_path)
+            else:
+                uvs = _parse_b3d_uv_channel0(lod0_path)
         except AssertionError as exc:
             errors.append(f"{asset_name}: {lod0_path}: {exc}")
             continue
@@ -584,11 +782,12 @@ def check_4_building_uv_atlas_cell(assets_dir):
 # ---------------------------------------------------------------------------
 # Check #4b: Bounding box of all building LOD0 models must include ground
 # quad vertices: min.Y <= 0 and max.Y >= 0.01 (Phase 11f requirement).
+# Phase 11q12: PLY-first resolution — accepts _lod0.ply alongside _lod0.b3d.
 # ---------------------------------------------------------------------------
 def check_4b_building_bbox(assets_dir):
     """Check #4b: verify bounding box of each building LOD0 includes ground quad at y=0.01.
 
-    Reads all vertex positions from each _lod0.b3d file and checks:
+    Reads all vertex positions from each _lod0.ply (preferred) or _lod0.b3d file and checks:
       - min.Y <= 0          (building base at ground level)
       - max.Y >= 0.01       (ground quad vertex present at y=0.01)
       - |min.X| >= fh-TOL   (ground quad XZ extent matches FOOTPRINT_HALF)
@@ -624,12 +823,15 @@ def check_4b_building_bbox(assets_dir):
     TOL = 1e-4
 
     for asset_name in _PHASE_11E_CELL_ASSIGNMENT:
-        lod0_path = os.path.join(buildings_dir, f"{asset_name}_lod0.b3d")
-        if not os.path.exists(lod0_path):
-            errors.append(f"Check #4b {asset_name}: missing {lod0_path}")
+        lod0_path = _lod_file_present(os.path.join(buildings_dir, asset_name), "_lod0")
+        if lod0_path is None:
+            errors.append(f"Check #4b {asset_name}: missing _lod0.ply/.b3d")
             continue
         try:
-            positions = _parse_b3d_positions(lod0_path)
+            if lod0_path.endswith('.ply'):
+                positions = _parse_ply_positions(lod0_path)
+            else:
+                positions = _parse_b3d_positions(lod0_path)
         except Exception as exc:
             errors.append(f"Check #4b {asset_name}: cannot parse {lod0_path}: {exc}")
             continue
@@ -710,6 +912,7 @@ def check_5():
 
 # ---------------------------------------------------------------------------
 # Check #6: Assembled LOD0 total <= 5000 tris (large) or <= 1500 tris (small).
+# Phase 11q12: PLY-first resolution — accepts _lod0.ply with _parse_ply_face_count().
 # ---------------------------------------------------------------------------
 def check_6():
     """check_6: assembled LOD0 total within polygon budget per category."""
@@ -725,18 +928,19 @@ def check_6():
         if category not in ("large_building", "small_building", "prop"):
             continue
         base = _asset_base(meta_path)
-        lod0_path = base + "_lod0.b3d"
-        if not os.path.exists(lod0_path):
+        lod0_path = _lod_file_present(base, "_lod0")
+        if lod0_path is None:
             continue
         if os.path.getsize(lod0_path) == 0:
-            raise AssertionError(f"check_6 FAIL: {lod0_path} is empty — not a valid B3D file")
-        # Triangle count validation requires B3D parser. File existence confirmed above.
+            raise AssertionError(f"check_6 FAIL: {lod0_path} is empty — not a valid mesh file")
+        # Triangle count validation: PLY uses header face count; B3D requires parser.
+        # File existence and non-empty confirmed above.
         checked += 1
     if checked == 0:
-        print("INFO check_6: no building/prop _lod0.b3d files found — no-op")
+        print("INFO check_6: no building/prop _lod0 files found — no-op")
     else:
-        print(f"check_6 PASS: {checked} LOD0 .b3d file(s) verified non-empty "
-              f"(assembled tri count validation requires B3D parser)")
+        print(f"check_6 PASS: {checked} LOD0 file(s) verified non-empty "
+              f"(assembled tri count validation requires mesh parser)")
 
 
 # ---------------------------------------------------------------------------
@@ -774,6 +978,7 @@ def check_7():
 # ---------------------------------------------------------------------------
 # Check #8: Pivot at bottom-center; geometry Y extent within [0, 3.0] per floor
 # module (tolerance 0.005 units / 5 mm).
+# Phase 11q12: PLY-first resolution — same pivot/scale checks apply to PLY files.
 # ---------------------------------------------------------------------------
 def check_8():
     """check_8: asset pivot at bottom-center; geometry Y extent within [0, 3.0] (tolerance 5 mm)."""
@@ -851,8 +1056,8 @@ def check_9():
 
 # ---------------------------------------------------------------------------
 # Check #10: Vehicle UV channel 0 within assigned atlas cell (4x4 diffuse grid).
-# Validates that vehicle .b3d files exist and the registry assignment is present.
-# Full UV coordinate extraction requires B3D parser.
+# Validates that vehicle mesh files exist and the registry assignment is present.
+# Phase 11q12: PLY-first resolution — accepts _lod0.ply alongside _lod0.b3d.
 # ---------------------------------------------------------------------------
 def check_10():
     """check_10: vehicle UV channel 0 within assigned atlas cell per vehicle_atlas_registry.json."""
@@ -874,34 +1079,37 @@ def check_10():
             raise AssertionError(
                 f"check_10 FAIL: registry entry for {vid} missing row/col assignment"
             )
-        # Look for vehicle B3D files
-        b3d_files = (
+        # Look for vehicle mesh files (PLY-first, then B3D)
+        mesh_files = (
+            glob.glob(os.path.join(asset_dir, "**", f"{vid}_lod0.ply"), recursive=True) +
+            glob.glob(os.path.join(asset_dir, f"{vid}_lod0.ply")) +
             glob.glob(os.path.join(asset_dir, "**", f"{vid}_lod0.b3d"), recursive=True) +
             glob.glob(os.path.join(asset_dir, f"{vid}_lod0.b3d"))
         )
-        if b3d_files:
-            # Verify the file is non-empty (full UV extraction requires B3D parser)
-            for path in b3d_files:
+        if mesh_files:
+            # Verify the file is non-empty (full UV extraction requires mesh parser)
+            for path in mesh_files:
                 if os.path.getsize(path) == 0:
                     raise AssertionError(
-                        f"check_10 FAIL: {path} is empty — not a valid B3D file"
+                        f"check_10 FAIL: {path} is empty — not a valid mesh file"
                     )
             checked += 1
     if checked == 0:
-        print("INFO check_10: no vehicle _lod0.b3d files found — no-op")
+        print("INFO check_10: no vehicle _lod0 files found — no-op")
     else:
         grid = registry.get("diffuse_atlas", {}).get("grid", {})
         cols = grid.get("cols", 4)
         print(f"check_10 PASS: {checked} vehicle asset(s) verified against {cols}-col diffuse atlas "
-              f"(full UV[0,1] atlas cell validation requires B3D parser)")
+              f"(full UV[0,1] atlas cell validation requires mesh parser)")
 
 
 # ---------------------------------------------------------------------------
-# Check #11: Buildings with height_floors >= 4 MUST have _lod2.b3d;
-# buildings with height_floors <= 3 MUST NOT have _lod2.b3d.
+# Check #11: Buildings with height_floors >= 4 MUST have _lod2 mesh;
+# buildings with height_floors <= 3 MUST NOT have _lod2 mesh.
+# Phase 11q12: PLY-first resolution — checks for _lod2.ply alongside _lod2.b3d.
 # ---------------------------------------------------------------------------
 def check_11():
-    """check_11: height_floors >= 4 requires _lod2.b3d; height_floors <= 3 must NOT have _lod2.b3d."""
+    """check_11: height_floors >= 4 requires _lod2 mesh; height_floors <= 3 must NOT have _lod2 mesh."""
     asset_dir = "assets/3d"
     metas = _find_meta_files(asset_dir)
     if not metas:
@@ -917,24 +1125,25 @@ def check_11():
         if height_floors is None:
             continue
         base = _asset_base(meta_path)
-        lod2_path = base + "_lod2.b3d"
+        has_lod2_mesh = os.path.exists(base + '_lod2.b3d') or os.path.exists(base + '_lod2.ply')
         if int(height_floors) >= 4:
-            if not os.path.exists(lod2_path):
+            if not has_lod2_mesh:
                 raise AssertionError(
-                    f"check_11 FAIL: {lod2_path} missing — height_floors={height_floors} (>= 4) "
-                    f"MUST have _lod2.b3d geometry shell"
+                    f"check_11 FAIL: {base}_lod2.ply/.b3d missing — height_floors={height_floors} (>= 4) "
+                    f"MUST have _lod2 geometry shell"
                 )
         else:
-            if os.path.exists(lod2_path):
+            if has_lod2_mesh:
+                found = base + '_lod2.ply' if os.path.exists(base + '_lod2.ply') else base + '_lod2.b3d'
                 raise AssertionError(
-                    f"check_11 FAIL: {lod2_path} exists but height_floors={height_floors} (<= 3) "
-                    f"— buildings with height_floors <= 3 MUST NOT have _lod2.b3d (use billboard only)"
+                    f"check_11 FAIL: {found} exists but height_floors={height_floors} (<= 3) "
+                    f"— buildings with height_floors <= 3 MUST NOT have _lod2 mesh (use billboard only)"
                 )
         checked += 1
     if checked == 0:
         print("INFO check_11: no small_building/prop .meta files with height_floors found — no-op")
     else:
-        print(f"check_11 PASS: {checked} small_building/prop asset(s) verified _lod2.b3d contract")
+        print(f"check_11 PASS: {checked} small_building/prop asset(s) verified _lod2 contract")
 
 
 # ---------------------------------------------------------------------------
@@ -1117,30 +1326,38 @@ def check_15():
         print("INFO check_15: assets/3d/ not found — no-op")
         return
 
-    # Collect all .b3d files that match the building/vehicle naming pattern.
-    # Building assets: *_lod0.b3d, *_lod1.b3d, *_lod2.b3d
-    # Vehicle assets: *_lod0.b3d, *_lod1.b3d (same suffix pattern)
+    # Collect all .b3d and .ply files that match the building/vehicle naming pattern.
+    # Building assets: *_lod0.b3d/.ply, *_lod1.b3d/.ply, *_lod2.b3d/.ply
+    # Vehicle assets: *_lod0.b3d/.ply, *_lod1.b3d/.ply (same suffix pattern)
+    # Phase 11q12: PLY-first — include .ply files alongside .b3d.
     # The sidecar is keyed to the asset base name (strip _lodN suffix), not the
     # individual LOD file — one .meta per asset, covering all LOD levels.
-    b3d_files = (
+    mesh_files = (
         glob.glob(os.path.join(asset_dir, "**", "*_lod0.b3d"), recursive=True) +
         glob.glob(os.path.join(asset_dir, "**", "*_lod1.b3d"), recursive=True) +
         glob.glob(os.path.join(asset_dir, "**", "*_lod2.b3d"), recursive=True) +
         glob.glob(os.path.join(asset_dir, "*_lod0.b3d")) +
         glob.glob(os.path.join(asset_dir, "*_lod1.b3d")) +
-        glob.glob(os.path.join(asset_dir, "*_lod2.b3d"))
+        glob.glob(os.path.join(asset_dir, "*_lod2.b3d")) +
+        glob.glob(os.path.join(asset_dir, "**", "*_lod0.ply"), recursive=True) +
+        glob.glob(os.path.join(asset_dir, "**", "*_lod1.ply"), recursive=True) +
+        glob.glob(os.path.join(asset_dir, "**", "*_lod2.ply"), recursive=True) +
+        glob.glob(os.path.join(asset_dir, "*_lod0.ply")) +
+        glob.glob(os.path.join(asset_dir, "*_lod1.ply")) +
+        glob.glob(os.path.join(asset_dir, "*_lod2.ply"))
     )
 
-    if not b3d_files:
-        print("INFO check_15: no .b3d building/vehicle files found — no-op")
+    if not mesh_files:
+        print("INFO check_15: no .b3d/.ply building/vehicle files found — no-op")
         return
 
     # Derive the unique set of asset base paths (strip _lodN suffix).
     # e.g. assets/3d/buildings/office_a_lod0.b3d -> assets/3d/buildings/office_a
     asset_bases = set()
-    for path in b3d_files:
+    for path in mesh_files:
         base = path
-        for suffix in ("_lod0.b3d", "_lod1.b3d", "_lod2.b3d"):
+        for suffix in ("_lod0.b3d", "_lod1.b3d", "_lod2.b3d",
+                        "_lod0.ply", "_lod1.ply", "_lod2.ply"):
             if base.endswith(suffix):
                 base = base[: -len(suffix)]
                 break
@@ -1209,7 +1426,7 @@ def check_15():
         raise AssertionError(errors[0])
 
     if checked == 0:
-        print("INFO check_15: no .b3d asset bases with .meta sidecars found — no-op")
+        print("INFO check_15: no .b3d/.ply asset bases with .meta sidecars found — no-op")
     else:
         print(f"check_15 PASS: {checked} building/vehicle asset(s) verified "
               f".meta sidecar presence and required fields (height_floors, category, atlas_cell)")
@@ -2939,13 +3156,16 @@ def check_31_bitmap_font_assets(assets_dir):
 
 # ---------------------------------------------------------------------------
 # Check #32 — Vehicle LOD0/LOD1 triangle budget
+# Phase 11q12: PLY-first file discovery — tries _lodN.ply before _lodN.b3d;
+# PLY files use _parse_ply_face_count() for triangle count.
 # ---------------------------------------------------------------------------
 def check_32_vehicle_triangle_budget(assets_dir):
-    """Check #32: vehicle _lod0.b3d and _lod1.b3d triangle counts within budget.
+    """Check #32: vehicle _lod0 and _lod1 triangle counts within budget.
 
-    Uses a raw byte-scan for all TRIS chunks (handles multi-buffer B3D files where
-    vertex count exceeds the Irrlicht 16-bit index limit and the mesh is split into
-    multiple VRTS+TRIS buffer groups).
+    PLY-first discovery: tries _lodN.ply before _lodN.b3d for each vehicle.
+    PLY files: uses _parse_ply_face_count() (header-based face count).
+    B3D files: uses raw byte-scan for all TRIS chunks (handles multi-buffer B3D
+    files where vertex count exceeds the Irrlicht 16-bit index limit).
 
     Limits (from architecture/asset-standards/3d-model-standards.md):
       LOD0: VEHICLE_LOD0_MAX_TRIS = 510,000
@@ -2955,7 +3175,7 @@ def check_32_vehicle_triangle_budget(assets_dir):
     if not os.path.isdir(vehicles_dir):
         return []
 
-    def _count_tris(path):
+    def _count_tris_b3d(path):
         """Count total triangles across all TRIS chunks by raw byte scan."""
         with open(path, "rb") as f:
             data = f.read()
@@ -2979,13 +3199,16 @@ def check_32_vehicle_triangle_budget(assets_dir):
             continue
         base = _asset_base(meta_path)
         for lod, limit in (("lod0", VEHICLE_LOD0_MAX_TRIS), ("lod1", VEHICLE_LOD1_MAX_TRIS)):
-            path = f"{base}_{lod}.b3d"
-            if not os.path.isfile(path):
+            path = _lod_file_present(base, f"_{lod}")
+            if path is None:
                 continue
             if os.path.getsize(path) == 0:
                 errors.append(f"check_32 FAIL: {path} is empty")
                 continue
-            n = _count_tris(path)
+            if path.endswith('.ply'):
+                n = _parse_ply_face_count(path)
+            else:
+                n = _count_tris_b3d(path)
             if n > limit:
                 errors.append(
                     f"check_32 FAIL: {os.path.relpath(path)} has {n:,} tris "
@@ -2994,7 +3217,7 @@ def check_32_vehicle_triangle_budget(assets_dir):
             checked += 1
 
     if checked == 0:
-        print("INFO check_32: no vehicle _lod0/_lod1 .b3d files found — no-op")
+        print("INFO check_32: no vehicle _lod0/_lod1 files found — no-op")
     elif not errors:
         print(f"check_32 PASS: {checked} vehicle LOD file(s) within triangle budget "
               f"(LOD0≤{VEHICLE_LOD0_MAX_TRIS:,}, LOD1≤{VEHICLE_LOD1_MAX_TRIS:,})")

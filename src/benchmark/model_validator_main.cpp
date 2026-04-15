@@ -1,6 +1,7 @@
 // model_validator_main.cpp — AI Town model validator tool.
 //
-// Interactive visual verification tool for all V1 building and vehicle B3D assets.
+// Interactive visual verification tool for all V1 building and vehicle mesh assets
+// (PLY preferred, B3D fallback via resolveModelPath).
 // Displays each asset category in sequence with an orbiting camera so the operator
 // can confirm that meshes, textures, and scale look correct before each release.
 //
@@ -19,6 +20,7 @@
 #include "rendering/LODNode.h"
 #include "rendering/TextureCache.h"
 #include "rendering/RoadShaderCallback.h"
+#include "rendering/mesh_format_utils.h"
 
 #include <chrono>
 #include <cmath>
@@ -694,11 +696,11 @@ int main(int argc, char** argv)
             {
                 std::string base = std::string(AITOWN_ASSETS_DIR) + "/"
                                  + cat.pathPrefix + "/" + name;
-                const char* suffixes[] = {"_lod0.b3d", "_lod1.b3d", "_lod2.b3d"};
-                const char* labels[]   = {" [LOD0]",   " [LOD1]",   " [LOD2]"  };
+                const char* suffixStems[] = {"_lod0", "_lod1", "_lod2"};
+                const char* labels[]     = {" [LOD0]", " [LOD1]", " [LOD2]"};
                 for (int li = 0; li < 3; ++li)
                 {
-                    std::string path = base + suffixes[li];
+                    std::string path = resolveModelPath(smgr3->getFileSystem(), base, suffixStems[li]);
                     irr::scene::IAnimatedMesh* m = smgr3->getMesh(path.c_str());
                     if (m) slots.push_back({name + labels[li], path});
                 }

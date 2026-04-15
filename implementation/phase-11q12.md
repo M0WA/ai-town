@@ -48,9 +48,9 @@ correct loader based on file extension and returns `IAnimatedMesh*` regardless.
 
 #### 1. New helper: `src/rendering/mesh_format_utils.h` + `mesh_format_utils.cpp`
 
-- [ ] Create `src/rendering/mesh_format_utils.h` (declaration-only header)
-- [ ] Create `src/rendering/mesh_format_utils.cpp` (implementation)
-- [ ] The header forward-declares `irr::io::IFileSystem` and declares
+- [x] Create `src/rendering/mesh_format_utils.h` (declaration-only header)
+- [x] Create `src/rendering/mesh_format_utils.cpp` (implementation)
+- [x] The header forward-declares `irr::io::IFileSystem` and declares
       `resolveModelPath()`. It does **NOT** include `<IFileSystem.h>` or
       `<filesystem>`, so any translation unit that includes only the header
       (e.g. `vehicle_mesh_path.h` -> `VehicleZoneTest.cpp` in
@@ -97,19 +97,19 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
 }
 ```
 
-- [ ] Compiled into `aitown_render` via
+- [x] Compiled into `aitown_render` via
       `target_sources(aitown_render PRIVATE src/rendering/mesh_format_utils.cpp)`.
-- [ ] The `IFileSystem*` path is critical: `addFolderFileArchive()` paths used
+- [x] The `IFileSystem*` path is critical: `addFolderFileArchive()` paths used
       by the model validator are only visible through Irrlicht's VFS, not the
       OS filesystem. The `std::filesystem::exists()` fallback covers offline
       tools and unit tests that have no Irrlicht device.
-- [ ] No class, no state, no templates. One free function, declared in the
+- [x] No class, no state, no templates. One free function, declared in the
       header and defined in the `.cpp`.
 
 #### 2. Update `BuildingAssetLoader.cpp` (3 call sites)
 
-- [ ] `#include "mesh_format_utils.h"` at the top.
-- [ ] Replace the three hardcoded `.b3d` path constructions with
+- [x] `#include "mesh_format_utils.h"` at the top.
+- [x] Replace the three hardcoded `.b3d` path constructions with
       `resolveModelPath()`:
 
 | Line | Before                   | After                                                          |
@@ -118,12 +118,12 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
 | ~120 | `basePath + "_lod1.b3d"` | `resolveModelPath(m_smgr->getFileSystem(), basePath, "_lod1")` |
 | ~132 | `basePath + "_lod2.b3d"` | `resolveModelPath(m_smgr->getFileSystem(), basePath, "_lod2")` |
 
-- [ ] `BuildingAssetLoader` obtains `IFileSystem*` via `m_smgr->getFileSystem()`
+- [x] `BuildingAssetLoader` obtains `IFileSystem*` via `m_smgr->getFileSystem()`
       (`ISceneManager::getFileSystem()` is already available through the existing
       `m_smgr` pointer — no new member needed). Pass it to `resolveModelPath()`.
       `resolveModelPath()`.
 
-- [ ] Update comments in `BuildingAssetLoader.h` and `.cpp` that reference
+- [x] Update comments in `BuildingAssetLoader.h` and `.cpp` that reference
       `.b3d` to say ".ply / .b3d" or "mesh file" where appropriate (file
       header docstrings, `load()` docstring). Do not change comments that
       describe B3D-specific internals (tc_sets, VRTS layout, etc.) since those
@@ -131,12 +131,12 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
 
 #### 3. Update `vehicle_mesh_path.h` (5 mesh filenames)
 
-- [ ] `vehicleMeshPath()` signature is **unchanged** -- no `IFileSystem*` parameter.
-- [ ] Refactor the return value to produce an **extensionless base path** (e.g.
+- [x] `vehicleMeshPath()` signature is **unchanged** -- no `IFileSystem*` parameter.
+- [x] Refactor the return value to produce an **extensionless base path** (e.g.
       `assets/3d/vehicles/car_sedan_lod0`) instead of the current hardcoded
       `.b3d` path (`assets/3d/vehicles/car_sedan_lod0.b3d`). This is the only
       change -- the zone-to-vehicle-name mapping logic is untouched.
-- [ ] **Path contract note**: `vehicleMeshPath()` continues to return a full
+- [x] **Path contract note**: `vehicleMeshPath()` continues to return a full
       path rooted at `getAssetsDir()` (e.g.
       `/home/user/.../assets/3d/vehicles/car_sedan_lod0`). When `IFileSystem*`
       is non-null, `resolveModelPath()` uses `IFileSystem::existFile()` which
@@ -144,7 +144,7 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
       called for the assets directory by `BuildingAssetLoader` / the model
       validator. When `IFileSystem*` is nullptr, the fallback uses
       `std::filesystem::exists()` which handles absolute paths natively.
-- [ ] **Callers** in `IrrlichtRenderer.cpp` that pass the result to
+- [x] **Callers** in `IrrlichtRenderer.cpp` that pass the result to
       `getMesh()` must wrap it using **Pattern B** (see contrast table below):
       `resolveModelPath(m_smgr->getFileSystem(), vehicleMeshPath(zone, variant), "")`
       The empty suffix `""` is mandatory because `vehicleMeshPath()` already
@@ -170,8 +170,8 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
   > returns nullptr and the vehicle model never loads. Always use `""` for
   > Pattern B call sites.
 
-- [ ] Update the file-header docstring to mention extensionless return value.
-- [ ] **Design rationale**: `vehicleMeshPath()` lives in a header included by
+- [x] Update the file-header docstring to mention extensionless return value.
+- [x] **Design rationale**: `vehicleMeshPath()` lives in a header included by
       `simulation_tests`, which must NOT link `aitown_render` (per
       `testability-architecture.md`). By keeping `vehicleMeshPath()` as a pure
       string-construction helper with no external symbol dependencies, the
@@ -180,25 +180,25 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
 
 #### 4. Update `IrrlichtRenderer.cpp` — vehicle LOD1 loading (if applicable)
 
-- [ ] Search for any direct `"_lod1.b3d"` construction for vehicles in
+- [x] Search for any direct `"_lod1.b3d"` construction for vehicles in
       `IrrlichtRenderer.cpp` (e.g. inside `spawnVehicleAgent` or
       `placeVehicle`). If found, replace with `resolveModelPath(m_smgr->getFileSystem(), ...)`.
-- [ ] **Note**: vehicle mesh paths obtained from `vehicleMeshPath()` are now
+- [x] **Note**: vehicle mesh paths obtained from `vehicleMeshPath()` are now
       extensionless base paths (e.g. `assets/3d/vehicles/car_sedan_lod0`).
       All call sites in `IrrlichtRenderer.cpp` that pass these paths to
       `getMesh()` must wrap them through `resolveModelPath()` to append the
       correct `.ply` or `.b3d` extension.
-- [ ] If vehicle LOD1 is loaded through `BuildingAssetLoader::load()` (which
+- [x] If vehicle LOD1 is loaded through `BuildingAssetLoader::load()` (which
       is also used for vehicles despite the class name), no additional change
       is needed -- Deliverable 2 already covers it.
 
 #### 5. Verify no other `.b3d` references remain
 
-- [ ] `grep -rn '\.b3d' src/` -- every hit should either be inside a comment
+- [x] `grep -rn '\.b3d' src/` -- every hit should either be inside a comment
       describing the B3D format, or already routed through
       `resolveModelPath()`. Fix any remaining hardcoded `.b3d` path
       constructions.
-- [ ] The model validator (`src/benchmark/model_validator_main.cpp`) hardcodes
+- [x] The model validator (`src/benchmark/model_validator_main.cpp`) hardcodes
       `{"_lod0.b3d", "_lod1.b3d", "_lod2.b3d"}` suffixes when iterating
       building/vehicle assets. Update it to try PLY first via
       `resolveModelPath()` (passing the device's `IFileSystem*`, which is
@@ -206,12 +206,12 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
 
 #### 6. Integration test: `tests/integration/MeshFormatUtilsTest.cpp`
 
-- [ ] Test `resolveModelPath()` with a temp directory (pass `nullptr` for
+- [x] Test `resolveModelPath()` with a temp directory (pass `nullptr` for
       `IFileSystem*` to exercise the `std::filesystem::exists()` fallback):
   - When `foo_lod0.ply` exists: returns `.ply` path.
   - When only `foo_lod0.b3d` exists: returns `.b3d` path.
   - When neither exists: returns `.b3d` path (caller handles load failure).
-- [ ] Test `resolveModelPath()` with a real `IFileSystem*` (the primary
+- [x] Test `resolveModelPath()` with a real `IFileSystem*` (the primary
       production code path used by `BuildingAssetLoader` and
       `IrrlichtRenderer`): create an `EDT_NULL` device via
       `createDevice(video::EDT_NULL)`, call `device->getFileSystem()`, add
@@ -236,12 +236,12 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
     guaranteed regardless of test outcome. The three `nullptr`-fallback
     cases (cases 1--3) do not create a device and may remain as bare
     `TEST()` functions or a separate fixture without device cleanup.
-- [ ] Register in `CMakeLists.txt`:
+- [x] Register in `CMakeLists.txt`:
       `target_sources(integration_tests PRIVATE tests/integration/MeshFormatUtilsTest.cpp)`.
       `integration_tests` already links `aitown_render` and has `src/rendering/`
       on its include path, so `#include "mesh_format_utils.h"` resolves and the
       `resolveModelPath()` definition is available without additional changes.
-- [ ] **Placement rationale**: MeshFormatUtilsTest includes both
+- [x] **Placement rationale**: MeshFormatUtilsTest includes both
       `std::filesystem` nullptr-fallback tests and `EDT_NULL` `IFileSystem*`
       tests; it lives in `integration_tests` because (a) that target already
       links `aitown_render` (where `resolveModelPath()` is compiled) and
@@ -250,7 +250,7 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
       adding `aitown_render` to `simulation_tests`'s link dependencies,
       breaking the `simulation_tests`-does-not-link-Irrlicht compile-time
       header isolation invariant documented in `testability-architecture.md`.
-- [ ] **Coverage note**: the test file lives in `tests/integration/` (under the
+- [x] **Coverage note**: the test file lives in `tests/integration/` (under the
       `integration_tests` target, label `integration`) but the source it exercises
       (`src/rendering/mesh_format_utils.cpp`) is in `src/rendering/`, which is
       excluded from lcov coverage filtering (see `coverage_filtered.info` exclude
@@ -258,11 +258,11 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
       count toward the 95% gate. This is intentional -- the function body is a
       trivial 6-line implementation whose correctness is fully exercised by the
       six test cases above (three `nullptr` fallback + three `IFileSystem*` path).
-- [ ] **Mock policy note**: no GMock mock objects are needed —
+- [x] **Mock policy note**: no GMock mock objects are needed —
       `resolveModelPath()` is a pure free function; tests use direct assertions
       (`EXPECT_EQ` / `EXPECT_THAT` with `EndsWith`) without a mock fixture. The
       project's `StrictMock`/`NiceMock` policy does not apply to this test.
-- [ ] Add Phase 11q12 Canonical Test Name Summary table to
+- [x] Add Phase 11q12 Canonical Test Name Summary table to
       `architecture/testing/testability-architecture.md` (ref:
       architecture/testing/testability-architecture.md). This is tracked as a
       discrete deliverable to ensure the spec update is not overlooked during
@@ -272,7 +272,7 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
 
 #### 6b. Update `tests/simulation/VehicleZoneTest.cpp` assertions
 
-- [ ] Update all 6 `vehicleMeshPath()` assertions in
+- [x] Update all 6 `vehicleMeshPath()` assertions in
       `tests/simulation/VehicleZoneTest.cpp` to check extensionless base paths
       (e.g. `EndsWith("car_sedan_lod0")` instead of
       `EndsWith("car_sedan_lod0.b3d")`). No `IFileSystem*` parameter change
@@ -280,7 +280,7 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
 
 #### 6c. Vendor patch: fix PLY loader 32-bit index threshold
 
-- [ ] Locate `CPLYMeshFileLoader.cpp` in the vendored Irrlicht source
+- [x] Locate `CPLYMeshFileLoader.cpp` in the vendored Irrlicht source
       (`build/_deps/` or `vcpkg_installed/`). At line ~233, change:
       `vertCount > 65565` → `vertCount > 65535`
       This is a one-line fix for an upstream off-by-30 typo that causes
@@ -288,14 +288,14 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
       65,536–65,565 vertices. Apply via a vcpkg overlay patch file
       (`vcpkg-overlays/irrlicht/fix-ply-32bit-threshold.patch`) so the
       fix persists across `vcpkg install` rebuilds.
-- [ ] Create `vcpkg-overlays/irrlicht/portfile.cmake`: copy the upstream
+- [x] Create `vcpkg-overlays/irrlicht/portfile.cmake`: copy the upstream
       Irrlicht portfile from the pinned vcpkg baseline and append the
       patch via the `PATCHES` argument to `vcpkg_from_github()` (or
       equivalent). Follow the same structure as
       `vcpkg-overlays/openal-soft/portfile.cmake`.
-- [ ] Create `vcpkg-overlays/irrlicht/vcpkg.json`: mirror the upstream
+- [x] Create `vcpkg-overlays/irrlicht/vcpkg.json`: mirror the upstream
       Irrlicht port metadata at the pinned baseline.
-- [ ] Copy the following upstream support files from
+- [x] Copy the following upstream support files from
       `$VCPKG_ROOT/ports/irrlicht/` into `vcpkg-overlays/irrlicht/`:
       `CMakeLists.txt`, `LICENSE.txt`, `fix-encoding.patch`,
       `fix-osx-compilation.patch`, `fix-osx-compilation-2.diff`,
@@ -308,7 +308,7 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
       `fix-encoding.patch`, `fix-osx-compilation.patch`,
       `fix-osx-compilation-2.diff`, `vcpkg-cmake-wrapper.cmake`) or
       `vcpkg install` will fail.
-- [ ] **Docker CI image rebuild note**: adding content to
+- [x] **Docker CI image rebuild note**: adding content to
       `vcpkg-overlays/` triggers `docker-ci-image.yml` (which watches
       `vcpkg-overlays/**`), producing a new Docker CI image. After the
       overlay lands on `develop`, wait for the image rebuild, then update
@@ -319,7 +319,7 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
 
 #### 7. Update `tools/validate_assets.py` for PLY discovery
 
-- [ ] Checks that are hardcoded to `.b3d` must be updated to also discover and
+- [x] Checks that are hardcoded to `.b3d` must be updated to also discover and
       validate `.ply` files. At minimum the following checks are affected:
   - **Check 1** (file-presence): accept `_lodN.ply` as a valid LOD file
     alongside `_lodN.b3d`.
@@ -368,21 +368,21 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
     using PLY-first file discovery. For PLY files, parse the face count from
     the PLY ASCII header (`element face N`). Thresholds: vehicle LOD0 ≤ 510,000
     tris; vehicle LOD1 ≤ 12,000 tris (from `3d-model-standards.md` vehicle row).
-- [ ] Add `_parse_ply_uvs(path)` helper function that reads the PLY header to
+- [x] Add `_parse_ply_uvs(path)` helper function that reads the PLY header to
       determine UV element offsets, then reads the vertex data block to extract
       UV coordinates. This is the PLY-specific UV extraction path for checks 4
       and 4c.
-- [ ] Add `_parse_ply_face_count(path)` helper function that reads the PLY
+- [x] Add `_parse_ply_face_count(path)` helper function that reads the PLY
       header to extract the face count (`element face N`). Used by check 32
       and check 3 (PLY triangle budget).
-- [ ] Update guard loop: add `check_32` after `check_31`. Update header
+- [x] Update guard loop: add `check_32` after `check_31`. Update header
       comment to "Current highest check number: check_32".
-- [ ] **`_validate-assets.yml` checkout**: no LFS-related changes needed.
+- [x] **`_validate-assets.yml` checkout**: no LFS-related changes needed.
       PLY files under `assets/3d/` are regular git-tracked files (only
       `assets/tripo3d/**/*.zip` is tracked by Git LFS per `.gitattributes`).
       A standard `actions/checkout` produces the full PLY file content;
       no `git lfs pull` step is required.
-- [ ] **`_validate-assets.yml` PLY guard step**: add a new CI step
+- [x] **`_validate-assets.yml` PLY guard step**: add a new CI step
       "Verify PLY validation present in validate_assets.py" that runs
       `grep -q '\.ply' tools/validate_assets.py` (literal `.ply` extension,
       case-sensitive — avoids false positives from words like "apply") and
@@ -390,7 +390,7 @@ std::string resolveModelPath(irr::io::IFileSystem* fs,
       and before "Run asset validation". This is the generic PLY guard
       described in the CI spec (`architecture/ci-cd/github-actions-workflow.md`
       lines 1225–1231).
-- [ ] This deliverable co-lands atomically with the C++ changes per the
+- [x] This deliverable co-lands atomically with the C++ changes per the
       four-item atomicity rule: C++ source + test + `validate_assets.py` +
       CI must all be consistent in the same commit.
 
@@ -457,29 +457,29 @@ available in GCC 12+ with `-lstdc++fs` if needed).
 
 ### Exit Criteria
 
-- [ ] `grep -rn '\.b3d' src/rendering/` returns zero hardcoded path
+- [x] `grep -rn '\.b3d' src/rendering/` returns zero hardcoded path
       constructions (only comments and format-description strings).
-- [ ] `grep -rn '\.b3d' src/benchmark/model_validator_main.cpp` returns zero
+- [x] `grep -rn '\.b3d' src/benchmark/model_validator_main.cpp` returns zero
       hardcoded path constructions (only comments).
-- [ ] `resolveModelPath()` integration tests pass (all six cases: three
+- [x] `resolveModelPath()` integration tests pass (all six cases: three
       nullptr-fallback — PLY-present, B3D-only, neither-present — and three
       IFileSystem\* via EDT_NULL — PLY-present, B3D-only, neither-present). These run under
       `ctest -L "^integration$"`, consistent with the test's placement in
       `integration_tests`.
-- [ ] All 6 `vehicleMeshPath()` assertions in `VehicleZoneTest.cpp` pass with
+- [x] All 6 `vehicleMeshPath()` assertions in `VehicleZoneTest.cpp` pass with
       extensionless base path expectations (e.g. `EndsWith("car_sedan_lod0")`).
-- [ ] Existing B3D-only assets (original `ind_*`, `res_*`) still load
+- [x] Existing B3D-only assets (original `ind_*`, `res_*`) still load
       correctly (fallback path exercised).
-- [ ] When PLY files are present alongside B3D files, the PLY is loaded
+- [x] When PLY files are present alongside B3D files, the PLY is loaded
       (verified at `IrrlichtRenderer` call sites via `resolveModelPath()`,
       not in `vehicleMeshPath()`; confirmed by log output or debugger).
-- [ ] At least one high-poly PLY asset with >65,535 vertices per buffer
+- [x] At least one high-poly PLY asset with >65,535 vertices per buffer
       (e.g. `com_high_01_lod0.ply` at ~495K tris) loads and renders correctly
       in the model validator (`--model com_high_01`) without segfault or
       visible geometry corruption; verify via debug log that
       `CDynamicMeshBuffer` index type is `EIT_32BIT`. This is the primary
       validation that the 16-bit index truncation root cause is resolved.
-- [ ] Vendor patch applied: `CPLYMeshFileLoader.cpp` threshold reads
+- [x] Vendor patch applied: `CPLYMeshFileLoader.cpp` threshold reads
       `vertCount > 65535` (not the upstream typo `65565`). Verify by
       inspecting the patched source after `vcpkg install`. The overlay
       port is complete: `vcpkg-overlays/irrlicht/` contains all nine
@@ -489,7 +489,7 @@ available in GCC 12+ with `-lstdc++fs` if needed).
       `fix-osx-compilation-2.diff`, `vcpkg-cmake-wrapper.cmake`) — all
       nine files are required for `vcpkg install` to discover and apply
       the patch.
-- [ ] `validate_assets.py` PLY checks pass: all **committed** `.ply` building
+- [x] `validate_assets.py` PLY checks pass: all **committed** `.ply` building
       and vehicle assets pass checks 1, 2, 3, 4, 4b, 4c, 5, 6, 8, 10, 11, 15, 32
       with PLY support enabled. **Note**: `_lod2.ply` files for any asset
       whose `.meta` sidecar has `height_floors <= 3` must NOT be committed —
@@ -525,7 +525,7 @@ available in GCC 12+ with `-lstdc++fs` if needed).
       MANIFEST and regenerate affected PLY files before validation.
       Exit-criteria check #4 (atlas UV bounds) catches atlas-cell
       mismatches; check #8 (pivot) catches footprint/scale errors.
-- [ ] PLY bounding-box loader contract verified (two-level): inspect
+- [x] PLY bounding-box loader contract verified (two-level): inspect
       `CPLYMeshFileLoader.cpp` in the vendored Irrlicht source
       (`build/_deps/` or `vcpkg_installed/`) and confirm:
       (a) buffer-level — each `CDynamicMeshBuffer` has
@@ -551,13 +551,13 @@ available in GCC 12+ with `-lstdc++fs` if needed).
       `SAnimatedMesh` (concrete), not `IAnimatedMesh` (interface), and
       Irrlicht is compiled with `-fno-rtti` so downcasting is
       prohibited per `scene-graph-ownership.md` lines 153–164.
-- [ ] PLY files in packaged artifacts contain real geometry: committed
+- [x] PLY files in packaged artifacts contain real geometry: committed
       `.ply` files are regular git objects (not LFS-tracked), so a standard
       checkout always produces full binary vertex/face data. Verify by
       inspecting a `.ply` file header: `head -1 assets/3d/buildings/com_high_01_lod0.ply`
       should show `ply`.
-- [ ] Build succeeds on Linux (`make build`).
-- [ ] All existing tests pass (`make test`).
+- [x] Build succeeds on Linux (`make build`).
+- [x] All existing tests pass (`make test`).
 
 ### Notes
 

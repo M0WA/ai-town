@@ -201,6 +201,11 @@ For static buildings, `addMeshSceneNode(static_cast<IMesh*>(lod0))` must be used
 
 - `CSkinnedMesh::finalize()` (called by the B3D loader) computes the bounding box from
   all vertices. No explicit `recalculateBoundingBox()` is required for B3D assets.
+- `CPLYMeshFileLoader` populates `CDynamicMeshBuffer` and calls `recalculateBoundingBox()`
+  on each buffer before wrapping in `SAnimatedMesh`; `SAnimatedMesh` aggregates buffer BBs
+  into its mesh-level `Box` — satisfying the mandatory two-level recalculation rule
+  (buffer + parent mesh). No explicit `recalculateBoundingBox()` is required for PLY assets
+  loaded via `getMesh()`.
 - `LODNode` stores `IMeshSceneNode*` for `m_node` (to call `setMesh(IMesh*)`), and
   `IAnimatedMesh*` for `m_lod0/1/2` (borrowed from cache). `getNode()` returns
   `ISceneNode*` via implicit upcast.
@@ -823,21 +828,28 @@ any number of manually placed vehicle nodes.
 
 **`vehicleMeshPath()` — zone-to-mesh mapping**: `spawnVehicleAgent()` calls a free function
 `vehicleMeshPath(ZoneType zone, int variantIdx = 0)` declared in
-**`src/rendering/vehicle_mesh_path.h`** to select the LOD0 asset path. Declaring it in a
-standalone header (not as a file-scope static) allows direct unit testing without a live
-Irrlicht context.
+**`src/rendering/vehicle_mesh_path.h`** to select the LOD0 **extensionless base path**
+(no `.ply` or `.b3d` suffix). Declaring it in a standalone header (not as a file-scope
+static) allows direct unit testing without a live Irrlicht context. The function signature
+is unchanged — no `IFileSystem*` parameter — to preserve link-time compatibility with
+`simulation_tests` which must NOT link `aitown_render`.
 
-| `ZoneType` | `vehicle_id` | LOD0 asset path |
+Callers in `IrrlichtRenderer` wrap the returned path through `resolveModelPath()` (defined
+in `src/rendering/mesh_format_utils.h`) at mesh load time to append `.ply` (preferred) or
+`.b3d` (fallback). The empty suffix `""` is passed to `resolveModelPath()` because
+`vehicleMeshPath()` already embeds `_lod0` in the returned base path.
+
+| `ZoneType` | `vehicle_id` | LOD0 base path (extensionless) |
 |---|---|---|
-| `Residential` | `car_sedan` / `car_hatchback` / `car_suv` (round-robin via `variantIdx % 3`) | `assets/3d/vehicles/<variant>_lod0.b3d` |
-| `Commercial` | `bus_standard` | `assets/3d/vehicles/bus_standard_lod0.b3d` |
-| `Industrial` | `truck_cargo` | `assets/3d/vehicles/truck_cargo_lod0.b3d` |
+| `Residential` | `car_sedan` / `car_hatchback` / `car_suv` (round-robin via `variantIdx % 3`) | `assets/3d/vehicles/<variant>_lod0` |
+| `Commercial` | `bus_standard` | `assets/3d/vehicles/bus_standard_lod0` |
+| `Industrial` | `truck_cargo` | `assets/3d/vehicles/truck_cargo_lod0` |
 
 Signature: `inline std::string vehicleMeshPath(ZoneType zone, int variantIdx = 0)` (defined
 in the header). `spawnVehicleAgent()` passes `static_cast<int>(handle) % 3` as `variantIdx`
 for deterministic per-vehicle Residential variant selection.
 **Fallback**: unrecognised `zone` values (and default `variantIdx = 0`) return the `car_sedan`
-path, preventing an empty string from reaching `ISceneManager::getMesh()`.
+base path, preventing an empty string from reaching `resolveModelPath()`.
 
 **Cull policy**: agents beyond 150 m from the camera are not spawned (simulation skips calling
 `spawnVehicleAgent` for them); agents that move beyond 150 m trigger `despawnVehicleAgent`.

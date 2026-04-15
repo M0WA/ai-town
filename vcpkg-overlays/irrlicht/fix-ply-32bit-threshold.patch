@@ -9,3 +9,23 @@
  			mb->getVertexBuffer().reallocate(vertCount);
  			mb->getIndexBuffer().reallocate(vertCount);
  			mb->setHardwareMappingHint(EHM_STATIC);
+@@ -528,16 +528,17 @@
+-	else if (strcmp(typeString, "uint") == 0 ||
+-		strcmp(typeString, "int16") == 0 ||
++	else if (strcmp(typeString, "int16") == 0 ||
+ 		strcmp(typeString, "uint16") == 0 ||
+ 		strcmp(typeString, "short") == 0 ||
+ 		strcmp(typeString, "ushort") == 0)
+ 	{
+ 		return EPLYPT_INT16;
+ 	}
+-	else if (strcmp(typeString, "int") == 0 ||
++	else if (strcmp(typeString, "uint") == 0 ||
++		strcmp(typeString, "int") == 0 ||
+ 		strcmp(typeString, "long") == 0 ||
+ 		strcmp(typeString, "ulong") == 0 ||
+ 		strcmp(typeString, "int32") == 0 ||
+ 		strcmp(typeString, "uint32") == 0)
+ 	{
+ 		return EPLYPT_INT32;
+ 	}

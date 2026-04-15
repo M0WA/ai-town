@@ -1,7 +1,7 @@
 # Validate assets — reusable workflow
 # Runs tools/validate_assets.py and all source-tree presence gates.
 # Called by ci.yml with vcpkg_commit_id input.
-# Current highest check number in tools/validate_assets.py: check_31.
+# Current highest check number in tools/validate_assets.py: check_32.
 # timeout-minutes: 10 is permanent.
 name: Validate Assets
 
@@ -46,7 +46,8 @@ jobs:
             check_28 \
             check_29 \
             check_30 \
-            check_31; do
+            check_31 \
+            check_32; do
             if grep -q "$check" tools/validate_assets.py; then
               echo "PASS: $check present"
             else
@@ -57,6 +58,9 @@ jobs:
           if [ "$failed" -eq 1 ]; then
             exit 1
           fi
+
+      - name: Verify PLY validation present in validate_assets.py
+        run: grep -q '\.ply' tools/validate_assets.py
 
       - name: Verify hud_sprites_ui.dds not git-tracked
         # The DDS intermediate is an authoring artifact and must never be committed.
