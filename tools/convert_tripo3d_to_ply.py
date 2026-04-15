@@ -63,56 +63,57 @@ MANIFEST = {
     "vehicles/firetruck_1.zip": {"name": "firetruck",     "type": "vehicle", "atlas_row": 1, "atlas_col": 2},
 
     # --- Commercial High (3x3 tiles) ---
-    "buildings/com_high_1.zip": {"name": "com_high_01", "type": "building", "atlas_row": 2, "atlas_col": 4, "footprint": 3},
-    "buildings/com_high_2.zip": {"name": "com_high_02", "type": "building", "atlas_row": 2, "atlas_col": 5, "footprint": 3},
-    "buildings/com_high_3.zip": {"name": "com_high_03", "type": "building", "atlas_row": 2, "atlas_col": 6, "footprint": 3},
-    "buildings/com_high_4.zip": {"name": "com_high_04", "type": "building", "atlas_row": 2, "atlas_col": 7, "footprint": 3},
-    "buildings/com_high_5.zip": {"name": "com_high_05", "type": "building", "atlas_row": 3, "atlas_col": 4, "footprint": 3},
-    "buildings/com_high_6.zip": {"name": "com_high_06", "type": "building", "atlas_row": 3, "atlas_col": 5, "footprint": 3},
-    "buildings/com_high_7.zip": {"name": "com_high_07", "type": "building", "atlas_row": 3, "atlas_col": 6, "footprint": 3},
-    "buildings/com_high_8.zip": {"name": "com_high_08", "type": "building", "atlas_row": 3, "atlas_col": 7, "footprint": 3},
+    "medium_poly/buildings/com_high_1.zip": {"name": "com_high_01", "type": "building", "atlas_row": 2, "atlas_col": 4, "footprint": 3},
+    "medium_poly/buildings/com_high_2.zip": {"name": "com_high_02", "type": "building", "atlas_row": 2, "atlas_col": 5, "footprint": 3},
+    "medium_poly/buildings/com_high_3.zip": {"name": "com_high_03", "type": "building", "atlas_row": 2, "atlas_col": 6, "footprint": 3},
+    "medium_poly/buildings/com_high_4.zip": {"name": "com_high_04", "type": "building", "atlas_row": 2, "atlas_col": 7, "footprint": 3},
+    "medium_poly/buildings/com_high_5.zip": {"name": "com_high_05", "type": "building", "atlas_row": 3, "atlas_col": 4, "footprint": 3},
 
     # --- Commercial Medium (2x2 tiles) ---
-    "buildings/com_medium_1.zip": {"name": "com_med_01", "type": "building", "atlas_row": 1, "atlas_col": 4, "footprint": 2},
-    "buildings/com_medium_2.zip": {"name": "com_med_02", "type": "building", "atlas_row": 1, "atlas_col": 5, "footprint": 2},
-    "buildings/com_medium_3.zip": {"name": "com_med_03", "type": "building", "atlas_row": 1, "atlas_col": 6, "footprint": 2},
-    "buildings/com_medium_4.zip": {"name": "com_med_04", "type": "building", "atlas_row": 1, "atlas_col": 7, "footprint": 2},
+    "medium_poly/buildings/com_med_1.zip": {"name": "com_med_01", "type": "building", "atlas_row": 1, "atlas_col": 4, "footprint": 2},
+    "medium_poly/buildings/com_med_2.zip": {"name": "com_med_02", "type": "building", "atlas_row": 1, "atlas_col": 5, "footprint": 2},
+    "medium_poly/buildings/com_med_3.zip": {"name": "com_med_03", "type": "building", "atlas_row": 1, "atlas_col": 6, "footprint": 2},
+    "medium_poly/buildings/com_med_4.zip": {"name": "com_med_04", "type": "building", "atlas_row": 1, "atlas_col": 7, "footprint": 2},
 
     # --- Commercial Low (1x1 tile) ---
-    "buildings/com_low_1.zip": {"name": "com_low_01", "type": "building", "atlas_row": 1, "atlas_col": 0, "footprint": 1},
-    "buildings/com_low_2.zip": {"name": "com_low_02", "type": "building", "atlas_row": 1, "atlas_col": 1, "footprint": 1},
-    "buildings/com_low_3.zip": {"name": "com_low_03", "type": "building", "atlas_row": 1, "atlas_col": 2, "footprint": 1},
-    "buildings/com_low_4.zip": {"name": "com_low_04", "type": "building", "atlas_row": 1, "atlas_col": 3, "footprint": 1},
-    "buildings/com_low_5.zip": {"name": "com_low_05", "type": "building", "atlas_row": 2, "atlas_col": 0, "footprint": 1},
-    "buildings/com_low_6.zip": {"name": "com_low_06", "type": "building", "atlas_row": 2, "atlas_col": 1, "footprint": 1},
-    "buildings/com_low_7.zip": {"name": "com_low_07", "type": "building", "atlas_row": 2, "atlas_col": 2, "footprint": 1},
+    "medium_poly/buildings/com_low_1.zip": {"name": "com_low_01", "type": "building", "atlas_row": 1, "atlas_col": 0, "footprint": 1},
+    "medium_poly/buildings/com_low_2.zip": {"name": "com_low_02", "type": "building", "atlas_row": 1, "atlas_col": 1, "footprint": 1},
+    "medium_poly/buildings/com_low_3.zip": {"name": "com_low_03", "type": "building", "atlas_row": 1, "atlas_col": 2, "footprint": 1},
+    "medium_poly/buildings/com_low_4.zip": {"name": "com_low_04", "type": "building", "atlas_row": 1, "atlas_col": 3, "footprint": 1},
 
     # --- Residential High (3x3 tiles) ---
-    "buildings/res_high_1.zip": {"name": "res_high_01", "type": "building", "atlas_row": 4, "atlas_col": 0, "footprint": 3},
-    "buildings/res_high_2.zip": {"name": "res_high_02", "type": "building", "atlas_row": 4, "atlas_col": 1, "footprint": 3},
-    "buildings/res_high_3.zip": {"name": "res_high_03", "type": "building", "atlas_row": 4, "atlas_col": 2, "footprint": 3},
+    "medium_poly/buildings/res_high_1.zip": {"name": "res_high_01", "type": "building", "atlas_row": 4, "atlas_col": 0, "footprint": 3},
+    "medium_poly/buildings/res_high_2.zip": {"name": "res_high_02", "type": "building", "atlas_row": 4, "atlas_col": 1, "footprint": 3},
+    "medium_poly/buildings/res_high_3.zip": {"name": "res_high_03", "type": "building", "atlas_row": 4, "atlas_col": 2, "footprint": 3},
 
     # --- Residential Medium (2x2 tiles) ---
-    "buildings/res_medium_1.zip": {"name": "res_med_01", "type": "building", "atlas_row": 0, "atlas_col": 4, "footprint": 2},
-    "buildings/res_medium_2.zip": {"name": "res_med_02", "type": "building", "atlas_row": 0, "atlas_col": 5, "footprint": 2},
-    "buildings/res_medium_3.zip": {"name": "res_med_03", "type": "building", "atlas_row": 0, "atlas_col": 6, "footprint": 2},
-    "buildings/res_medium_4.zip": {"name": "res_med_04", "type": "building", "atlas_row": 0, "atlas_col": 7, "footprint": 2},
-    "buildings/res_medium_5.zip": {"name": "res_med_05", "type": "building", "atlas_row": 5, "atlas_col": 0, "footprint": 2},
-    "buildings/res_medium_6.zip": {"name": "res_med_06", "type": "building", "atlas_row": 5, "atlas_col": 1, "footprint": 2},
+    "medium_poly/buildings/res_med_1.zip":  {"name": "res_med_01", "type": "building", "atlas_row": 0, "atlas_col": 4, "footprint": 2},
+    "medium_poly/buildings/res_med_2.zip":  {"name": "res_med_02", "type": "building", "atlas_row": 0, "atlas_col": 5, "footprint": 2},
+    "medium_poly/buildings/res_med_03.zip": {"name": "res_med_03", "type": "building", "atlas_row": 0, "atlas_col": 6, "footprint": 2},
+    "medium_poly/buildings/res_med_4.zip":  {"name": "res_med_04", "type": "building", "atlas_row": 0, "atlas_col": 7, "footprint": 2},
+    "medium_poly/buildings/res_med_5.zip":  {"name": "res_med_05", "type": "building", "atlas_row": 5, "atlas_col": 0, "footprint": 2},
+    "medium_poly/buildings/res_med_6.zip":  {"name": "res_med_06", "type": "building", "atlas_row": 5, "atlas_col": 1, "footprint": 2},
 
     # --- Residential Low (1x1 tile) ---
-    "buildings/res_low_1.zip": {"name": "res_low_01", "type": "building", "atlas_row": 0, "atlas_col": 0, "footprint": 1},
-    "buildings/res_low_2.zip": {"name": "res_low_02", "type": "building", "atlas_row": 0, "atlas_col": 1, "footprint": 1},
-    "buildings/res_low_3.zip": {"name": "res_low_03", "type": "building", "atlas_row": 0, "atlas_col": 2, "footprint": 1},
-    "buildings/res_low_4.zip": {"name": "res_low_04", "type": "building", "atlas_row": 0, "atlas_col": 3, "footprint": 1},
-    "buildings/res_low_5.zip": {"name": "res_low_05", "type": "building", "atlas_row": 5, "atlas_col": 2, "footprint": 1},
-    "buildings/res_low_6.zip": {"name": "res_low_06", "type": "building", "atlas_row": 5, "atlas_col": 3, "footprint": 1},
+    "medium_poly/buildings/res_low_1.zip": {"name": "res_low_01", "type": "building", "atlas_row": 0, "atlas_col": 0, "footprint": 1},
+    "medium_poly/buildings/res_low_2.zip": {"name": "res_low_02", "type": "building", "atlas_row": 0, "atlas_col": 1, "footprint": 1},
+    "medium_poly/buildings/res_low_3.zip": {"name": "res_low_03", "type": "building", "atlas_row": 0, "atlas_col": 2, "footprint": 1},
+    "medium_poly/buildings/res_low_4.zip": {"name": "res_low_04", "type": "building", "atlas_row": 0, "atlas_col": 3, "footprint": 1},
 
     # --- Service buildings (1x1 tile) ---
-    "buildings/svc_fire_station.zip":  {"name": "svc_fire_station",  "type": "building", "atlas_row": 4, "atlas_col": 4, "footprint": 1},
-    "buildings/svc_police_station.zip": {"name": "svc_police_station", "type": "building", "atlas_row": 4, "atlas_col": 5, "footprint": 1},
-    "buildings/svc_power_plant.zip":   {"name": "svc_power_plant",   "type": "building", "atlas_row": 4, "atlas_col": 6, "footprint": 1},
-    "buildings/svc_water_tower.zip":   {"name": "svc_water_tower",   "type": "building", "atlas_row": 4, "atlas_col": 7, "footprint": 1},
+    # Primary replacements for existing svc_* B3D assets (keep same atlas cell)
+    "medium_poly/buildings/svc_fire_medium_1.zip":   {"name": "svc_fire_station",  "type": "building", "atlas_row": 4, "atlas_col": 4, "footprint": 1},
+    "medium_poly/buildings/svc_police_medium_1.zip": {"name": "svc_police_station", "type": "building", "atlas_row": 4, "atlas_col": 5, "footprint": 1},
+    "medium_poly/buildings/svc_power_coal_medium_1.zip": {"name": "svc_power_plant", "type": "building", "atlas_row": 4, "atlas_col": 6, "footprint": 1},
+    "medium_poly/buildings/svc_water_low_1.zip":     {"name": "svc_water_tower",   "type": "building", "atlas_row": 4, "atlas_col": 7, "footprint": 1},
+    # Additional svc variants (new assets, row 5)
+    "medium_poly/buildings/svc_fire_high_1.zip":          {"name": "svc_fire_high_01",          "type": "building", "atlas_row": 5, "atlas_col": 0, "footprint": 1},
+    "medium_poly/buildings/svc_power_coal_medium_2.zip":  {"name": "svc_power_coal_medium_02",  "type": "building", "atlas_row": 5, "atlas_col": 1, "footprint": 1},
+    "medium_poly/buildings/svc_power_nuclear_medium_1.zip": {"name": "svc_power_nuclear_medium_01", "type": "building", "atlas_row": 5, "atlas_col": 2, "footprint": 1},
+    "medium_poly/buildings/svc_power_nuclear_medium_2.zip": {"name": "svc_power_nuclear_medium_02", "type": "building", "atlas_row": 5, "atlas_col": 3, "footprint": 1},
+    "medium_poly/buildings/svc_power_nuclear_medium_3.zip": {"name": "svc_power_nuclear_medium_03", "type": "building", "atlas_row": 5, "atlas_col": 4, "footprint": 1},
+    "medium_poly/buildings/svc_school_medium_1.zip":  {"name": "svc_school_medium_01",  "type": "building", "atlas_row": 5, "atlas_col": 5, "footprint": 1},
+    "medium_poly/buildings/svc_water_low_2.zip":      {"name": "svc_water_low_02",      "type": "building", "atlas_row": 5, "atlas_col": 6, "footprint": 1},
 }
 
 # ---------------------------------------------------------------------------
@@ -128,6 +129,29 @@ BUILDING_ATLAS_GRID = 8    # 8x8 building atlas
 
 DEFAULT_VEHICLE_LENGTH_M = 4.0
 TILE_SIZE_M = 10.0
+
+
+# ===========================================================================
+# Meta file helpers
+# ===========================================================================
+
+import json
+
+def read_height_floors(asset_name, asset_type):
+    """Read height_floors from <asset_name>.meta in assets/3d/<type>s/.
+
+    Returns the floor count, or 0 if no meta file exists (conservative: no LOD2).
+    """
+    meta_path = os.path.join(_ASSETS_DIR, "3d", asset_type + "s", f"{asset_name}.meta")
+    if not os.path.exists(meta_path):
+        return 0
+    try:
+        with open(meta_path) as f:
+            data = json.load(f)
+        return int(data.get("height_floors", 0))
+    except Exception as e:
+        print(f"  WARNING: could not read {meta_path}: {e}")
+        return 0
 
 
 # ===========================================================================
@@ -440,17 +464,16 @@ def export_ply(obj, filepath):
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-    # Blender 3.x PLY exporter
-    bpy.ops.export_mesh.ply(
+    # Blender 4.x PLY exporter (bpy.ops.export_mesh.ply was removed in 4.0)
+    bpy.ops.wm.ply_export(
         filepath=filepath,
-        use_selection=True,
-        use_normals=True,
-        use_uv_coords=True,
-        use_colors=False,
-        use_ascii=False,
+        ascii_format=False,
+        export_normals=True,
+        export_uv=True,
+        export_colors='NONE',
         global_scale=1.0,
-        axis_forward='-Z',
-        axis_up='Y',
+        forward_axis='NEGATIVE_Z',
+        up_axis='Y',
     )
 
     sz = os.path.getsize(filepath)
@@ -557,19 +580,24 @@ def convert_vehicle(fbx_path, asset_name, atlas_row, atlas_col, target_length):
 
 
 def convert_building(fbx_path, asset_name, atlas_row, atlas_col, footprint_tiles,
-                     basecolor_jpg=None):
-    """Full building conversion pipeline: FBX -> PLY (LOD0 + LOD1 + LOD2)."""
+                     basecolor_jpg=None, generate_lod2=True):
+    """Full building conversion pipeline: FBX -> PLY (LOD0 + LOD1 [+ LOD2]).
+
+    LOD2 is skipped when generate_lod2=False (buildings with height_floors <= 3).
+    """
     out_dir = os.path.join(_ASSETS_DIR, "3d", "buildings")
     out_lod0 = os.path.join(out_dir, f"{asset_name}_lod0.ply")
     out_lod1 = os.path.join(out_dir, f"{asset_name}_lod1.ply")
     out_lod2 = os.path.join(out_dir, f"{asset_name}_lod2.ply")
 
     print(f"\n{'='*60}")
-    print(f"Building: {asset_name} ({footprint_tiles}x{footprint_tiles} tiles)")
+    print(f"Building: {asset_name} ({footprint_tiles}x{footprint_tiles} tiles, "
+          f"lod2={'yes' if generate_lod2 else 'no'})")
     print(f"  FBX: {fbx_path}")
     print(f"  -> {out_lod0}")
     print(f"  -> {out_lod1}")
-    print(f"  -> {out_lod2}")
+    if generate_lod2:
+        print(f"  -> {out_lod2}")
     print(f"{'='*60}")
 
     reset_scene()
@@ -608,17 +636,20 @@ def convert_building(fbx_path, asset_name, atlas_row, atlas_col, footprint_tiles
     remap_uvs_to_atlas(lod1, BUILDING_ATLAS_GRID, atlas_row, atlas_col)
     export_ply(lod1, out_lod1)
 
-    # LOD2: voxel remesh + collapse
-    print(f"\n  [LOD2] Voxel remesh + decimate to ~{BUILDING_LOD2_TRIS} tris")
-    lod2, _ = decimate_voxel_then_collapse(obj, BUILDING_LOD2_TRIS)
-    # Smart UV unwrap after voxel remesh (original UVs are destroyed)
-    select_only(lod2)
-    bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.select_all(action='SELECT')
-    bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.01)
-    bpy.ops.object.mode_set(mode='OBJECT')
-    remap_uvs_to_atlas(lod2, BUILDING_ATLAS_GRID, atlas_row, atlas_col)
-    export_ply(lod2, out_lod2)
+    # LOD2: voxel remesh + collapse (only for tall buildings, height_floors > 3)
+    if generate_lod2:
+        print(f"\n  [LOD2] Voxel remesh + decimate to ~{BUILDING_LOD2_TRIS} tris")
+        lod2, _ = decimate_voxel_then_collapse(obj, BUILDING_LOD2_TRIS)
+        # Smart UV unwrap after voxel remesh (original UVs are destroyed)
+        select_only(lod2)
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.01)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        remap_uvs_to_atlas(lod2, BUILDING_ATLAS_GRID, atlas_row, atlas_col)
+        export_ply(lod2, out_lod2)
+    else:
+        print(f"\n  [LOD2] Skipped (height_floors <= 3)")
 
     return True
 
@@ -656,7 +687,8 @@ def bake_basecolor_to_atlas(basecolor_path, atlas_row, atlas_col):
 # ===========================================================================
 
 def convert_single(zip_path, asset_name, asset_type, atlas_row, atlas_col,
-                   footprint=1, target_length=DEFAULT_VEHICLE_LENGTH_M):
+                   footprint=1, target_length=DEFAULT_VEHICLE_LENGTH_M,
+                   generate_lod2=True):
     """Convert a single Tripo3D zip to PLY."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         print(f"Extracting {zip_path}...")
@@ -667,7 +699,7 @@ def convert_single(zip_path, asset_name, asset_type, atlas_row, atlas_col,
             return convert_vehicle(fbx_path, asset_name, atlas_row, atlas_col, target_length)
         else:
             return convert_building(fbx_path, asset_name, atlas_row, atlas_col, footprint,
-                                    basecolor)
+                                    basecolor, generate_lod2=generate_lod2)
 
 
 def convert_batch():
@@ -683,6 +715,15 @@ def convert_batch():
             continue
 
         try:
+            # Determine LOD2: generate only for buildings with height_floors > 3.
+            # Read from existing .meta file; default False (no LOD2) when absent.
+            lod2 = False
+            if cfg["type"] == "building":
+                floors = read_height_floors(cfg["name"], cfg["type"])
+                lod2 = floors > 3
+                if floors == 0:
+                    print(f"  NOTE: no meta for {cfg['name']} — LOD2 skipped")
+
             ok = convert_single(
                 zip_path,
                 cfg["name"],
@@ -691,6 +732,7 @@ def convert_batch():
                 cfg.get("atlas_col", 0),
                 cfg.get("footprint", 1),
                 cfg.get("target_len", DEFAULT_VEHICLE_LENGTH_M),
+                generate_lod2=lod2,
             )
             if ok:
                 results["ok"].append(cfg["name"])
