@@ -442,3 +442,42 @@ TEST_F(UndoTest, UndoZoneOverRoad_RestoresRoadAndIncrementsCount)
     EXPECT_FALSE(afterUndo.isRoad);
     EXPECT_FALSE(afterUndo.isZoned);
 }
+
+// ---------------------------------------------------------------------------
+// Test 6: UndoSystem_Demolish_Road_Undo_RestoresRoadTileCount
+//
+// Covers CitySimulation.cpp line 776: the !currentlyRoad && prevWasRoad branch
+// in undoLastAction() that increments m_roadTileCount.
+//
+// Scenario:
+//   1. Place a road at (1,1) — roadTileCount becomes 1.
+//   2. Demolish the road — roadTileCount becomes 0; undo action records
+//      previousState.isRoad=true.
+//   3. Undo the demolish — currentlyRoad=false (tile cleared by demolish),
+//      prevWasRoad=true → hits line 776: m_roadTileCount++.
+//
+// After undo, the tile must again be a road and no pending undo must remain.
+// ---------------------------------------------------------------------------
+TEST_F(UndoTest, UndoSystem_Demolish_Road_Undo_RestoresRoadTileCount) {
+    // Place a road at (1,1).
+    sim_->placeRoad(1, 1);
+    ASSERT_TRUE(sim_->queryTile(1, 1).isRoad)
+        << "Pre-condition: tile (1,1) must be a road after placeRoad";
+
+    // Demolish the road — records undo action with previousState.isRoad=true.
+    cs()->demolishTile(1, 1);
+    ASSERT_FALSE(sim_->queryTile(1, 1).isRoad)
+        << "Pre-condition: tile (1,1) must not be a road after demolish";
+    ASSERT_TRUE(sim_->hasUndoPendingAction())
+        << "Undo action must be pending after demolishTile";
+
+    // Undo the demolish — covers the !currentlyRoad && prevWasRoad branch.
+    sim_->undoLastAction();
+
+    // After undo, no pending undo remains.
+    EXPECT_FALSE(sim_->hasUndoPendingAction())
+        << "hasUndoPendingAction() must be false after undoLastAction()";
+    // The tile is restored to a road.
+    EXPECT_TRUE(sim_->queryTile(1, 1).isRoad)
+        << "Tile (1,1) must be a road again after undoing the demolish";
+}

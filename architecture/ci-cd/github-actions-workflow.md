@@ -1196,6 +1196,41 @@ markdown-lint:
             echo "PASS: check_31 present"
     ```
 
+  - Phase 11q12: Checks #1, #2, #3, #4, #4b, #6, #8, #10, #11, #15, and #32 (check #5
+    skips PLY files per UV1 exemption) are **extended** to discover and validate `.ply`
+    files alongside `.b3d`. The PLY-first mesh loading path introduced in Phase 11q12
+    requires the asset validator to accept `_lodN.ply` filenames, read PLY geometry for
+    triangle-count / UV / pivot validation, and treat a model set as complete when
+    LOD0/1/2 are present in either format. Check #32 is extended (vehicle triangle budget
+    extended for PLY path discovery). `check_32` is added to the numbered guard loop in
+    `_validate-assets.yml` (after `check_31`); the header comment is updated from
+    `check_31` to `check_32`. PLY files under `assets/3d/` are regular
+    git-tracked files (NOT Git LFS objects — only `assets/tripo3d/**/*.zip` is
+    tracked by LFS). No `lfs: true` or `git lfs pull` step is needed; PLY files
+    are present in the working tree after a normal `actions/checkout`. No change
+    to `all-checks-pass` wiring.
+
+    Guard steps (add to `validate-assets` job after the existing check_31 guard, before
+    `Run asset validation`):
+
+    ```yaml
+        - name: Verify check_32 present in validate_assets.py
+          # check_32: vehicle per-class triangle budget (LOD0/LOD1) — extended in Phase 11q12 for PLY path discovery.
+          # A missing check_32 allows over-budget vehicle meshes to pass CI silently.
+          run: |
+            grep -q "check_32" tools/validate_assets.py || \
+              (echo "FAIL: check_32 not found in validate_assets.py — Phase 11q12 vehicle triangle budget gate missing" && exit 1)
+            echo "PASS: check_32 present"
+
+        - name: Verify PLY validation present in validate_assets.py
+          # Phase 11q12: checks 1-4, 4b, 6, 8, 10, 11, 15, 32 extended for PLY format discovery (check 5 skips PLY per UV1 exemption).
+          # A missing PLY path allows .ply assets to bypass validation silently.
+          run: |
+            grep -q '\.ply' tools/validate_assets.py || \
+              (echo "FAIL: PLY validation not found in validate_assets.py — Phase 11q12 PLY discovery gate missing" && exit 1)
+            echo "PASS: PLY validation present"
+    ```
+
 ### PHASE 0 FORM (validate-assets not yet introduced)
 
 ```yaml

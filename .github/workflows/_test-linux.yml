@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     container:
-      image: ghcr.io/m0wa/aitown-ci-linux@sha256:fdf5a354a1a16166aad2448bdf157ae711aad11f83815e3d3792100caae4cdf1
+      image: ghcr.io/m0wa/aitown-ci-linux@sha256:3339c8973fd67d052f82e1e193c5ffbe0258137adeef2165f7b2a07f999dca51
     permissions:
       packages: read
       checks: write

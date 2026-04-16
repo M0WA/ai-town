@@ -37,15 +37,6 @@
     return SimulationConstants::starting_funds_normal;
 }
 
-/*static*/ int CitySimulation::bondMaxUsesForDifficulty(Difficulty d) {
-    switch (d) {
-        case Difficulty::Easy:   return SimulationConstants::bond_max_uses_easy;
-        case Difficulty::Normal: return SimulationConstants::bond_max_uses_normal;
-        case Difficulty::Hard:   return SimulationConstants::bond_max_uses_hard;
-    }
-    return SimulationConstants::bond_max_uses_normal;
-}
-
 // ---------------------------------------------------------------------------
 // Map dimensions
 // ---------------------------------------------------------------------------
@@ -802,6 +793,9 @@ void CitySimulation::setModalOpen(bool open) {
 #ifdef AITOWN_TESTING_ENABLED
 void CitySimulation::testForceUnlockDensityTier(ZoneType zone, DensityTier tier) {
     m_population.testForceUnlockDensityTier(zone, tier);
+}
+void CitySimulation::testSetZoneDemandFactor(ZoneType zone, float value) {
+    m_traffic.overrideZoneDemandFactor(zone, value);
 }
 #endif
 

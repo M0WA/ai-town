@@ -3,6 +3,7 @@
 //
 // Four simulation unit tests (all use NiceMock fixtures):
 //   1. VehicleMeshPath tests: Commercial->bus, Industrial->truck, Residential->car variants
+//      (assertions check extensionless base paths — no .b3d/.ply suffix)
 //   2. SpawnVehicleAgent_UnzonedDestination_FallsBackToRNG — proportional distribution
 //   3. TripComplete_ZonedDestination_UpdatesVehicleZone — zone re-evaluation on trip hop
 //
@@ -30,20 +31,20 @@ using ::testing::EndsWith;
 
 TEST(VehicleMeshPathTest, VehicleMeshPath_Commercial_ReturnsBusPath) {
     std::string path = vehicleMeshPath(ZoneType::Commercial);
-    EXPECT_THAT(path, EndsWith("bus_standard_lod0.b3d"));
+    EXPECT_THAT(path, EndsWith("bus_standard_lod0"));
 }
 
 TEST(VehicleMeshPathTest, VehicleMeshPath_Industrial_ReturnsTruckPath) {
     std::string path = vehicleMeshPath(ZoneType::Industrial);
-    EXPECT_THAT(path, EndsWith("truck_cargo_lod0.b3d"));
+    EXPECT_THAT(path, EndsWith("truck_cargo_lod0"));
 }
 
 TEST(VehicleMeshPathTest, VehicleMeshPath_Residential_ReturnsCarPath) {
     // variantIdx=0 -> sedan, 1 -> hatchback, 2 -> suv, 3 -> sedan (wraps)
-    EXPECT_THAT(vehicleMeshPath(ZoneType::Residential, 0), EndsWith("car_sedan_lod0.b3d"));
-    EXPECT_THAT(vehicleMeshPath(ZoneType::Residential, 1), EndsWith("car_hatchback_lod0.b3d"));
-    EXPECT_THAT(vehicleMeshPath(ZoneType::Residential, 2), EndsWith("car_suv_lod0.b3d"));
-    EXPECT_THAT(vehicleMeshPath(ZoneType::Residential, 3), EndsWith("car_sedan_lod0.b3d"));  // wraps
+    EXPECT_THAT(vehicleMeshPath(ZoneType::Residential, 0), EndsWith("car_sedan_lod0"));
+    EXPECT_THAT(vehicleMeshPath(ZoneType::Residential, 1), EndsWith("car_hatchback_lod0"));
+    EXPECT_THAT(vehicleMeshPath(ZoneType::Residential, 2), EndsWith("car_suv_lod0"));
+    EXPECT_THAT(vehicleMeshPath(ZoneType::Residential, 3), EndsWith("car_sedan_lod0"));  // wraps
 }
 
 // ---------------------------------------------------------------------------

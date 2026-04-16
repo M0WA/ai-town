@@ -725,3 +725,60 @@ TEST_F(TerrainSystemTest, FlushPendingRebuilds_WithProgressCallback) {
     EXPECT_GE(progress.callCount, 1)
         << "onChunkRebuilt() must be called at least once during flushPendingRebuilds()";
 }
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_GetHeightAtWorld_ReturnsInterpolatedHeight
+//
+// Covers TerrainSystem.cpp lines 911-931 (getHeightAtWorld body).
+// Uses FlatRNG (all heights=0) so every getHeightAt() call returns 0.0f and
+// the bilinear interpolation result is also 0.0f.
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, GetHeightAtWorld_ReturnsInterpolatedHeight) {
+    FlatRNG flatRng;
+    m_sim->generate(/*mapTilesX=*/100, /*mapTilesZ=*/100,
+                    /*cellSize=*/4.0f, &flatRng, /*maxRetries=*/0);
+    // With a flat (all-zero) heightmap, getHeightAtWorld must return 0 everywhere.
+    const float h = m_sim->getHeightAtWorld(5.0f, 5.0f);
+    EXPECT_FLOAT_EQ(h, 0.0f)
+        << "getHeightAtWorld must return 0.0f on a flat all-zero heightmap";
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_ClearAllChunks_WithActiveChunks_CallsRemoveOnRenderer
+//
+// Covers TerrainSystem.cpp line 88 (m_renderer->removeTerrainChunk inside
+// clearAllChunks loop).
+//
+// generate() + buildAllChunks() populates m_activeChunks. clearAllChunks()
+// then iterates over every active chunk and calls removeTerrainChunk() on the
+// renderer. With NiceMock, we can assert AtLeast(1) call.
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, ClearAllChunks_WithActiveChunks_CallsRemoveOnRenderer) {
+    FlatRNG flatRng;
+    m_sim->generate(/*mapTilesX=*/100, /*mapTilesZ=*/100,
+                    /*cellSize=*/4.0f, &flatRng, /*maxRetries=*/0);
+    m_sim->buildAllChunks();  // populates m_activeChunks via buildOneChunk + flushPendingRebuilds
+
+    // clearAllChunks() must call removeTerrainChunk() for each active chunk.
+    EXPECT_CALL(*m_renderer, removeTerrainChunk(_)).Times(AtLeast(1));
+    m_sim->clearAllChunks();
+}
+
+// ---------------------------------------------------------------------------
+// TerrainSystemTest_BuildAllChunks_EmptyHeightmap_EarlyReturn
+//
+// Covers TerrainSystem.cpp line 636 (early return when heightmap is empty).
+// buildAllChunks() must return without queueing any rebuilds when
+// m_generatedHeightmap is empty (i.e., generate() was never called).
+// ---------------------------------------------------------------------------
+TEST_F(TerrainSystemTest, BuildAllChunks_EmptyHeightmap_EarlyReturn) {
+    // Do NOT call generate() — m_generatedHeightmap is empty.
+    ASSERT_TRUE(m_sim->getGeneratedHeightmap().empty())
+        << "Pre-condition: heightmap must be empty without prior generate()";
+
+    // buildAllChunks() must take the early-return path and not enqueue anything.
+    m_sim->buildAllChunks();
+
+    EXPECT_EQ(m_sim->pendingRebuildCount(), 0)
+        << "No rebuilds must be queued when buildAllChunks() hits the empty-heightmap guard";
+}

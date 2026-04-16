@@ -1,0 +1,570 @@
+## Phase 11q12: PLY-First Mesh Loading with B3D Fallback
+
+**Status: TODO**
+
+**Prerequisite**: phase-11q11 merged.
+
+### Goal
+
+Tripo3D high-poly LOD0 models crash on load because Irrlicht's B3D loader
+(`SSkinMeshBuffer`) hardcodes 16-bit indices (`core::array<u16> Indices`).
+Any mesh buffer with >65,535 vertices wraps its indices, producing garbage
+geometry (vehicles) or a segfault (buildings) in `drawVertexPrimitiveList`.
+
+Irrlicht's PLY loader (`CPLYMeshFileLoader`) uses `CDynamicMeshBuffer` which
+automatically selects `EIT_32BIT` when vertex count exceeds a threshold. This
+phase switches the mesh loading path to prefer `.ply` files and fall back to
+`.b3d` only when no PLY exists, preserving backward compatibility with the
+original low-poly `ind_*` / `res_*` assets that remain in B3D format.
+
+**Upstream threshold bug**: `CPLYMeshFileLoader.cpp` line 233 uses
+`vertCount > 65565` (not `> 65535`) — an off-by-30 typo in upstream Irrlicht.
+Meshes with vertex counts in [65,536 .. 65,565] would be assigned `EIT_16BIT`
+indices, causing silent index truncation and corrupt geometry. This phase
+applies a one-line vendor patch to fix the threshold to `> 65535`. All current
+Tripo3D LOD0 assets are well above this range (~495K vertices), so the bug does
+not affect existing assets, but the fix prevents future edge-case corruption.
+
+### Root Cause
+
+- `SSkinMeshBuffer::getIndexType()` always returns `EIT_16BIT` (Irrlicht
+  engine limitation, not AI Town code).
+- The `B3DWriter` in `convert_vehicle_fbx.py` / `convert_building_fbx.py`
+  splits vertices into 65,535-vertex VRTS chunks, but the TRIS indices within
+  each chunk still reference indices >65,535, causing 16-bit truncation.
+- All Tripo3D LOD0 B3D files have index overflow (up to 377K indices per
+  buffer). LOD1 files are safe (<65K).
+
+### Approach
+
+Introduce a single free function `resolveModelPath()` that tries `.ply` first,
+then `.b3d`, used by all three mesh-loading call sites. No format-specific
+logic is needed in callers because `ISceneManager::getMesh()` dispatches to the
+correct loader based on file extension and returns `IAnimatedMesh*` regardless.
+
+---
+
+### Deliverables
+
+#### 1. New helper: `src/rendering/mesh_format_utils.h` + `mesh_format_utils.cpp`
+
+- [x] Create `src/rendering/mesh_format_utils.h` (declaration-only header)
+- [x] Create `src/rendering/mesh_format_utils.cpp` (implementation)
+- [x] The header forward-declares `irr::io::IFileSystem` and declares
+      `resolveModelPath()`. It does **NOT** include `<IFileSystem.h>` or
+      `<filesystem>`, so any translation unit that includes only the header
+      (e.g. `vehicle_mesh_path.h` -> `VehicleZoneTest.cpp` in
+      `simulation_tests`) will NOT pull in Irrlicht headers. This is the
+      key design choice that prevents a compile failure in targets that
+      lack Irrlicht on their include path.
+
+**`mesh_format_utils.h`**:
+
+```cpp
+#pragma once
+#include <string>
+
+namespace irr { namespace io { class IFileSystem; } }
+
+/// Try PLY first, fall back to B3D.
+/// fs:       Irrlicht VFS handle (may be nullptr for offline tools / unit tests).
+/// basePath: e.g. "assets/3d/vehicles/car_sedan"
+/// suffix:   e.g. "_lod0"
+/// Returns:  basePath + suffix + ".ply"  if that file exists,
+///           basePath + suffix + ".b3d"  otherwise.
+std::string resolveModelPath(irr::io::IFileSystem* fs,
+                             const std::string& basePath,
+                             const std::string& suffix);
+```
+
+**`mesh_format_utils.cpp`**:
+
+```cpp
+#include "mesh_format_utils.h"
+#include <IFileSystem.h>   // irr::io::IFileSystem -- full definition
+#include <filesystem>
+
+std::string resolveModelPath(irr::io::IFileSystem* fs,
+                             const std::string& basePath,
+                             const std::string& suffix) {
+    std::string ply = basePath + suffix + ".ply";
+    if (fs) {
+        if (fs->existFile(ply.c_str())) return ply;
+    } else {
+        if (std::filesystem::exists(ply)) return ply;
+    }
+    return basePath + suffix + ".b3d";
+}
+```
+
+- [x] Compiled into `aitown_render` via
+      `target_sources(aitown_render PRIVATE src/rendering/mesh_format_utils.cpp)`.
+- [x] The `IFileSystem*` path is critical: `addFolderFileArchive()` paths used
+      by the model validator are only visible through Irrlicht's VFS, not the
+      OS filesystem. The `std::filesystem::exists()` fallback covers offline
+      tools and unit tests that have no Irrlicht device.
+- [x] No class, no state, no templates. One free function, declared in the
+      header and defined in the `.cpp`.
+
+#### 2. Update `BuildingAssetLoader.cpp` (3 call sites)
+
+- [x] `#include "mesh_format_utils.h"` at the top.
+- [x] Replace the three hardcoded `.b3d` path constructions with
+      `resolveModelPath()`:
+
+| Line | Before                   | After                                                          |
+| ---- | ------------------------ | -------------------------------------------------------------- |
+| ~111 | `basePath + "_lod0.b3d"` | `resolveModelPath(m_smgr->getFileSystem(), basePath, "_lod0")` |
+| ~120 | `basePath + "_lod1.b3d"` | `resolveModelPath(m_smgr->getFileSystem(), basePath, "_lod1")` |
+| ~132 | `basePath + "_lod2.b3d"` | `resolveModelPath(m_smgr->getFileSystem(), basePath, "_lod2")` |
+
+- [x] `BuildingAssetLoader` obtains `IFileSystem*` via `m_smgr->getFileSystem()`
+      (`ISceneManager::getFileSystem()` is already available through the existing
+      `m_smgr` pointer — no new member needed). Pass it to `resolveModelPath()`.
+      `resolveModelPath()`.
+
+- [x] Update comments in `BuildingAssetLoader.h` and `.cpp` that reference
+      `.b3d` to say ".ply / .b3d" or "mesh file" where appropriate (file
+      header docstrings, `load()` docstring). Do not change comments that
+      describe B3D-specific internals (tc_sets, VRTS layout, etc.) since those
+      still apply when the fallback is used.
+
+#### 3. Update `vehicle_mesh_path.h` (5 mesh filenames)
+
+- [x] `vehicleMeshPath()` signature is **unchanged** -- no `IFileSystem*` parameter.
+- [x] Refactor the return value to produce an **extensionless base path** (e.g.
+      `assets/3d/vehicles/car_sedan_lod0`) instead of the current hardcoded
+      `.b3d` path (`assets/3d/vehicles/car_sedan_lod0.b3d`). This is the only
+      change -- the zone-to-vehicle-name mapping logic is untouched.
+- [x] **Path contract note**: `vehicleMeshPath()` continues to return a full
+      path rooted at `getAssetsDir()` (e.g.
+      `/home/user/.../assets/3d/vehicles/car_sedan_lod0`). When `IFileSystem*`
+      is non-null, `resolveModelPath()` uses `IFileSystem::existFile()` which
+      handles absolute paths because `addFolderFileArchive()` has already been
+      called for the assets directory by `BuildingAssetLoader` / the model
+      validator. When `IFileSystem*` is nullptr, the fallback uses
+      `std::filesystem::exists()` which handles absolute paths natively.
+- [x] **Callers** in `IrrlichtRenderer.cpp` that pass the result to
+      `getMesh()` must wrap it using **Pattern B** (see contrast table below):
+      `resolveModelPath(m_smgr->getFileSystem(), vehicleMeshPath(zone, variant), "")`
+      The empty suffix `""` is mandatory because `vehicleMeshPath()` already
+      embeds `_lodN` in the returned base path (e.g. `car_sedan_lod0`);
+      `resolveModelPath` then appends only `.ply` or `.b3d`.
+      **Note**: `IrrlichtRenderer` obtains `IFileSystem*` via
+      `m_smgr->getFileSystem()` at each call site — same pattern as
+      `BuildingAssetLoader` in Deliverable 2 (no new member needed).
+
+  **Two-pattern contrast — callers MUST choose the correct one:**
+
+  | Pattern | Caller | Example basePath | suffix arg | Resolved path |
+  |---------|--------|-----------------|------------|---------------|
+  | A | `BuildingAssetLoader` (Deliverable 2) | `"assets/3d/buildings/com_high_01"` (no LOD suffix) | `"_lod0"` | `com_high_01_lod0.ply` |
+  | B | `IrrlichtRenderer` via `vehicleMeshPath()` (Deliverable 4) | `"assets/3d/vehicles/car_sedan_lod0"` (LOD suffix already embedded) | `""` | `car_sedan_lod0.ply` |
+
+  > **WARNING — double-suffix bug**: Do NOT pass `"_lod0"` as suffix when
+  > calling via `vehicleMeshPath()`. Because `vehicleMeshPath()` already
+  > returns a path ending in `_lod0`, passing `"_lod0"` would produce
+  > `car_sedan_lod0_lod0.ply` — a file that does not exist. The `.ply`
+  > probe fails silently and `resolveModelPath` falls back to
+  > `car_sedan_lod0_lod0.b3d`, which also does not exist, so `getMesh()`
+  > returns nullptr and the vehicle model never loads. Always use `""` for
+  > Pattern B call sites.
+
+- [x] Update the file-header docstring to mention extensionless return value.
+- [x] **Design rationale**: `vehicleMeshPath()` lives in a header included by
+      `simulation_tests`, which must NOT link `aitown_render` (per
+      `testability-architecture.md`). By keeping `vehicleMeshPath()` as a pure
+      string-construction helper with no external symbol dependencies, the
+      link-time invariant is preserved. Format resolution happens at the
+      `IrrlichtRenderer` call sites which already link `aitown_render`.
+
+#### 4. Update `IrrlichtRenderer.cpp` — vehicle LOD1 loading (if applicable)
+
+- [x] Search for any direct `"_lod1.b3d"` construction for vehicles in
+      `IrrlichtRenderer.cpp` (e.g. inside `spawnVehicleAgent` or
+      `placeVehicle`). If found, replace with `resolveModelPath(m_smgr->getFileSystem(), ...)`.
+- [x] **Note**: vehicle mesh paths obtained from `vehicleMeshPath()` are now
+      extensionless base paths (e.g. `assets/3d/vehicles/car_sedan_lod0`).
+      All call sites in `IrrlichtRenderer.cpp` that pass these paths to
+      `getMesh()` must wrap them through `resolveModelPath()` to append the
+      correct `.ply` or `.b3d` extension.
+- [x] If vehicle LOD1 is loaded through `BuildingAssetLoader::load()` (which
+      is also used for vehicles despite the class name), no additional change
+      is needed -- Deliverable 2 already covers it.
+
+#### 5. Verify no other `.b3d` references remain
+
+- [x] `grep -rn '\.b3d' src/` -- every hit should either be inside a comment
+      describing the B3D format, or already routed through
+      `resolveModelPath()`. Fix any remaining hardcoded `.b3d` path
+      constructions.
+- [x] The model validator (`src/benchmark/model_validator_main.cpp`) hardcodes
+      `{"_lod0.b3d", "_lod1.b3d", "_lod2.b3d"}` suffixes when iterating
+      building/vehicle assets. Update it to try PLY first via
+      `resolveModelPath()` (passing the device's `IFileSystem*`, which is
+      already available since the validator calls `addFolderFileArchive()`).
+
+#### 6. Integration test: `tests/integration/MeshFormatUtilsTest.cpp`
+
+- [x] Test `resolveModelPath()` with a temp directory (pass `nullptr` for
+      `IFileSystem*` to exercise the `std::filesystem::exists()` fallback):
+  - When `foo_lod0.ply` exists: returns `.ply` path.
+  - When only `foo_lod0.b3d` exists: returns `.b3d` path.
+  - When neither exists: returns `.b3d` path (caller handles load failure).
+- [x] Test `resolveModelPath()` with a real `IFileSystem*` (the primary
+      production code path used by `BuildingAssetLoader` and
+      `IrrlichtRenderer`): create an `EDT_NULL` device via
+      `createDevice(video::EDT_NULL)`, call `device->getFileSystem()`, add
+      the temp directory as a folder archive
+      (`fs->addFolderFileArchive(tmpDir)`), then verify:
+  - When `foo_lod0.ply` exists: `fs->existFile()` finds it, returns `.ply`.
+  - When only `foo_lod0.b3d` exists: returns `.b3d` path.
+  - When neither exists: add an empty temp directory as folder archive,
+    verify `resolveModelPath()` returns `.b3d` fallback path (caller handles
+    load failure). This mirrors the nullptr "neither-present" case above but
+    exercises the `IFileSystem::existFile()` code path.
+  - **TearDown fixture requirement**: these three `IFileSystem*` test cases
+    (cases 4--6) must use a GTest test fixture (e.g.
+    `class MeshFormatUtilsIFSTest : public ::testing::Test`) with a
+    `TearDown()` override that calls `device_->drop()` and sets
+    `device_ = nullptr` if non-null, preventing Irrlicht device resource
+    leaks when an `EXPECT` or `ASSERT` fails mid-test. This follows the
+    mandatory TearDown contract pattern established in
+    `architecture/testing/testability-architecture.md` (see
+    `UIManagerDrawOrderTest` and `CitySimulationUnitTest` fixture examples):
+    explicitly release the owned resource in `TearDown()` so cleanup is
+    guaranteed regardless of test outcome. The three `nullptr`-fallback
+    cases (cases 1--3) do not create a device and may remain as bare
+    `TEST()` functions or a separate fixture without device cleanup.
+- [x] Register in `CMakeLists.txt`:
+      `target_sources(integration_tests PRIVATE tests/integration/MeshFormatUtilsTest.cpp)`.
+      `integration_tests` already links `aitown_render` and has `src/rendering/`
+      on its include path, so `#include "mesh_format_utils.h"` resolves and the
+      `resolveModelPath()` definition is available without additional changes.
+- [x] **Placement rationale**: MeshFormatUtilsTest includes both
+      `std::filesystem` nullptr-fallback tests and `EDT_NULL` `IFileSystem*`
+      tests; it lives in `integration_tests` because (a) that target already
+      links `aitown_render` (where `resolveModelPath()` is compiled) and
+      (b) the `EDT_NULL` device tests meet the integration label definition
+      in `framework.md`. Placing it in `simulation_tests` would require
+      adding `aitown_render` to `simulation_tests`'s link dependencies,
+      breaking the `simulation_tests`-does-not-link-Irrlicht compile-time
+      header isolation invariant documented in `testability-architecture.md`.
+- [x] **Coverage note**: the test file lives in `tests/integration/` (under the
+      `integration_tests` target, label `integration`) but the source it exercises
+      (`src/rendering/mesh_format_utils.cpp`) is in `src/rendering/`, which is
+      excluded from lcov coverage filtering (see `coverage_filtered.info` exclude
+      list in `CLAUDE.md`). Therefore `resolveModelPath()` line coverage will not
+      count toward the 95% gate. This is intentional -- the function body is a
+      trivial 6-line implementation whose correctness is fully exercised by the
+      six test cases above (three `nullptr` fallback + three `IFileSystem*` path).
+- [x] **Mock policy note**: no GMock mock objects are needed —
+      `resolveModelPath()` is a pure free function; tests use direct assertions
+      (`EXPECT_EQ` / `EXPECT_THAT` with `EndsWith`) without a mock fixture. The
+      project's `StrictMock`/`NiceMock` policy does not apply to this test.
+- [x] Add Phase 11q12 Canonical Test Name Summary table to
+      `architecture/testing/testability-architecture.md` (ref:
+      architecture/testing/testability-architecture.md). This is tracked as a
+      discrete deliverable to ensure the spec update is not overlooked during
+      implementation. The table content is already specified in the Files
+      Changed entry for `testability-architecture.md` below (6 canonical test
+      names, columns: name, source file, CMake target, label, description).
+
+#### 6b. Update `tests/simulation/VehicleZoneTest.cpp` assertions
+
+- [x] Update all 6 `vehicleMeshPath()` assertions in
+      `tests/simulation/VehicleZoneTest.cpp` to check extensionless base paths
+      (e.g. `EndsWith("car_sedan_lod0")` instead of
+      `EndsWith("car_sedan_lod0.b3d")`). No `IFileSystem*` parameter change
+      needed — `vehicleMeshPath()` signature is unchanged.
+
+#### 6c. Vendor patch: fix PLY loader 32-bit index threshold
+
+- [x] Locate `CPLYMeshFileLoader.cpp` in the vendored Irrlicht source
+      (`build/_deps/` or `vcpkg_installed/`). At line ~233, change:
+      `vertCount > 65565` → `vertCount > 65535`
+      This is a one-line fix for an upstream off-by-30 typo that causes
+      `CDynamicMeshBuffer` to assign 16-bit indices to meshes with
+      65,536–65,565 vertices. Apply via a vcpkg overlay patch file
+      (`vcpkg-overlays/irrlicht/fix-ply-32bit-threshold.patch`) so the
+      fix persists across `vcpkg install` rebuilds.
+- [x] Create `vcpkg-overlays/irrlicht/portfile.cmake`: copy the upstream
+      Irrlicht portfile from the pinned vcpkg baseline and append the
+      patch via the `PATCHES` argument to `vcpkg_from_github()` (or
+      equivalent). Follow the same structure as
+      `vcpkg-overlays/openal-soft/portfile.cmake`.
+- [x] Create `vcpkg-overlays/irrlicht/vcpkg.json`: mirror the upstream
+      Irrlicht port metadata at the pinned baseline.
+- [x] Copy the following upstream support files from
+      `$VCPKG_ROOT/ports/irrlicht/` into `vcpkg-overlays/irrlicht/`:
+      `CMakeLists.txt`, `LICENSE.txt`, `fix-encoding.patch`,
+      `fix-osx-compilation.patch`, `fix-osx-compilation-2.diff`,
+      `vcpkg-cmake-wrapper.cmake`. A vcpkg overlay port **replaces** the
+      upstream port directory entirely — it does not inherit files from
+      the upstream port. The overlay's `portfile.cmake` references these
+      files via `CMAKE_CURRENT_LIST_DIR`, so all nine files must be
+      present in the overlay directory (`portfile.cmake`, `vcpkg.json`,
+      `fix-ply-32bit-threshold.patch`, `CMakeLists.txt`, `LICENSE.txt`,
+      `fix-encoding.patch`, `fix-osx-compilation.patch`,
+      `fix-osx-compilation-2.diff`, `vcpkg-cmake-wrapper.cmake`) or
+      `vcpkg install` will fail.
+- [x] **Docker CI image rebuild note**: adding content to
+      `vcpkg-overlays/` triggers `docker-ci-image.yml` (which watches
+      `vcpkg-overlays/**`), producing a new Docker CI image. After the
+      overlay lands on `develop`, wait for the image rebuild, then update
+      the image digest in `_build-linux.yml`, `_test-linux.yml`,
+      `_coverage-linux.yml`, `_asan-linux.yml`, and `.devcontainer/Dockerfile`
+      in a follow-up commit (two-commit sequence, same pattern as openal-soft
+      overlay introduction).
+
+#### 7. Update `tools/validate_assets.py` for PLY discovery
+
+- [x] Checks that are hardcoded to `.b3d` must be updated to also discover and
+      validate `.ply` files. At minimum the following checks are affected:
+  - **Check 1** (file-presence): accept `_lodN.ply` as a valid LOD file
+    alongside `_lodN.b3d`.
+  - **Check 2** (floor-count conditional LOD2 prohibition): also check for `_lod2.ply`
+    existence when `height_floors <= 3` — currently only checks for `_lod2.b3d`; a
+    committed `_lod2.ply` for a short building would silently bypass the prohibition.
+  - **Check 3** (triangle count + lightmap): load PLY geometry for tri-count
+    validation when the PLY file is present. **PLY exemption for lightmap
+    sub-check**: Check 3 also validates `_lod2_lm.dds` presence and DXT5
+    format for `.b3d` LOD2 files; `.ply` LOD2 files are exempt from this
+    lightmap sub-check because PLY meshes carry only UV channel 0 (no
+    lightmap UV1). The script must still validate geometry presence and
+    triangle budget for PLY LOD2 files.
+  - **Check 4** (atlas UV bounds): PLY files carry UV channel 0 -- validate
+    U/V within cell boundaries using `_parse_ply_uvs` (see Check 4c).
+  - **Check 6** (LOD0 polygon budget per category): currently hardcodes
+    `_lod0.b3d` for triangle-count validation; must discover `_lod0.ply`
+    via PLY-first path resolution. **Tripo3D budget branching note**: the
+    existing Check 6 thresholds (assembled LOD0 total ≤5,000 tris large /
+    ≤1,500 tris small) apply only to hand-modeled assembled-stack buildings.
+    Tripo3D building categories (`com_high_*`, `com_med_*`,
+    `res_high_01`/`02`/`03` -- identified via the asset's `.meta` sidecar
+    `category` field or the naming prefix `com_high`/`com_med`/`res_high_01`
+    through `res_high_03`) must use the Tripo3D
+    sub-row budget from the LOD Requirements table in
+    `architecture/asset-standards/3d-model-standards.md` (≤510,000 tris
+    for com_high / res_high LOD0; ≤510,000 for com_med LOD0; vehicle budgets
+    from the vehicle LOD row). The branching logic is: if the asset name
+    matches one of the Tripo3D prefixes (com_high, com_med, res_high_01/02/03,
+    or a vehicle type), use the corresponding Tripo3D budget; otherwise use
+    the assembled-stack thresholds.
+  - **Check 4b / 4c** (UV channel validation for PLY): Add `_parse_ply_uvs`
+    helper to extract UV channel 0 from the PLY header + data block. Used by
+    Check 4 (atlas UV bounds) and Check 4c (UV normalization).
+  - **Check 8** (pivot / scale): PLY files must pass the same pivot and
+    scale checks as B3D files (centroid within ±0.05 m of origin XZ,
+    Y-up orientation, scale ~1.0).
+  - **Check 10** (normal vectors): verify PLY normals are unit-length (or
+    absent, since PLY normals are optional — absence is valid for LOD2 shells).
+  - **Check 11** (billboard co-existence): ensure `_lod2.ply` is not present
+    alongside `_lod2_billboard.png` for assets where the floor-count
+    conditional LOD2 prohibition applies.
+  - **Check 15** (meta sidecar presence): no change needed — check already
+    operates on asset name prefix, not file extension.
+  - **Check 32** (NEW): validate vehicle LOD0 and LOD1 triangle budgets
+    using PLY-first file discovery. For PLY files, parse the face count from
+    the PLY ASCII header (`element face N`). Thresholds: vehicle LOD0 ≤ 510,000
+    tris; vehicle LOD1 ≤ 12,000 tris (from `3d-model-standards.md` vehicle row).
+- [x] Add `_parse_ply_uvs(path)` helper function that reads the PLY header to
+      determine UV element offsets, then reads the vertex data block to extract
+      UV coordinates. This is the PLY-specific UV extraction path for checks 4
+      and 4c.
+- [x] Add `_parse_ply_face_count(path)` helper function that reads the PLY
+      header to extract the face count (`element face N`). Used by check 32
+      and check 3 (PLY triangle budget).
+- [x] Update guard loop: add `check_32` after `check_31`. Update header
+      comment to "Current highest check number: check_32".
+- [x] **`_validate-assets.yml` checkout**: no LFS-related changes needed.
+      PLY files under `assets/3d/` are regular git-tracked files (only
+      `assets/tripo3d/**/*.zip` is tracked by Git LFS per `.gitattributes`).
+      A standard `actions/checkout` produces the full PLY file content;
+      no `git lfs pull` step is required.
+- [x] **`_validate-assets.yml` PLY guard step**: add a new CI step
+      "Verify PLY validation present in validate_assets.py" that runs
+      `grep -q '\.ply' tools/validate_assets.py` (literal `.ply` extension,
+      case-sensitive — avoids false positives from words like "apply") and
+      fails if PLY support is absent; place it after the `check_32` guard step
+      and before "Run asset validation". This is the generic PLY guard
+      described in the CI spec (`architecture/ci-cd/github-actions-workflow.md`
+      lines 1225–1231).
+- [x] This deliverable co-lands atomically with the C++ changes per the
+      four-item atomicity rule: C++ source + test + `validate_assets.py` +
+      CI must all be consistent in the same commit.
+
+#### 8. Packaging workflows — no changes needed
+
+PLY files under `assets/3d/` are regular git-tracked files (only
+`assets/tripo3d/**/*.zip` is tracked by Git LFS per `.gitattributes`).
+Both `_package-linux-deb.yml` and `_package-windows.yml` use a standard
+`actions/checkout` which produces full PLY file content. No `git-lfs`
+install step and no `git lfs pull` step are required. No changes to either
+packaging workflow for this phase.
+
+---
+
+### Files Changed
+
+| File | Change |
+| --- | --- |
+| `src/rendering/mesh_format_utils.h` | **NEW** -- `resolveModelPath()` declaration-only header (forward-declares `irr::io::IFileSystem`; includes only `<string>`; NO `<IFileSystem.h>` or `<filesystem>`) |
+| `src/rendering/mesh_format_utils.cpp` | **NEW** -- `resolveModelPath()` implementation (`#include <IFileSystem.h>`, `#include <filesystem>`); compiled into `aitown_render` via `target_sources(aitown_render PRIVATE src/rendering/mesh_format_utils.cpp)` |
+| `src/rendering/BuildingAssetLoader.cpp` | 3 path constructions → `resolveModelPath()` |
+| `src/rendering/BuildingAssetLoader.h` | Docstring update (`.b3d` → `.ply / .b3d`); clarify that `IFileSystem*` is obtained via `m_smgr->getFileSystem()` (no new member needed — `ISceneManager::getFileSystem()` is already available through the existing `m_smgr` pointer) |
+| `src/rendering/vehicle_mesh_path.h` | 5 filenames → extensionless base paths (strip `.b3d` extension); no `#include "mesh_format_utils.h"` needed — `vehicleMeshPath()` is a pure string-construction helper with no external symbol dependencies |
+| `src/rendering/IrrlichtRenderer.cpp` | Any remaining hardcoded `.b3d` vehicle paths |
+| `src/benchmark/model_validator_main.cpp` | LOD suffix array updated to use `resolveModelPath()` |
+| `tests/integration/MeshFormatUtilsTest.cpp` | **NEW** -- integration tests for `resolveModelPath()` (in `integration_tests` target, label `integration` -- pure logic + EDT_NULL IFileSystem tests, no OpenGL context needed) |
+| `tests/simulation/VehicleZoneTest.cpp` | Update all 6 `vehicleMeshPath()` assertions to check extensionless base paths (e.g. `EndsWith("car_sedan_lod0")` instead of `EndsWith("car_sedan_lod0.b3d")`); no `IFileSystem*` parameter change needed -- `vehicleMeshPath()` signature is unchanged |
+| `CMakeLists.txt` | `target_sources(aitown_render PRIVATE src/rendering/mesh_format_utils.cpp)`; `target_sources(integration_tests PRIVATE tests/integration/MeshFormatUtilsTest.cpp)` — `simulation_tests` does NOT gain an `aitown_render` link dependency because `vehicleMeshPath()` no longer calls `resolveModelPath()` (extensionless base path design) |
+| `architecture/testing/framework.md` | Add `MeshFormatUtilsTest` to `integration_tests` file list in the `integration_tests` example block with comment `# Phase 11q12 — resolveModelPath() tests` |
+| `architecture/testing/testability-architecture.md` | Add note to the `simulation_tests` linkage constraint paragraph confirming that the `simulation_tests`-does-not-link-Irrlicht invariant is preserved: `vehicleMeshPath()` returns extensionless base paths with no `resolveModelPath()` call, so no `aitown_render` link is needed. `MeshFormatUtilsTest` lives in `integration_tests` (not `simulation_tests`). Add a "Phase 11q12 Canonical Test Name Summary" table listing all 6 test cases (3 nullptr-fallback: PLY-present / B3D-only / neither-present; 3 IFileSystem\* via EDT_NULL: PLY-present / B3D-only / neither-present) with the following canonical test names: (1) `MeshFormatUtilsTest.NullFS_PLYPresent_ReturnsPLYPath`, (2) `MeshFormatUtilsTest.NullFS_B3DOnly_ReturnsB3DPath`, (3) `MeshFormatUtilsTest.NullFS_NeitherPresent_ReturnsB3DPath`, (4) `MeshFormatUtilsIFSTest.IFileSystem_PLYPresent_ReturnsPLYPath`, (5) `MeshFormatUtilsIFSTest.IFileSystem_B3DOnly_ReturnsB3DPath`, (6) `MeshFormatUtilsIFSTest.IFileSystem_NeitherPresent_ReturnsB3DPath`; columns: canonical name, source file (`tests/integration/MeshFormatUtilsTest.cpp`), CMake target (`integration_tests`), label (`integration`), and one-sentence description — matching the per-phase convention at lines 2707--2718 |
+| `tools/validate_assets.py` | Checks 1, 2, 3, 4, 4b, 4c, 6, 8, 10, 11, 15, 32 updated to discover and validate `.ply` files |
+| `architecture/asset-standards/3d-model-standards.md` | Update LOD Requirements table row for "Small buildings / props (height_floors >= 4)" (spec line 17) to read `_lod2.b3d` or `_lod2.ply` geometry shell (currently B3D-only); update checks 2 and 11 to include `_lod2.ply` alongside `_lod2.b3d` for floor-count conditional LOD2 prohibition and billboard co-existence; update Check #3 (Large building `_lod2` presence/tri-budget — generalize file reference to `.b3d` or `.ply`); update `BuildingAssetLoader` LOD Loading Contract section (lines 208--223) to describe PLY-first loading via `resolveModelPath()` for steps 2/3/5 (replace hardcoded `_lod0.b3d`/`_lod1.b3d`/`_lod2.b3d` paths with PLY-first resolution); annotate Multi-buffer split paragraph (line 344) as the root-cause limitation that PLY format resolves for high-poly LOD0 meshes; update Building LOD File Naming Convention (lines 319--332) to accept `.ply` alongside `.b3d` for all building LOD levels; add PLY exemption to LOD2 shell lightmap requirement (line 542) and LOD2 blend mode (line 544) — generalize these annotations to clarify that the UV1 lightmap exemption applies to `.ply` assets at **all** LOD levels (LOD0, LOD1, LOD2), not only LOD2, matching the check #5 validation exemption and the Notes section of this plan; update V1 Minimum Building Coverage section (lines 442--455) to accept `_lod0.ply`/`_lod1.ply`/`_lod2.ply` alongside `.b3d` in the three mesh bullet points; update Vehicle LOD File Naming Convention section (lines 395--403) to include `_lod0.ply` / `_lod1.ply` alongside `.b3d` examples; update Service Building Model Standards naming convention (lines 464--471) to note that `.ply` format is technically supported by the loader and validator but is not expected for service buildings in V1 (their LOD0 budgets of 2,000--4,000 tris are far below the B3D 65,535-vertex-per-buffer limit, so service buildings retain `.b3d` only); update Commercial High Skyscraper Standards LOD2 strategy bullet (spec line 163) to read `_lod2.b3d` or `_lod2.ply`; update `.meta` Sidecar `height_floors` field description (spec line 307) to say `_lod2.b3d` or `_lod2.ply` in all six occurrences; update Service Building LOD strategy narrative (line 482) to read "No `_lod2.b3d` geometry shell" (B3D-only — no `.ply` addition, consistent with the service building B3D-retention policy); update Commercial Medium Tripo3D Buildings pipeline section (line 380) to add a LOD2 pipeline difference: "LOD2: billboard baking only (no geometry shell) — all com_med variants have height_floors 2--3, triggering the floor-count conditional LOD2 prohibition (check #2) and the billboard imposter path; skip the voxel-remesh LOD2 geometry shell step inherited from Commercial High"; update Tripo3D Asset Processing Pipeline section (lines 350--396): annotate pipeline steps 8 (line 363) and 9 (line 378) to note that PLY export via `convert_tripo3d_to_ply.py` replaces B3DWriter export for LOD0 meshes exceeding the 65K-vertex-per-buffer B3D limit, and add a brief PLY pipeline subsection documenting the tool's usage; append check #32 (vehicle LOD0/LOD1 triangle budget with PLY-first file discovery and PLY header face-count parsing) to the Export Validation Script Required Checks list after check #20 (line 589), and update the Phase assignment note (line 591) to include "Check #32 (vehicle triangle budget with PLY discovery) is a Phase 11q12 addition."; extend LOD Requirements table: (a) expand the "Commercial Medium Tripo3D variants" row from "(com_med_01/02)" to "(com_med_01–04)" to cover all four variants that have PLY LOD0 files and change its LOD2 column from "≤500 tris shell" to "Billboard (point-sprite only)" to match the floor-count conditional LOD2 prohibition (all com_med variants have height_floors 2–3, so check #2 mandates billboard-only — the previous "≤500 tris shell" annotation was inconsistent), (b) add a new "Residential High Tripo3D variants (res_high_01/02/03)" row with the same elevated Tripo3D budget structure as Commercial High (≤510,000 LOD0 / ≤8,000 LOD1 / ≤600 LOD2), (c) add actual tri counts for res_high, com_med_03/04, and com_high_04 to the "Actual V1 Tripo3D tri counts" table (com_high_04 is in the PLY commit scope but has no binding limit row yet); also update existing com_med_01 and com_med_02 LOD2 entries from `500` to `N/A (billboard)` to match the updated LOD Requirements billboard-only strategy (all com_med variants have height_floors 2--3, so check #2 mandates billboard-only -- no geometry shell LOD2 is produced), and set com_med_03/04 LOD2 to `N/A (billboard)` as well, (d) extend the Tripo3D pipeline narrative (line 352) to include res_high alongside existing vehicle and commercial categories, and add a cross-reference for res_high noting that it follows the same pipeline as Commercial High (footprint_tiles=3, same scale/orientation conventions); update Residential High Building Variant Geometry Standards section (line ~727) to annotate that res_high_01/02/03 are subject to the Residential High Tripo3D sub-row budgets in the LOD Requirements table (same cross-reference pattern as the Commercial High section at line ~144: "These assets are subject to the Residential High Tripo3D sub-row budgets in the LOD Requirements table"), while noting that res_high_04 retains the general large-building budget; update the "Small Building / Prop LOD2 Asset Contract (floor-count conditional)" subsection (lines ~342--348) to include `_lod2.ply` alongside `_lod2.b3d` in all geometry-shell require/prohibit language, LODNode loading descriptions, and validation check references, consistent with PLY-first resolution via `resolveModelPath()` |
+| `architecture/graphics-architecture/model-validator-tool.md` | Update lines referencing `.b3d`-only to include PLY-first loading; adjust Phase 11d Asset Inventory table to note LOD0 may be `.ply` |
+| `architecture/graphics-architecture/scene-graph-ownership.md` | Update `vehicleMeshPath()` documentation to note extensionless return value (signature unchanged — no `IFileSystem*` parameter); add PLY row to the "Summary: when to use which pattern" table with the following exact column values — Asset source: "PLY file (Tripo3D buildings, vehicles)"; Mesh type: `` `IAnimatedMesh*` (SAnimatedMesh wrapping CDynamicMeshBuffer) ``; Scene node type: `` `IMeshSceneNode` (via `addMeshSceneNode`) ``; LOD swap: `` `setMesh(static_cast<IMesh*>(lod))` ``; drop() after setMesh?: "No — borrowed from cache (same contract as B3D)"; document that callers in `IrrlichtRenderer` wrap through `resolveModelPath()` at mesh load time; add PLY bounding-box loader contract note adjacent to existing B3D exemption (line ~202): "`CPLYMeshFileLoader` populates `CDynamicMeshBuffer` and calls `recalculateBoundingBox()` on each buffer before wrapping in `SAnimatedMesh`; `SAnimatedMesh` aggregates buffer BBs into its mesh-level `Box` — satisfying the mandatory two-level recalculation rule (buffer + parent mesh). No explicit `recalculateBoundingBox()` is required for PLY assets loaded via `getMesh()` provided both levels are confirmed during the Phase 11q12 source inspection exit criterion." |
+| `architecture/ci-cd/github-actions-workflow.md` | Add Phase 11q12 entry to validate-assets phasing summary with PLY guard step; update `_validate-assets.yml` spec section to document the PLY guard step (`grep -q '\.ply' tools/validate_assets.py`) and `check_32` guard loop addition; no LFS-related changes — PLY files under `assets/3d/` are regular git objects (not LFS-tracked) |
+| `architecture/asset-standards/2d-texture-standards.md` | Extend billboard `_lod2` mutual-exclusion rule to `.ply`; add PLY UV channel 1 exemption to UV & Atlas Strategy section |
+| `.github/workflows/_validate-assets.yml` | Add PLY guard step (`grep -q '\.ply' tools/validate_assets.py` — literal extension, case-sensitive); add `check_32` to the numbered guard loop (after `check_31`); update header comment to "Current highest check number: check_32"; no LFS-related changes — PLY files are regular git objects and a standard `actions/checkout` produces full PLY file content |
+| `.github/workflows/_package-linux-deb.yml` | No changes — PLY files under `assets/3d/` are regular git objects; standard `actions/checkout` produces full PLY file content; no `git-lfs` install or `git lfs pull` step required |
+| `.github/workflows/_package-windows.yml` | No changes — PLY files under `assets/3d/` are regular git objects; standard `actions/checkout` produces full PLY file content; no `git lfs pull` step required |
+| `vcpkg-overlays/irrlicht/fix-ply-32bit-threshold.patch` | **NEW** — one-line vendor patch fixing `CPLYMeshFileLoader.cpp` line ~233: `vertCount > 65565` → `vertCount > 65535` (upstream off-by-30 typo in the `EIT_32BIT` index type threshold) |
+| `vcpkg-overlays/irrlicht/portfile.cmake` | **NEW** — overlay portfile that applies `fix-ply-32bit-threshold.patch` via the `PATCHES` argument (same pattern as `vcpkg-overlays/openal-soft/portfile.cmake`); copied from `$VCPKG_ROOT/ports/irrlicht/portfile.cmake` at the pinned baseline then modified |
+| `vcpkg-overlays/irrlicht/vcpkg.json` | **NEW** — overlay port metadata mirroring the upstream Irrlicht port at the pinned vcpkg baseline; copied from `$VCPKG_ROOT/ports/irrlicht/vcpkg.json` |
+| `vcpkg-overlays/irrlicht/CMakeLists.txt` | **NEW (copied)** — copied verbatim from `$VCPKG_ROOT/ports/irrlicht/CMakeLists.txt`; required because the overlay replaces the upstream port directory entirely and `portfile.cmake` references this file via `CMAKE_CURRENT_LIST_DIR` |
+| `vcpkg-overlays/irrlicht/LICENSE.txt` | **NEW (copied)** — copied verbatim from `$VCPKG_ROOT/ports/irrlicht/LICENSE.txt`; required by vcpkg overlay completeness |
+| `vcpkg-overlays/irrlicht/fix-encoding.patch` | **NEW (copied)** — copied verbatim from `$VCPKG_ROOT/ports/irrlicht/fix-encoding.patch`; referenced by `portfile.cmake` via `CMAKE_CURRENT_LIST_DIR` |
+| `vcpkg-overlays/irrlicht/fix-osx-compilation.patch` | **NEW (copied)** — copied verbatim from `$VCPKG_ROOT/ports/irrlicht/fix-osx-compilation.patch`; referenced by `portfile.cmake` via `CMAKE_CURRENT_LIST_DIR` |
+| `vcpkg-overlays/irrlicht/fix-osx-compilation-2.diff` | **NEW (copied)** — copied verbatim from `$VCPKG_ROOT/ports/irrlicht/fix-osx-compilation-2.diff`; referenced by `portfile.cmake` via `CMAKE_CURRENT_LIST_DIR` |
+| `vcpkg-overlays/irrlicht/vcpkg-cmake-wrapper.cmake` | **NEW (copied)** — copied verbatim from `$VCPKG_ROOT/ports/irrlicht/vcpkg-cmake-wrapper.cmake`; referenced by `portfile.cmake` via `CMAKE_CURRENT_LIST_DIR` |
+| `.github/workflows/_build-linux.yml` | Update container image digest pin after `docker-ci-image.yml` rebuilds with the Irrlicht vcpkg overlay (follow-up commit; digest-only `sha256:` format per CLAUDE.md) |
+| `.github/workflows/_test-linux.yml` | Update container image digest pin (follow-up commit; same digest as `_build-linux.yml`) |
+| `.github/workflows/_coverage-linux.yml` | Update container image digest pin (follow-up commit; same digest as `_build-linux.yml`) |
+| `.github/workflows/_asan-linux.yml` | Update container image digest pin (follow-up commit; same digest as `_build-linux.yml`) |
+| `.devcontainer/Dockerfile` | Update `FROM` line digest to match the rebuilt image (follow-up commit; `ghcr.io/m0wa/aitown-ci-linux@sha256:<digest>` — digest-only format per CLAUDE.md) |
+
+### Lines of Code Estimate
+
+~50 lines new (`mesh_format_utils.h` + `mesh_format_utils.cpp` + test), ~25 lines changed across
+existing C++ files, ~150–250 lines changed in `validate_assets.py` (13 checks
+updated for PLY discovery + 2 new PLY-parsing helpers + check #32 extension),
+~15 lines across CI workflow YAML files (`_validate-assets.yml` guard steps only;
+`_package-linux-deb.yml` and `_package-windows.yml` require no changes).
+No new dependencies (only `<filesystem>` added in the `.cpp`, which is already
+available in GCC 12+ with `-lstdc++fs` if needed).
+
+### Exit Criteria
+
+- [x] `grep -rn '\.b3d' src/rendering/` returns zero hardcoded path
+      constructions (only comments and format-description strings).
+- [x] `grep -rn '\.b3d' src/benchmark/model_validator_main.cpp` returns zero
+      hardcoded path constructions (only comments).
+- [x] `resolveModelPath()` integration tests pass (all six cases: three
+      nullptr-fallback — PLY-present, B3D-only, neither-present — and three
+      IFileSystem\* via EDT_NULL — PLY-present, B3D-only, neither-present). These run under
+      `ctest -L "^integration$"`, consistent with the test's placement in
+      `integration_tests`.
+- [x] All 6 `vehicleMeshPath()` assertions in `VehicleZoneTest.cpp` pass with
+      extensionless base path expectations (e.g. `EndsWith("car_sedan_lod0")`).
+- [x] Existing B3D-only assets (original `ind_*`, `res_*`) still load
+      correctly (fallback path exercised).
+- [x] When PLY files are present alongside B3D files, the PLY is loaded
+      (verified at `IrrlichtRenderer` call sites via `resolveModelPath()`,
+      not in `vehicleMeshPath()`; confirmed by log output or debugger).
+- [x] At least one high-poly PLY asset with >65,535 vertices per buffer
+      (e.g. `com_high_01_lod0.ply` at ~495K tris) loads and renders correctly
+      in the model validator (`--model com_high_01`) without segfault or
+      visible geometry corruption; verify via debug log that
+      `CDynamicMeshBuffer` index type is `EIT_32BIT`. This is the primary
+      validation that the 16-bit index truncation root cause is resolved.
+- [x] Vendor patch applied: `CPLYMeshFileLoader.cpp` threshold reads
+      `vertCount > 65535` (not the upstream typo `65565`). Verify by
+      inspecting the patched source after `vcpkg install`. The overlay
+      port is complete: `vcpkg-overlays/irrlicht/` contains all nine
+      files listed in Deliverable 6c (`portfile.cmake`, `vcpkg.json`,
+      `fix-ply-32bit-threshold.patch`, `CMakeLists.txt`, `LICENSE.txt`,
+      `fix-encoding.patch`, `fix-osx-compilation.patch`,
+      `fix-osx-compilation-2.diff`, `vcpkg-cmake-wrapper.cmake`) — all
+      nine files are required for `vcpkg install` to discover and apply
+      the patch.
+- [x] `validate_assets.py` PLY checks pass: all **committed** `.ply` building
+      and vehicle assets pass checks 1, 2, 3, 4, 4b, 4c, 5, 6, 8, 10, 11, 15, 32
+      with PLY support enabled. **Note**: `_lod2.ply` files for any asset
+      whose `.meta` sidecar has `height_floors <= 3` must NOT be committed —
+      they violate the floor-count conditional LOD2 prohibition (check #2).
+      This includes all `res_low_*`, `res_med_*` (height*floors 2–3),
+      `com_low*_`, small `com*med*_`variants (height_floors <= 3), and all
+   `svc*\*`variants. Remove or exclude these files before running
+    validation; only`\_lod0.ply`and`\_lod1.ply`files (and`\_lod2.ply`for
+    assets with`height_floors >= 4`) are valid commit candidates.
+    **Variant limit**: only variants 01–04 per zone-tier combination
+    (e.g. `com_high_01`through`com_high_04`) and the four service
+    building types have atlas cell assignments in
+    `building-atlas-layout.md`and`.meta`sidecars. PLY files for
+    variants 05+ (e.g.`com_high_05_lod0.ply`, `com_low_05_lod0.ply`,
+    `res_low_05_lod0.ply`) must be excluded from the commit — they have
+    no atlas cell (fail check #4) and no `.meta`sidecar (fail
+    check #15).
+    **PLY commit scope (by category)**: PLY files are only valid commit
+    candidates for categories whose Tripo3D LOD0 meshes exceed the
+    B3D 65,535-vertex-per-buffer limit:`com_high_01`–`04`,
+    `com_med_01`–`04`, `res_high_01`–`03`, and the five vehicle types.
+    All other categories (`res_low*_`, `res*med*_`, `com*low*_`,
+    `ind\__`, `svc\_\*`) have LOD budgets that fit within B3D's 16-bit
+    index limit and must retain B3D format — do NOT commit PLY files
+    for these categories even if generated by the conversion tool.
+    **Conversion tool prerequisite**: before committing PLY files,
+    verify that `tools/convert_tripo3d_to_ply.py`'s MANIFEST atlas
+    cell assignments (`atlas_row`/`atlas_col`) match the canonical
+    values in each variant's `.meta`sidecar and
+   `building-atlas-layout.md`. Also verify `footprint`values match
+    the spec (service buildings use footprint=2 per
+   `3d-model-standards.md` line 239). If mismatches exist, fix the
+      MANIFEST and regenerate affected PLY files before validation.
+      Exit-criteria check #4 (atlas UV bounds) catches atlas-cell
+      mismatches; check #8 (pivot) catches footprint/scale errors.
+- [x] PLY bounding-box loader contract verified (two-level): inspect
+      `CPLYMeshFileLoader.cpp` in the vendored Irrlicht source
+      (`build/_deps/` or `vcpkg_installed/`) and confirm:
+      (a) buffer-level — each `CDynamicMeshBuffer` has
+      `recalculateBoundingBox()` called after vertex data load;
+      (b) mesh-level — the wrapping `SAnimatedMesh` has its bounding box
+      computed (either via explicit `recalculateBoundingBox()` or by
+      `SAnimatedMesh` constructor aggregating buffer BBs into its `Box`
+      field). Both levels are verified per the PLY Mesh Ownership Contract in
+      `scene-graph-ownership.md` (PLY Mesh Ownership Contract section), which
+      documents that `CPLYMeshFileLoader` computes bounding boxes automatically
+      during load — no explicit `recalculateBoundingBox()` call is required;
+      this exit criterion is a verification step to confirm the loader's
+      internal behavior, not a requirement to add explicit calls.
+      If either call is absent, add a defensive recalculation in the
+      PLY loading path or immediately after `getMesh()` returns in
+      `IrrlichtRenderer`: buffer-level via
+      `buf->recalculateBoundingBox()` (on the `IMeshBuffer` interface);
+      mesh-level via `animMesh->setBoundingBox(aggregatedBox)` where
+      `aggregatedBox` is computed by iterating all mesh buffers and
+      unioning their bounding boxes — `setBoundingBox()` is on the
+      `IMesh` interface and callable through `IAnimatedMesh*`. Do NOT
+      use `animMesh->recalculateBoundingBox()` — that method is on
+      `SAnimatedMesh` (concrete), not `IAnimatedMesh` (interface), and
+      Irrlicht is compiled with `-fno-rtti` so downcasting is
+      prohibited per `scene-graph-ownership.md` lines 153–164.
+- [x] PLY files in packaged artifacts contain real geometry: committed
+      `.ply` files are regular git objects (not LFS-tracked), so a standard
+      checkout always produces full binary vertex/face data. Verify by
+      inspecting a `.ply` file header: `head -1 assets/3d/buildings/com_high_01_lod0.ply`
+      should show `ply`.
+- [x] Build succeeds on Linux (`make build`).
+- [x] All existing tests pass (`make test`).
+
+### Notes
+
+- **PLY UV channel limitation**: PLY-loaded meshes carry only UV channel 0
+  (diffuse atlas coordinates). They do NOT carry a lightmap UV channel 1.
+  This means PLY assets are **exempt from the UV1 (lightmap) requirement**
+  that applies to hand-authored B3D models. Lightmap baking for these
+  high-poly Tripo3D assets at all LOD levels (LOD0, LOD1, LOD2) is deferred to a future
+  decimation-then-B3D-re-export phase (see `post-v1-backlog.md`).
+  `validate_assets.py` must not flag missing UV1 on `.ply` files.

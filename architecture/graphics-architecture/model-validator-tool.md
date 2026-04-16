@@ -3,21 +3,23 @@
 ## Purpose
 
 The AI Town model validator (`aitown_model_validator`) is a standalone interactive tool that
-visually verifies all V1 building and vehicle B3D assets load and display correctly. It is the
+visually verifies all V1 building and vehicle 3D assets load and display correctly. It is the
 canonical tool for per-release asset sign-off.
 
 The tool:
 
-- Displays all V1 building and vehicle B3D assets grouped by category in a centred horizontal
+- Displays all V1 building and vehicle 3D assets grouped by category in a centred horizontal
   row with an orbiting camera.
-- Loads assets via `BuildingAssetLoader` (same code path as the game) so texture binding,
-  scale, and LOD selection are exercised exactly as in production.
+- Loads assets via `BuildingAssetLoader` (same code path as the game) using
+  `resolveModelPath()` (defined in `src/rendering/mesh_format_utils.h`) which resolves
+  `.ply` first with `.b3d` fallback. Texture binding, scale, and LOD selection are exercised
+  exactly as in production.
 - Reports which models loaded successfully and which failed.
 - Allows the operator to step through categories with **Spacebar** and exit with **ESC**.
 
 The tool is **not** part of the game runtime and is **not** executed in CI (requires a real
-OpenGL display). It must be run manually after any change to B3D assets, atlas textures, or
-`BuildingAssetLoader`.
+OpenGL display). It must be run manually after any change to PLY/B3D assets, atlas textures,
+or `BuildingAssetLoader`.
 
 ---
 
@@ -92,7 +94,7 @@ The overlay is drawn after `smgr->drawAll()` and before the HUD text, inside the
 ### Road Tiles (Vehicles Category Only)
 
 **Note**: Road tile geometry is **procedurally generated at runtime** via
-`buildTileRoadMesh()`. No road tile `.b3d` asset exists. The validator exercises road
+`buildTileRoadMesh()`. No road tile mesh asset file exists. The validator exercises road
 tiles by calling the same `buildTileRoadMesh()` function as `IrrlichtRenderer` — not by
 loading a file. This is the identical code path per the validator design goal.
 
@@ -175,16 +177,20 @@ commercial buildings. Service buildings are 1 unique model each (no variants).
 | 10 | Service | svc\_fire\_station, svc\_police\_station, svc\_power\_plant, svc\_water\_tower |
 | 11 | Vehicles | car\_sedan, car\_hatchback, car\_suv, bus\_standard, truck\_cargo |
 
-The validator displays LOD0 (`.b3d` at `_lod0.b3d` suffix) for all building/service categories.
-LOD1 (`_lod1.b3d`) and LOD2 (geometry shells `_lod2.b3d` for High-density zones, billboard
-imposters for Low/Med) are not displayed by the validator — validate LOD2 assets visually in the
-game at distances > 40 m.
+The validator displays LOD0 (resolved via `resolveModelPath()` — `.ply` primary format,
+`.b3d` fallback — at `_lod0` suffix) for all building/service categories. LOD1 (`_lod1`)
+and LOD2 (geometry shells `_lod2` for High-density zones, billboard imposters for Low/Med)
+are not displayed by the validator — validate LOD2 assets visually in the game at
+distances > 40 m.
 
 ---
 
 ## Phase 11d Asset Inventory
 
-V1 total `.b3d` files validated by the tool (LOD0 categories 1–11 above):
+V1 total mesh files validated by the tool (LOD0 categories 1–11 above). Assets are stored as
+`.ply` (primary format, replaces `.b3d`) under `assets/3d/`. The validator uses
+`resolveModelPath()` to resolve each extensionless base path to `.ply` first, falling back
+to `.b3d` for backward compatibility during the transition period.
 
 | Asset type | Count | Notes |
 |---|---|---|
@@ -195,11 +201,11 @@ V1 total `.b3d` files validated by the tool (LOD0 categories 1–11 above):
 | Service building LOD1 | 4 | 1 unique model each |
 | Vehicle LOD0 | 5 | car\_sedan, car\_hatchback, car\_suv, bus\_standard, truck\_cargo |
 | Vehicle LOD1 | 5 | car\_sedan, car\_hatchback, car\_suv, bus\_standard, truck\_cargo |
-| **Total LOD0 `.b3d`** | **45** | 36 zone buildings + 4 service buildings + 5 vehicles (LOD0 only) |
-| **Total `.b3d`** | **102** | All LOD levels across all asset categories |
-| Billboard DDS (`*_billboard.dds`) | 28 | 24 zone (Low/Med × 3 zone-types × 4 variants) + 4 service; High excluded (uses `_lod2.b3d`) |
+| **Total LOD0 meshes** | **45** | 36 zone buildings + 4 service buildings + 5 vehicles (LOD0 only) |
+| **Total meshes** | **102** | All LOD levels across all asset categories |
+| Billboard DDS (`*_billboard.dds`) | 28 | 24 zone (Low/Med × 3 zone-types × 4 variants) + 4 service; High excluded (uses `_lod2` geometry shell) |
 
-The validator tool exercises the 45 LOD0 `.b3d` files across categories 1–11. LOD1 and LOD2
+The validator tool exercises the 45 LOD0 mesh files across categories 1–11. LOD1 and LOD2
 assets are validated by `validate_assets.py` (CI) and manual game playback at appropriate distances.
 
 **Phase 11d polygon budget reference** (see `architecture/asset-standards/3d-model-standards.md`
@@ -481,9 +487,9 @@ The model validator is **not** run in CI. Reasons:
 
 - Before each major release: run on a representative development machine and step through
   all 11 categories confirming correct mesh, texture, and scale for every model.
-- After any change to B3D assets, atlas textures (currently PNG — see V1 exception in
-  `architecture/asset-standards/building-atlas-layout.md`), `BuildingAssetLoader`, or
-  any `*_billboard.dds` asset rework.
+- After any change to PLY/B3D assets (under `assets/3d/`), atlas textures (currently
+  PNG — see V1 exception in `architecture/asset-standards/building-atlas-layout.md`),
+  `BuildingAssetLoader`, or any `*_billboard.dds` asset rework.
 - After any change to `road_asphalt_tileable.dds`, `road.vert`/`road.frag`, or
   `RoadShaderCallback`.
 - After any change to `LODNode` or the `IrrlichtRenderer` building-placement scale.
