@@ -126,6 +126,7 @@ public:
 
 #ifdef AITOWN_TESTING_ENABLED
     void testForceUnlockDensityTier(ZoneType zone, DensityTier tier);
+    void testSetZoneDemandFactor(ZoneType zone, float value);
 #endif
 
 private:
@@ -202,7 +203,6 @@ private:
     // ------------------------------------------------------------------
     static float speedValue(SpeedMultiplier s);
     static int64_t startingFundsForDifficulty(Difficulty d);
-    static int     bondMaxUsesForDifficulty(Difficulty d);
 
     void doBudgetTick();
     void recordUndoAction(const UndoAction& action);

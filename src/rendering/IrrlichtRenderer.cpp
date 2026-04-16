@@ -8,7 +8,7 @@
 #include "src/platform/PlatformUtils.h"
 #include "src/ui/UIManager.h"            // FULL include here (not in header — per Header Dependency Rule)
 #include "src/interfaces/ITerrainQuery.h" // ITerrainQuery full include (forward-decl in header only)
-#include "BuildingAssetLoader.h"          // Phase 10: load .b3d asset families via BuildingAssetLoader::load()
+#include "BuildingAssetLoader.h"          // Phase 10: load .ply/.b3d asset families via BuildingAssetLoader::load()
 #include "LODNode.h"                      // Phase 10: LOD swap wrapper returned by BuildingAssetLoader::load()
 #include "TextureCache.h"                 // Phase 10: sRGB texture loading for road diffuse
 #include "RoadShaderCallback.h"           // Phase 10: road.vert/road.frag shader callback
@@ -16,6 +16,7 @@
 #include "TerrainShaderCallback.h"        // Phase 10c: terrain splat-map shader callback
 #include "RenderSystem.h"                 // Phase 10c: isSRGBTextureSupported() query
 #include "vehicle_mesh_path.h"             // Phase 11q: vehicleMeshPath(zone, variantIdx)
+#include "mesh_format_utils.h"             // Phase 11q12: resolveModelPath(.ply/.b3d)
 
 #include <algorithm>   // std::min, std::max
 #include <cstdio>      // fprintf
@@ -1587,7 +1588,8 @@ void IrrlichtRenderer::placeBuildingMesh(int tileX, int tileZ,
     destroyTileNode(m_buildingNodes, tileX, tileZ);
 
     // Construct the asset base path: assets/3d/buildings/<assetBaseName>
-    // BuildingAssetLoader::load() appends _lod0.b3d, _lod1.b3d, _lod2.b3d, .meta.
+    // BuildingAssetLoader::load() resolves LOD mesh paths (PLY preferred, B3D fallback)
+    // via resolveModelPath(), appends .meta.
     std::string basePath = getAssetsDir() +
                            "/3d/buildings/" + assetBaseName;
 
@@ -2598,11 +2600,12 @@ void IrrlichtRenderer::bindVehicleAtlasMaterials(irr::scene::ISceneNode* node) {
 }
 
 // -------------------------------------------------------------------------
-// placeVehicle — load vehicle B3D assets and create a scene node.
+// placeVehicle — load vehicle mesh assets (PLY preferred, B3D fallback).
 //
 // If vehicleId is already registered, the old node is removed first.
 // Asset base path: AITOWN_ASSETS_DIR/3d/vehicles/<assetName>
-// BuildingAssetLoader::load() appends _lod0.b3d, _lod1.b3d, .meta.
+// BuildingAssetLoader::load() resolves LOD mesh paths (PLY preferred, B3D fallback)
+// via resolveModelPath(), appends .meta.
 //
 // Vehicles are authored at world scale; no setScale() is applied.
 // -------------------------------------------------------------------------
@@ -3079,7 +3082,10 @@ void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tile
     }
 
     // Load vehicle mesh from scene manager cache (no drop — smgr retains ownership).
-    std::string meshPath = vehicleMeshPath(zone, static_cast<int>(handle) % 3);
+    // vehicleMeshPath() returns an extensionless base path; resolveModelPath() appends
+    // .ply (preferred) or .b3d (fallback). Empty suffix because _lodN is already embedded.
+    std::string meshPath = resolveModelPath(m_smgr->getFileSystem(),
+        vehicleMeshPath(zone, static_cast<int>(handle) % 3), "");
     IAnimatedMesh* animMesh = m_smgr->getMesh(meshPath.c_str());
     if (!animMesh) {
         std::string meshMsg = "[IrrlichtRenderer] spawnVehicleAgent: mesh not found: ";
@@ -3088,7 +3094,7 @@ void IrrlichtRenderer::spawnVehicleAgent(AgentHandle handle, int tileX, int tile
         return;
     }
 
-    // Create a static mesh scene node (NOT animated — B3D root bone displaces position).
+    // Create a static mesh scene node (NOT animated — bone transforms displace position).
     IMeshSceneNode* node = m_smgr->addMeshSceneNode(static_cast<IMesh*>(animMesh));
     if (!node) return;
 

@@ -1,14 +1,15 @@
 // BuildingAssetLoader.cpp — Phase 9 building asset loader implementation.
 //
-// Loads building asset families (LOD0/1/2 .b3d files) and their .meta sidecar JSON,
-// then creates and returns a LODNode wrapping the scene node with LOD distances.
+// Loads building asset families (LOD0/1/2 .ply/.b3d mesh files) and their .meta sidecar
+// JSON, then creates and returns a LODNode wrapping the scene node with LOD distances.
 //
 // Asset loading sequence:
 //   1. Parse .meta sidecar to get height_floors, lod_distances[0..2], and
 //      atlas_cell {row, col}.
-//   2. Load _lod0.b3d via m_smgr->getMesh() → IAnimatedMesh* (CSkinnedMesh).
-//   3. Load _lod1.b3d (same approach).
-//   4. For height_floors >= 4: load _lod2.b3d geometry shell.
+//   2. Resolve LOD0 mesh path via resolveModelPath() (PLY preferred, B3D fallback),
+//      then load via m_smgr->getMesh() → IAnimatedMesh*.
+//   3. Resolve and load LOD1 mesh (same approach).
+//   4. For height_floors >= 4: resolve and load LOD2 mesh file.
 //      For height_floors <= 3: lod2 = nullptr (billboard at this distance).
 //   5. Create scene node via addMeshSceneNode(lod0).
 //   6. Bind buildings_atlas_d.dds to texture slot 0 of all material slots on the
@@ -44,6 +45,7 @@
 
 #include "BuildingAssetLoader.h"
 #include "LODNode.h"
+#include "mesh_format_utils.h"
 
 #include <cstdio>
 #include <cstring>
@@ -67,7 +69,7 @@ BuildingAssetLoader::BuildingAssetLoader(ISceneManager* smgr, IVideoDriver* driv
 }
 
 // ---------------------------------------------------------------------------
-// Helper: load an IAnimatedMesh* from a .b3d path.
+// Helper: load an IAnimatedMesh* from a mesh path (.ply or .b3d).
 //
 // Returns the borrowed pointer from the Irrlicht mesh cache (no grab for caller).
 // Returns nullptr if the file cannot be loaded.
@@ -105,19 +107,19 @@ std::unique_ptr<LODNode> BuildingAssetLoader::load(const std::string& basePath)
     }
 
     // ------------------------------------------------------------------
-    // Step 2: Load LOD0 mesh.
+    // Step 2: Load LOD0 mesh (.ply preferred, .b3d fallback via resolveModelPath).
     // Returns a borrowed IAnimatedMesh* from the mesh cache (no grab for caller).
     // ------------------------------------------------------------------
-    const std::string lod0Path = basePath + "_lod0.b3d";
+    const std::string lod0Path = resolveModelPath(m_smgr->getFileSystem(), basePath, "_lod0");
     IAnimatedMesh* lod0 = loadAnimMesh(m_smgr, lod0Path);
     if (!lod0) {
         return nullptr;  // mandatory LOD0 not found
     }
 
     // ------------------------------------------------------------------
-    // Step 3: Load LOD1 mesh.
+    // Step 3: Load LOD1 mesh (.ply preferred, .b3d fallback via resolveModelPath).
     // ------------------------------------------------------------------
-    const std::string lod1Path = basePath + "_lod1.b3d";
+    const std::string lod1Path = resolveModelPath(m_smgr->getFileSystem(), basePath, "_lod1");
     IAnimatedMesh* lod1 = loadAnimMesh(m_smgr, lod1Path);
     if (!lod1) {
         return nullptr;  // mandatory LOD1 not found
@@ -129,7 +131,7 @@ std::unique_ptr<LODNode> BuildingAssetLoader::load(const std::string& basePath)
     // ------------------------------------------------------------------
     IAnimatedMesh* lod2 = nullptr;
     if (heightFloors >= 4) {
-        const std::string lod2Path = basePath + "_lod2.b3d";
+        const std::string lod2Path = resolveModelPath(m_smgr->getFileSystem(), basePath, "_lod2");
         lod2 = loadAnimMesh(m_smgr, lod2Path);
         // lod2 failure is non-fatal for tall buildings — we continue with nullptr
         // but this will suppress the LOD2 transition.

@@ -497,9 +497,14 @@ void Population::processUpgradeWave(Zoning& zoning, const Traffic& traffic,
         for (const auto& [key, tile] : zoning.tiles()) {
             if (tile.isZoned && tile.zone == tm.zone) totalZoneTiles++;
         }
-        int maxUpgrades = static_cast<int>(
-            SimulationConstants::density_max_upgrade_rate_per_tick * static_cast<float>(totalZoneTiles));
-        maxUpgrades = std::max(1, maxUpgrades);
+        // Scale upgrade quota linearly by how far demand exceeds the gate threshold.
+        // demandExcess == 0 at threshold → near-zero rate (trickle of 1 tile).
+        // demandExcess == 1 at peak demand → full density_max_upgrade_rate_per_tick.
+        float demandExcess = (demandForZone - SimulationConstants::density_upgrade_wave_demand_threshold)
+                             / (1.0f - SimulationConstants::density_upgrade_wave_demand_threshold);
+        demandExcess = std::min(1.0f, demandExcess);   // hard cap: never exceed peak-demand rate
+        float scaledRate  = demandExcess * SimulationConstants::density_max_upgrade_rate_per_tick;
+        int maxUpgrades   = std::max(1, static_cast<int>(scaledRate * static_cast<float>(totalZoneTiles)));
 
         std::vector<UpgradeCandidate> candidates = scanUnlockCandidates(zoning, tm.zone, tm.current);
 

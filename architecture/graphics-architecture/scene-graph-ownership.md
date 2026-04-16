@@ -201,6 +201,11 @@ For static buildings, `addMeshSceneNode(static_cast<IMesh*>(lod0))` must be used
 
 - `CSkinnedMesh::finalize()` (called by the B3D loader) computes the bounding box from
   all vertices. No explicit `recalculateBoundingBox()` is required for B3D assets.
+- `CPLYMeshFileLoader` populates `CDynamicMeshBuffer` and calls `recalculateBoundingBox()`
+  on each buffer before wrapping in `SAnimatedMesh`; `SAnimatedMesh` aggregates buffer BBs
+  into its mesh-level `Box` — satisfying the mandatory two-level recalculation rule
+  (buffer + parent mesh). No explicit `recalculateBoundingBox()` is required for PLY assets
+  loaded via `getMesh()`.
 - `LODNode` stores `IMeshSceneNode*` for `m_node` (to call `setMesh(IMesh*)`), and
   `IAnimatedMesh*` for `m_lod0/1/2` (borrowed from cache). `getNode()` returns
   `ISceneNode*` via implicit upcast.
@@ -211,6 +216,50 @@ For static buildings, `addMeshSceneNode(static_cast<IMesh*>(lod0))` must be used
 |---|---|---|---|---|
 | Procedural terrain / runtime | `SMesh*` | `IMeshSceneNode` | `recalculateBoundingBox()` then `setMesh()` | Yes — caller owns ref |
 | B3D file (buildings, vehicles) | `IAnimatedMesh*` | `IMeshSceneNode` (via `addMeshSceneNode`) | `setMesh(static_cast<IMesh*>(lod))` | No — borrowed from cache |
+| PLY file (Tripo3D buildings, vehicles) | `IAnimatedMesh*` (concrete: `SAnimatedMesh` wrapping `CDynamicMeshBuffer`) | `IMeshSceneNode` (via `addMeshSceneNode`) | `setMesh(static_cast<IMesh*>(lod))` | No — borrowed from cache |
+
+### PLY Mesh Ownership Contract (Phase 11q12)
+
+`ISceneManager::getMesh()` dispatches to the correct file loader based on the file extension:
+`.b3d` → `CB3DMeshFileLoader`; `.ply` → `CPLYMeshFileLoader`. Both return `IAnimatedMesh*`.
+
+The concrete type returned by `CPLYMeshFileLoader` is `SAnimatedMesh` wrapping one or more
+`CDynamicMeshBuffer` instances (one per material group in the PLY file). `CDynamicMeshBuffer`
+differs from `SSkinMeshBuffer` (used by the B3D loader) in one important way: it selects
+the index type at construction time based on vertex count:
+
+- Vertex count ≤ 65 535 → `EIT_16BIT` (16-bit index buffer, same as `SSkinMeshBuffer`)
+- Vertex count > 65 535 → `EIT_32BIT` (32-bit index buffer)
+
+**Upstream threshold bug (vendor patch required — Phase 11q12 Deliverable 6c):** The
+vendored `CPLYMeshFileLoader.cpp` line 233 uses `vertCount > 65565` (off-by-30 typo)
+instead of the correct `> 65535`. Meshes with vertex counts in the range [65 536–65 565]
+are therefore incorrectly assigned `EIT_16BIT`, causing silent index truncation and
+corrupt geometry at runtime. Phase 11q12 Deliverable 6c applies a one-line vendor patch
+to correct the threshold to `> 65535`. All current Tripo3D LOD0 assets are well above
+this range (~495 K vertices), so the bug does not affect existing assets; the patch
+prevents future edge-case corruption when new assets fall in the affected band.
+
+This automatic promotion to `EIT_32BIT` eliminates the 16-bit index overflow that can
+silently corrupt large meshes loaded via `SSkinMeshBuffer`. The caller never needs to
+inspect or override the index type.
+
+**Cache ownership for PLY assets is identical to B3D assets:**
+
+- `ISceneManager::getMesh()` returns a **borrowed** (non-owning) `IAnimatedMesh*`; the
+  Irrlicht mesh cache retains `ref_count == 1`.
+- Do **NOT** call `grab()` or `drop()` on the returned pointer in the normal load or LOD
+  swap path.
+- `CMeshSceneNode::setMesh()` internally drops the old mesh and grabs the new mesh;
+  the cache reference is not disturbed.
+- No explicit `recalculateBoundingBox()` is required: `CPLYMeshFileLoader` computes the
+  bounding box for each `CDynamicMeshBuffer` during load, and `SAnimatedMesh` aggregates
+  them.
+- As with B3D, never attempt a downcast on the returned `IAnimatedMesh*`. Work with
+  `IAnimatedMesh*` (or `IMesh*` via safe upcast) throughout.
+
+**Rule: `getMesh(".ply")` → `IAnimatedMesh*` → `static_cast<IMesh*>` → `addMeshSceneNode`.
+No grab, no drop, no recalculateBoundingBox.**
 
 ### CameraController — Preventing Animator Conflicts
 
@@ -779,21 +828,28 @@ any number of manually placed vehicle nodes.
 
 **`vehicleMeshPath()` — zone-to-mesh mapping**: `spawnVehicleAgent()` calls a free function
 `vehicleMeshPath(ZoneType zone, int variantIdx = 0)` declared in
-**`src/rendering/vehicle_mesh_path.h`** to select the LOD0 asset path. Declaring it in a
-standalone header (not as a file-scope static) allows direct unit testing without a live
-Irrlicht context.
+**`src/rendering/vehicle_mesh_path.h`** to select the LOD0 **extensionless base path**
+(no `.ply` or `.b3d` suffix). Declaring it in a standalone header (not as a file-scope
+static) allows direct unit testing without a live Irrlicht context. The function signature
+is unchanged — no `IFileSystem*` parameter — to preserve link-time compatibility with
+`simulation_tests` which must NOT link `aitown_render`.
 
-| `ZoneType` | `vehicle_id` | LOD0 asset path |
+Callers in `IrrlichtRenderer` wrap the returned path through `resolveModelPath()` (defined
+in `src/rendering/mesh_format_utils.h`) at mesh load time to append `.ply` (preferred) or
+`.b3d` (fallback). The empty suffix `""` is passed to `resolveModelPath()` because
+`vehicleMeshPath()` already embeds `_lod0` in the returned base path.
+
+| `ZoneType` | `vehicle_id` | LOD0 base path (extensionless) |
 |---|---|---|
-| `Residential` | `car_sedan` / `car_hatchback` / `car_suv` (round-robin via `variantIdx % 3`) | `assets/3d/vehicles/<variant>_lod0.b3d` |
-| `Commercial` | `bus_standard` | `assets/3d/vehicles/bus_standard_lod0.b3d` |
-| `Industrial` | `truck_cargo` | `assets/3d/vehicles/truck_cargo_lod0.b3d` |
+| `Residential` | `car_sedan` / `car_hatchback` / `car_suv` (round-robin via `variantIdx % 3`) | `assets/3d/vehicles/<variant>_lod0` |
+| `Commercial` | `bus_standard` | `assets/3d/vehicles/bus_standard_lod0` |
+| `Industrial` | `truck_cargo` | `assets/3d/vehicles/truck_cargo_lod0` |
 
 Signature: `inline std::string vehicleMeshPath(ZoneType zone, int variantIdx = 0)` (defined
 in the header). `spawnVehicleAgent()` passes `static_cast<int>(handle) % 3` as `variantIdx`
 for deterministic per-vehicle Residential variant selection.
 **Fallback**: unrecognised `zone` values (and default `variantIdx = 0`) return the `car_sedan`
-path, preventing an empty string from reaching `ISceneManager::getMesh()`.
+base path, preventing an empty string from reaching `resolveModelPath()`.
 
 **Cull policy**: agents beyond 150 m from the camera are not spawned (simulation skips calling
 `spawnVehicleAgent` for them); agents that move beyond 150 m trigger `despawnVehicleAgent`.

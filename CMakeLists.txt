@@ -228,6 +228,7 @@ add_library(aitown_render STATIC
     src/rendering/BuildingShaderCallback.cpp
     src/rendering/RoadShaderCallback.cpp
     src/rendering/BuildingAssetLoader.cpp
+    src/rendering/mesh_format_utils.cpp
 )
 target_include_directories(aitown_render
     PRIVATE   src/rendering/       # RenderSystem/IrrlichtRenderer internal headers
@@ -620,8 +621,10 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/footprint_test.cpp
 )
 
-# AITOWN_TESTING_ENABLED=1 enables CitySimulation::testForceUnlockDensityTier().
-# MUST be on simulation_tests ONLY — never on the main aitown binary target.
+# AITOWN_TESTING_ENABLED=1 enables CitySimulation::testForceUnlockDensityTier() and
+# CitySimulation::testSetZoneDemandFactor(). MUST be set on both aitown_sim (compiled into
+# library) and simulation_tests (test TU). MUST NOT be set on the main aitown binary target.
+target_compile_definitions(aitown_sim PRIVATE AITOWN_TESTING_ENABLED=1)
 target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)
 
 # ----------------------------------------------------------------------------
@@ -1028,6 +1031,10 @@ target_sources(integration_tests PRIVATE
 # releaseVehicleEnginePair(); uses real AudioSystem + null-backend thread.
 target_sources(integration_tests PRIVATE
     tests/integration/VehicleReleaseTest.cpp
+)
+# Phase 11q12: resolveModelPath() integration tests (PLY-first mesh loading)
+target_sources(integration_tests PRIVATE
+    tests/integration/MeshFormatUtilsTest.cpp
 )
 
 # ----------------------------------------------------------------------------

@@ -32,6 +32,7 @@
 
 #include "NiceSimulationTestBase.h"
 #include "src/interfaces/simulation_types.h"
+#include "src/simulation/Population.h"
 #include "src/simulation/simulation_constants.h"
 
 #include <gtest/gtest.h>
@@ -691,4 +692,81 @@ TEST_F(PopulationTest, TimeOfDay_MultipleTicks_NoCrash)
     // Run enough ticks to exercise the TimeOfDay update code path.
     runTicks(5);
     SUCCEED();
+}
+
+// ============================================================================
+// Tests: testForceUnlockDensityTier — missing branch coverage
+//
+// The existing tests in zoning_test.cpp call testForceUnlockDensityTier with
+// only Residential+Medium. The Commercial Medium (tierIdx=1), Industrial Medium
+// (tierIdx=2), and all High tiers (tierIdx=3,4,5) branches in Population.cpp
+// were previously uncovered. These tests exercise those branches.
+// ============================================================================
+
+TEST_F(PopulationTest, ForceUnlockDensityTier_CommercialMedium_SetsFlagAtIndex1) {
+    cs()->testForceUnlockDensityTier(ZoneType::Commercial, DensityTier::Medium);
+    auto state = sim_->getDensityUnlockState();
+    EXPECT_TRUE(state.unlock_flags[1])
+        << "Commercial Medium (tierIdx=1) unlock flag must be set";
+    EXPECT_FALSE(state.unlock_flags[0])
+        << "Residential Medium flag must remain unset";
+}
+
+TEST_F(PopulationTest, ForceUnlockDensityTier_IndustrialMedium_SetsFlagAtIndex2) {
+    cs()->testForceUnlockDensityTier(ZoneType::Industrial, DensityTier::Medium);
+    auto state = sim_->getDensityUnlockState();
+    EXPECT_TRUE(state.unlock_flags[2])
+        << "Industrial Medium (tierIdx=2) unlock flag must be set";
+}
+
+TEST_F(PopulationTest, ForceUnlockDensityTier_HighTiers_SetsFlags3To5) {
+    cs()->testForceUnlockDensityTier(ZoneType::Residential, DensityTier::High);
+    cs()->testForceUnlockDensityTier(ZoneType::Commercial,  DensityTier::High);
+    cs()->testForceUnlockDensityTier(ZoneType::Industrial,  DensityTier::High);
+    auto state = sim_->getDensityUnlockState();
+    EXPECT_TRUE(state.unlock_flags[3]) << "Residential High (tierIdx=3) must be set";
+    EXPECT_TRUE(state.unlock_flags[4]) << "Commercial High (tierIdx=4) must be set";
+    EXPECT_TRUE(state.unlock_flags[5]) << "Industrial High (tierIdx=5) must be set";
+    // Low-tier flags must be unaffected.
+    EXPECT_FALSE(state.unlock_flags[0]) << "Residential Medium flag must remain unset";
+}
+
+// ============================================================================
+// Tests: Population::checkCityRatingTransition — Megalopolis and City branches
+//
+// These branches require population >= 500,000 (Megalopolis) and >= 10,000
+// (City). Growing population to these thresholds organically via tick() would
+// require hundreds of ticks with thousands of High-R tiles. Instead we
+// instantiate Population directly and set m_totalPopulation to test the
+// specific branch in checkCityRatingTransition (Population.cpp lines 563, 567).
+// ============================================================================
+
+TEST(CityRatingTransitionDirect, Megalopolis_BranchCovered) {
+    Population pop;
+    pop.m_totalPopulation = SimulationConstants::city_rating_megalopolis_threshold;
+    pop.m_cityRating      = CityRatingTier::Metropolis;
+    std::queue<SimulationNotification> notifications;
+    pop.checkCityRatingTransition(notifications);
+
+    ASSERT_FALSE(notifications.empty())
+        << "A CityRatingTransition notification must be queued";
+    const auto& n = notifications.front();
+    EXPECT_EQ(n.type, NotificationType::CityRatingTransition);
+    EXPECT_EQ(static_cast<CityRatingTier>(n.milestoneValue), CityRatingTier::Megalopolis);
+    EXPECT_EQ(pop.m_cityRating, CityRatingTier::Megalopolis);
+}
+
+TEST(CityRatingTransitionDirect, City_BranchCovered) {
+    Population pop;
+    pop.m_totalPopulation = SimulationConstants::city_rating_city_threshold;
+    pop.m_cityRating      = CityRatingTier::Town;
+    std::queue<SimulationNotification> notifications;
+    pop.checkCityRatingTransition(notifications);
+
+    ASSERT_FALSE(notifications.empty())
+        << "A CityRatingTransition notification must be queued";
+    const auto& n = notifications.front();
+    EXPECT_EQ(n.type, NotificationType::CityRatingTransition);
+    EXPECT_EQ(static_cast<CityRatingTier>(n.milestoneValue), CityRatingTier::City);
+    EXPECT_EQ(pop.m_cityRating, CityRatingTier::City);
 }

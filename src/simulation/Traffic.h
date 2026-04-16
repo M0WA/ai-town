@@ -59,11 +59,13 @@ public:
     float m_roadSpeedFraction{1.0f};
 
     std::array<float, 3> m_demandPressurePct{0.0f, 0.0f, 0.0f};
+    std::array<float, 3> m_demandOverride{0.0f, 0.0f, 0.0f};
 
     // ---- Public accessors ----
     float getZoneDemandFactor(ZoneType zone) const;
     float getTrafficDemandFactor(ZoneType zone) const;
     float getRoadSpeedFraction() const;
+    void overrideZoneDemandFactor(ZoneType zone, float value);
 
     std::vector<RoadSegmentSpeed>        getRoadSegmentSpeeds(const Zoning& zoning) const;
     std::vector<AgentState>              getAgentPositions() const;

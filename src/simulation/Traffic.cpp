@@ -24,7 +24,13 @@ static constexpr int kDespawnedVehicleTile = -9999;
 // ---------------------------------------------------------------------------
 
 float Traffic::getZoneDemandFactor(ZoneType zone) const {
+    float ov = m_demandOverride[static_cast<int>(zone)];
+    if (ov > 0.0f) return ov;
     return m_demandPressurePct[static_cast<int>(zone)];
+}
+
+void Traffic::overrideZoneDemandFactor(ZoneType zone, float value) {
+    m_demandOverride[static_cast<int>(zone)] = value;
 }
 
 float Traffic::getTrafficDemandFactor(ZoneType zone) const {

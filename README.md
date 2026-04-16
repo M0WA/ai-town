@@ -3,7 +3,7 @@
 A 3D city simulator built with C++ and the Irrlicht engine. Zone land, build roads,
 manage finances, and grow a living city with traffic, economy simulation, and spatial audio.
 
-![AI Town screenshot](docs/screenshot-v0.0.12.png)
+![AI Town screenshot](docs/screenshot-v0.0.30.png)
 
 ---
 
