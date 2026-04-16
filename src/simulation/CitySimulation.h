@@ -203,7 +203,6 @@ private:
     // ------------------------------------------------------------------
     static float speedValue(SpeedMultiplier s);
     static int64_t startingFundsForDifficulty(Difficulty d);
-    static int     bondMaxUsesForDifficulty(Difficulty d);
 
     void doBudgetTick();
     void recordUndoAction(const UndoAction& action);

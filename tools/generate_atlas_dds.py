@@ -2276,9 +2276,89 @@ def build_dds_header(width, height, mip_levels):
     return magic + hdr
 
 
+def build_dds_header_dx10_bc1_srgb(width, height, mip_levels):
+    """Build a 148-byte DDS header with DX10 extension for BC1_UNORM_SRGB.
+
+    Layout: 4-byte magic + 124-byte DDS_HEADER + 20-byte DDS_HEADER_DXT10 = 148 bytes.
+    DXGI_FORMAT_BC1_UNORM_SRGB = 72.
+    """
+    DDSD_CAPS        = 0x00000001
+    DDSD_HEIGHT      = 0x00000002
+    DDSD_WIDTH       = 0x00000004
+    DDSD_PIXELFORMAT = 0x00001000
+    DDSD_MIPMAPCOUNT = 0x00020000
+    DDSD_LINEARSIZE  = 0x00080000
+
+    flags = (DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH |
+             DDSD_PIXELFORMAT | DDSD_MIPMAPCOUNT | DDSD_LINEARSIZE)
+
+    blocks_x = max(1, (width + 3) // 4)
+    blocks_y = max(1, (height + 3) // 4)
+    linear_size = blocks_x * blocks_y * 8
+
+    DDPF_FOURCC = 0x00000004
+    DDSCAPS_COMPLEX = 0x00000008
+    DDSCAPS_TEXTURE = 0x00001000
+    DDSCAPS_MIPMAP  = 0x00400000
+    caps1 = DDSCAPS_COMPLEX | DDSCAPS_TEXTURE | DDSCAPS_MIPMAP
+
+    magic = b'DDS '
+    hdr = struct.pack('<IIIIIII',
+        124, flags, height, width, linear_size, 0, mip_levels)
+    hdr += bytes(44)  # dwReserved1[11]
+    # FourCC = 'DX10' to signal DX10 extended header
+    hdr += struct.pack('<II4sIIIII',
+        32, DDPF_FOURCC, b'DX10', 0, 0, 0, 0, 0)
+    hdr += struct.pack('<IIII', caps1, 0, 0, 0)
+    hdr += struct.pack('<I', 0)  # dwReserved2
+
+    assert len(hdr) == 124
+
+    # DDS_HEADER_DXT10 (20 bytes):
+    #   dxgiFormat        = 72  (DXGI_FORMAT_BC1_UNORM_SRGB)
+    #   resourceDimension = 3   (D3D10_RESOURCE_DIMENSION_TEXTURE2D)
+    #   miscFlag          = 0
+    #   arraySize         = 1
+    #   miscFlags2        = 0
+    dx10 = struct.pack('<IIIII', 72, 3, 0, 1, 0)
+    assert len(dx10) == 20
+
+    return magic + hdr + dx10
+
+
 # ---------------------------------------------------------------------------
 # DDS generation from pixel buffer with proper mip chain
 # ---------------------------------------------------------------------------
+
+def generate_dds_dx10_bc1_srgb_from_pixels(output_path, pixels, width, height, mip_levels):
+    """Generate a DX10/BC1_UNORM_SRGB DDS file from a pixel buffer with mip chain.
+
+    Produces a 148-byte header (DDS_HEADER + DX10 extension) followed by BC1 pixel data.
+    DXGI_FORMAT = 72 (BC1_UNORM_SRGB).  Use for sRGB diffuse atlases.
+    """
+    header = build_dds_header_dx10_bc1_srgb(width, height, mip_levels)
+    assert len(header) == 148
+
+    all_data = bytearray()
+    cur_pixels = pixels
+    cur_w = width
+    cur_h = height
+
+    for mip in range(mip_levels):
+        print(f"    Encoding mip {mip}: {cur_w}x{cur_h}")
+        mip_data = encode_dxt1_image_from_pixels(cur_pixels, cur_w, cur_h)
+        all_data += mip_data
+        if mip < mip_levels - 1:
+            cur_pixels, cur_w, cur_h = downsample_2x(cur_pixels, cur_w, cur_h)
+
+    total = len(header) + len(all_data)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, 'wb') as f:
+        f.write(header)
+        f.write(all_data)
+
+    return total
+
 
 def generate_dds_from_pixels(output_path, pixels, width, height, mip_levels):
     """Generate a DXT1 DDS file from a pixel buffer with mip chain."""
@@ -2391,7 +2471,7 @@ def verify_headers(primary_path, fallback_path):
 #
 # Reads vehicle assignments from vehicle_atlas_registry.json, extracts
 # basecolor textures from Tripo3D ZIPs, and produces:
-#   assets/textures/vehicles/vehicles_diffuse_atlas_d.dds  (2048x2048, 4 mips, DXT1)
+#   assets/textures/vehicles/vehicles_diffuse_atlas_d.dds  (2048x2048, 4 mips, DX10/BC1_UNORM_SRGB)
 #   assets/textures/vehicles/vehicles_diffuse_atlas_d.png  (source PNG)
 #
 # Y-normal convention: row R is stored at PNG y = R * cell_size.
@@ -2476,9 +2556,9 @@ def generate_vehicle_atlas(repo_root):
         for s in skipped:
             print(f"    SKIP: {s}")
 
-    # Generate DDS (2048×2048, 4 mip levels, DXT1)
+    # Generate DDS (2048×2048, 4 mip levels, DX10/BC1_UNORM_SRGB — required by check_25)
     print(f"\nGenerating {out_dds}")
-    generate_dds_from_pixels(out_dds, pixels, atlas_w, atlas_h, 4)
+    generate_dds_dx10_bc1_srgb_from_pixels(out_dds, pixels, atlas_w, atlas_h, 4)
     print(f"  {os.path.getsize(out_dds):,} bytes")
 
     # Save source PNG

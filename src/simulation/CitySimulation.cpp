@@ -37,15 +37,6 @@
     return SimulationConstants::starting_funds_normal;
 }
 
-/*static*/ int CitySimulation::bondMaxUsesForDifficulty(Difficulty d) {
-    switch (d) {
-        case Difficulty::Easy:   return SimulationConstants::bond_max_uses_easy;
-        case Difficulty::Normal: return SimulationConstants::bond_max_uses_normal;
-        case Difficulty::Hard:   return SimulationConstants::bond_max_uses_hard;
-    }
-    return SimulationConstants::bond_max_uses_normal;
-}
-
 // ---------------------------------------------------------------------------
 // Map dimensions
 // ---------------------------------------------------------------------------
