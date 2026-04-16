@@ -1,6 +1,6 @@
 ## Phase 11q11: Demand-Proportional Building Upgrade Speed
 
-**Status: TODO**
+**Status: DONE**
 
 **Prerequisite**: phase-11q10 merged.
 
