@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
 """
-Blender headless pipeline: Tripo3D FBX source zips -> PLY (LOD0 + LOD1 [+ LOD2])
+Blender headless pipeline: Tripo3D FBX source zip -> PLY (LOD0 + LOD1 [+ LOD2])
 
-Converts Tripo3D source assets to Irrlicht-compatible PLY format.  PLY files
-loaded by Irrlicht use CDynamicMeshBuffer with 32-bit indices, eliminating the
-65,535 vertex-per-buffer limit that causes crashes with high-poly B3D meshes.
+Converts a single Tripo3D source asset to Irrlicht-compatible PLY format.  PLY
+files loaded by Irrlicht use CDynamicMeshBuffer with 32-bit indices, eliminating
+the 65,535 vertex-per-buffer limit that causes crashes with high-poly B3D meshes.
 
-Supports both vehicles and buildings.  The asset type is inferred from the
-output directory or can be set explicitly.
+Supports both vehicles and buildings.
 
-Usage (single asset):
+Usage:
   blender --background --python tools/convert_tripo3d_to_ply.py -- \\
     --zip <source.zip> --name <asset_name> --type <vehicle|building> \\
     [--atlas-row R] [--atlas-col C] [--footprint N] [--target-length L]
 
-Usage (batch — all assets from manifest):
-  blender --background --python tools/convert_tripo3d_to_ply.py -- --batch
-
-The batch manifest is embedded in this file (MANIFEST dict).  Edit it to add
-or change source-zip-to-asset-name mappings.
+Arguments:
+  --zip           Path to the Tripo3D source ZIP (required)
+  --name          Output asset base name, e.g. com_high_01 (required)
+  --type          Asset type: vehicle or building (required)
+  --atlas-row     Row index in the texture atlas (default: 0)
+  --atlas-col     Column index in the texture atlas (default: 0)
+  --footprint     Tile footprint for buildings, e.g. 1/2/3 (default: 1)
+  --target-length Vehicle target length in metres (default: 4.0)
 
 Output files:
   assets/3d/vehicles/<name>_lod0.ply, <name>_lod1.ply
@@ -40,81 +42,6 @@ _TOOLS_DIR  = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT  = os.path.join(_TOOLS_DIR, "..")
 _ASSETS_DIR = os.path.join(_REPO_ROOT, "assets")
 
-# ---------------------------------------------------------------------------
-# Manifest: maps Tripo3D source zips to output asset names.
-#
-# Format:
-#   "tripo3d/<subdir>/<zip>": {
-#       "name":      "<output asset base name>",
-#       "type":      "vehicle" | "building",
-#       "atlas_row": <int>,   # from .meta file
-#       "atlas_col": <int>,   # from .meta file
-#       "footprint": <int>,   # tiles (buildings only; default 3 for com_high, 2 for com_med, 1 for small)
-#       "target_len": <float> # metres (vehicles only; default 4.0)
-#   }
-# ---------------------------------------------------------------------------
-MANIFEST = {
-    # --- Vehicles ---
-    "vehicles/sedan_1.zip":     {"name": "car_sedan",     "type": "vehicle", "atlas_row": 0, "atlas_col": 0},
-    "vehicles/hatchback_1.zip": {"name": "car_hatchback", "type": "vehicle", "atlas_row": 0, "atlas_col": 1},
-    "vehicles/suv_1.zip":       {"name": "car_suv",       "type": "vehicle", "atlas_row": 0, "atlas_col": 2},
-    "vehicles/bus_1.zip":       {"name": "bus_standard",  "type": "vehicle", "atlas_row": 1, "atlas_col": 0},
-    "vehicles/truck_1.zip":     {"name": "truck_cargo",   "type": "vehicle", "atlas_row": 1, "atlas_col": 1},
-    "vehicles/firetruck_1.zip": {"name": "firetruck",     "type": "vehicle", "atlas_row": 1, "atlas_col": 2},
-
-    # --- Commercial High (3x3 tiles) ---
-    "medium_poly/buildings/com_high_1.zip": {"name": "com_high_01", "type": "building", "atlas_row": 2, "atlas_col": 4, "footprint": 3},
-    "medium_poly/buildings/com_high_2.zip": {"name": "com_high_02", "type": "building", "atlas_row": 2, "atlas_col": 5, "footprint": 3},
-    "medium_poly/buildings/com_high_3.zip": {"name": "com_high_03", "type": "building", "atlas_row": 2, "atlas_col": 6, "footprint": 3},
-    "medium_poly/buildings/com_high_4.zip": {"name": "com_high_04", "type": "building", "atlas_row": 2, "atlas_col": 7, "footprint": 3},
-    "medium_poly/buildings/com_high_5.zip": {"name": "com_high_05", "type": "building", "atlas_row": 3, "atlas_col": 4, "footprint": 3},
-
-    # --- Commercial Medium (2x2 tiles) ---
-    "medium_poly/buildings/com_med_1.zip": {"name": "com_med_01", "type": "building", "atlas_row": 2, "atlas_col": 0, "footprint": 2},
-    "medium_poly/buildings/com_med_2.zip": {"name": "com_med_02", "type": "building", "atlas_row": 2, "atlas_col": 1, "footprint": 2},
-    "medium_poly/buildings/com_med_3.zip": {"name": "com_med_03", "type": "building", "atlas_row": 2, "atlas_col": 2, "footprint": 2},
-    "medium_poly/buildings/com_med_4.zip": {"name": "com_med_04", "type": "building", "atlas_row": 2, "atlas_col": 3, "footprint": 2},
-
-    # --- Commercial Low (1x1 tile) ---
-    "medium_poly/buildings/com_low_1.zip": {"name": "com_low_01", "type": "building", "atlas_row": 1, "atlas_col": 4, "footprint": 1},
-    "medium_poly/buildings/com_low_2.zip": {"name": "com_low_02", "type": "building", "atlas_row": 1, "atlas_col": 5, "footprint": 1},
-    "medium_poly/buildings/com_low_3.zip": {"name": "com_low_03", "type": "building", "atlas_row": 1, "atlas_col": 6, "footprint": 1},
-    "medium_poly/buildings/com_low_4.zip": {"name": "com_low_04", "type": "building", "atlas_row": 1, "atlas_col": 7, "footprint": 1},
-
-    # --- Residential High (3x3 tiles) ---
-    "medium_poly/buildings/res_high_1.zip": {"name": "res_high_01", "type": "building", "atlas_row": 1, "atlas_col": 0, "footprint": 3},
-    "medium_poly/buildings/res_high_2.zip": {"name": "res_high_02", "type": "building", "atlas_row": 1, "atlas_col": 1, "footprint": 3},
-    "medium_poly/buildings/res_high_3.zip": {"name": "res_high_03", "type": "building", "atlas_row": 1, "atlas_col": 2, "footprint": 3},
-
-    # --- Residential Medium (2x2 tiles) ---
-    "medium_poly/buildings/res_med_1.zip":  {"name": "res_med_01", "type": "building", "atlas_row": 0, "atlas_col": 4, "footprint": 2},
-    "medium_poly/buildings/res_med_2.zip":  {"name": "res_med_02", "type": "building", "atlas_row": 0, "atlas_col": 5, "footprint": 2},
-    "medium_poly/buildings/res_med_03.zip": {"name": "res_med_03", "type": "building", "atlas_row": 0, "atlas_col": 6, "footprint": 2},
-    "medium_poly/buildings/res_med_4.zip":  {"name": "res_med_04", "type": "building", "atlas_row": 0, "atlas_col": 7, "footprint": 2},
-    "medium_poly/buildings/res_med_5.zip":  {"name": "res_med_05", "type": "building", "atlas_row": 5, "atlas_col": 0, "footprint": 2},
-    "medium_poly/buildings/res_med_6.zip":  {"name": "res_med_06", "type": "building", "atlas_row": 5, "atlas_col": 1, "footprint": 2},
-
-    # --- Residential Low (1x1 tile) ---
-    "medium_poly/buildings/res_low_1.zip": {"name": "res_low_01", "type": "building", "atlas_row": 0, "atlas_col": 0, "footprint": 1},
-    "medium_poly/buildings/res_low_2.zip": {"name": "res_low_02", "type": "building", "atlas_row": 0, "atlas_col": 1, "footprint": 1},
-    "medium_poly/buildings/res_low_3.zip": {"name": "res_low_03", "type": "building", "atlas_row": 0, "atlas_col": 2, "footprint": 1},
-    "medium_poly/buildings/res_low_4.zip": {"name": "res_low_04", "type": "building", "atlas_row": 0, "atlas_col": 3, "footprint": 1},
-
-    # --- Service buildings (1x1 tile) ---
-    # Primary replacements for existing svc_* B3D assets (keep same atlas cell)
-    "medium_poly/buildings/svc_fire_medium_1.zip":   {"name": "svc_fire_station",  "type": "building", "atlas_row": 4, "atlas_col": 4, "footprint": 1},
-    "medium_poly/buildings/svc_police_medium_1.zip": {"name": "svc_police_station", "type": "building", "atlas_row": 4, "atlas_col": 5, "footprint": 1},
-    "medium_poly/buildings/svc_power_coal_medium_1.zip": {"name": "svc_power_plant", "type": "building", "atlas_row": 4, "atlas_col": 6, "footprint": 1},
-    "medium_poly/buildings/svc_water_low_1.zip":     {"name": "svc_water_tower",   "type": "building", "atlas_row": 4, "atlas_col": 7, "footprint": 1},
-    # Additional svc variants (new assets, row 3 cols 5-6 to avoid collision with res_med_05/06 at 5,0/5,1)
-    "medium_poly/buildings/svc_fire_high_1.zip":          {"name": "svc_fire_high_01",          "type": "building", "atlas_row": 3, "atlas_col": 5, "footprint": 1},
-    "medium_poly/buildings/svc_power_coal_medium_2.zip":  {"name": "svc_power_coal_medium_02",  "type": "building", "atlas_row": 3, "atlas_col": 6, "footprint": 1},
-    "medium_poly/buildings/svc_power_nuclear_medium_1.zip": {"name": "svc_power_nuclear_medium_01", "type": "building", "atlas_row": 5, "atlas_col": 2, "footprint": 1},
-    "medium_poly/buildings/svc_power_nuclear_medium_2.zip": {"name": "svc_power_nuclear_medium_02", "type": "building", "atlas_row": 5, "atlas_col": 3, "footprint": 1},
-    "medium_poly/buildings/svc_power_nuclear_medium_3.zip": {"name": "svc_power_nuclear_medium_03", "type": "building", "atlas_row": 5, "atlas_col": 4, "footprint": 1},
-    "medium_poly/buildings/svc_school_medium_1.zip":  {"name": "svc_school_medium_01",  "type": "building", "atlas_row": 5, "atlas_col": 5, "footprint": 1},
-    "medium_poly/buildings/svc_water_low_2.zip":      {"name": "svc_water_low_02",      "type": "building", "atlas_row": 5, "atlas_col": 6, "footprint": 1},
-}
 
 # ---------------------------------------------------------------------------
 # LOD targets (triangle counts)
@@ -930,58 +857,6 @@ def convert_single(zip_path, asset_name, asset_type, atlas_row, atlas_col,
                                     basecolor, generate_lod2=generate_lod2)
 
 
-def convert_batch():
-    """Convert all assets listed in MANIFEST."""
-    tripo_dir = os.path.join(_ASSETS_DIR, "tripo3d")
-    results = {"ok": [], "fail": [], "skip": []}
-
-    for rel_zip, cfg in sorted(MANIFEST.items()):
-        zip_path = os.path.join(tripo_dir, rel_zip)
-        if not os.path.exists(zip_path):
-            print(f"SKIP: {zip_path} not found")
-            results["skip"].append(rel_zip)
-            continue
-
-        try:
-            # Determine LOD2: generate only for buildings with height_floors > 3.
-            # Read from existing .meta file; default False (no LOD2) when absent.
-            lod2 = False
-            if cfg["type"] == "building":
-                floors = read_height_floors(cfg["name"], cfg["type"])
-                lod2 = floors > 3
-                if floors == 0:
-                    print(f"  NOTE: no meta for {cfg['name']} — LOD2 skipped")
-
-            ok = convert_single(
-                zip_path,
-                cfg["name"],
-                cfg["type"],
-                cfg.get("atlas_row", 0),
-                cfg.get("atlas_col", 0),
-                cfg.get("footprint", 1),
-                cfg.get("target_len", DEFAULT_VEHICLE_LENGTH_M),
-                generate_lod2=lod2,
-            )
-            if ok:
-                results["ok"].append(cfg["name"])
-            else:
-                results["fail"].append(cfg["name"])
-        except Exception as e:
-            print(f"FAIL: {cfg['name']}: {e}")
-            results["fail"].append(cfg["name"])
-
-    print(f"\n{'='*60}")
-    print(f"BATCH COMPLETE")
-    print(f"  OK:   {len(results['ok'])}")
-    print(f"  FAIL: {len(results['fail'])}")
-    print(f"  SKIP: {len(results['skip'])}")
-    if results["fail"]:
-        print(f"  Failed: {results['fail']}")
-    if results["skip"]:
-        print(f"  Skipped: {results['skip']}")
-    print(f"{'='*60}")
-
-
 # ===========================================================================
 # CLI argument parsing
 # ===========================================================================
@@ -992,10 +867,6 @@ def main():
     if not argv:
         print(__doc__)
         sys.exit(1)
-
-    if argv[0] == "--batch":
-        convert_batch()
-        return
 
     # Parse named arguments
     args = {}
@@ -1014,10 +885,10 @@ def main():
 
     zip_path = args.get("zip")
     name = args.get("name")
-    atype = args.get("type", "vehicle")
+    atype = args.get("type")
 
-    if not zip_path or not name:
-        print("ERROR: --zip and --name are required for single-asset mode")
+    if not zip_path or not name or not atype:
+        print("ERROR: --zip, --name, and --type are required")
         print(__doc__)
         sys.exit(1)
 
