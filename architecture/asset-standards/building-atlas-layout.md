@@ -23,6 +23,14 @@ building texture content 2026-03-04), `graphics-dev-irrlicht` (2026-02-26), and
 > explicitly assigns the result to every material slot via `node->getMaterial(m).setTexture(0, atlas)`.
 > This bypasses the failed B3D-embedded DDS reference entirely.
 >
+> **PNG size requirement**: `buildings_atlas_d.png` must always be exactly **4096×4096 px**.
+> `generate_atlas_dds.py` saves the source PNG at 4096×4096 (not 2048×2048) so that
+> `convert_tripo3d_to_ply.py` can bake Tripo3D basecolor textures into 512×512-pixel cells
+> correctly. A wrong-size PNG causes the converter to discard it and create a blank canvas,
+> losing all previously baked cells. See the **Atlas PNG interaction** section in
+> `architecture/asset-standards/3d-model-standards.md` (PLY Export Pipeline) for the full
+> blank-canvas creation rules and PLY cell preservation logic.
+>
 > **Production target (Phase 11+)**: migrate to `buildings_atlas_d.dds` (DXT1 sRGB) uploaded via
 > `TextureCache::loadSRGB()` (raw-GL `glCompressedTexImage2D` path), which bypasses the Irrlicht
 > image loader entirely and therefore is not affected by the disabled DDS loader or the

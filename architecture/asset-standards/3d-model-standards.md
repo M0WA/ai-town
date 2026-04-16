@@ -414,6 +414,36 @@ Same pipeline as Commercial High with the following differences:
 
 For any Tripo3D LOD0 mesh whose vertex count exceeds the B3D 65,535-vertex-per-buffer limit, the PLY export path replaces B3DWriter export. Usage: `convert_tripo3d_to_ply.py <input.fbx> <output.ply>`. The tool writes a binary little-endian PLY with vertex positions, normals, UV channel 0, and face indices as 32-bit integers. `resolveModelPath()` in the C++ loader checks for `.ply` first and falls back to `.b3d` if absent. This pipeline applies to all Tripo3D asset categories (vehicles, commercial high, commercial medium, and residential high buildings).
 
+**Atlas PNG interaction** (`bake_basecolor_to_atlas` in `convert_tripo3d_to_ply.py`):
+
+After writing the PLY file, the converter bakes the Tripo3D basecolor texture into
+`assets/textures/buildings/buildings_atlas_d.png` at the assigned atlas cell (512×512 px per cell
+on an 8×8 grid). The following invariants must hold:
+
+- **Blank canvas creation**: If `buildings_atlas_d.png` does not exist, or exists at any size
+  other than 4096×4096, the converter creates a new blank 4096×4096 canvas before baking. This
+  makes every import run self-bootstrapping — it does NOT warn-and-skip as the earlier
+  implementation did.
+- **Size invariant**: `buildings_atlas_d.png` must always be exactly 4096×4096 px
+  (8 cells × 512 px/cell). A wrong-size file causes the blank-canvas path to trigger, discarding
+  all previously baked cells. To regenerate from scratch: run `generate_atlas_dds.py` first (it
+  saves the source PNG at 4096×4096), then run the converter for each PLY asset.
+- **PLY cell preservation in `generate_atlas_dds.py`**: When `generate_atlas_dds.py` runs after
+  the converter, it inspects `assets/3d/buildings/` for committed `*_lod0.ply` files. For each
+  cell listed in `CELL_ASSET_NAMES` that has a PLY lod0 file present, it copies pixels from the
+  existing 4096×4096 `buildings_atlas_d.png` (the converter-baked PNG) instead of overwriting
+  with procedural draw functions. Cells without a PLY lod0 continue to use procedural generation.
+  The source PNG written by `generate_atlas_dds.py` is always 4096×4096 (not 2048×2048) so the
+  converter can safely write 512×512-pixel cells into it.
+
+**Y-axis convention** (both tools must agree):
+
+Blender's internal pixel array is Y-flipped (row R stored at `y = (GRID-1-R) × cell_px`), but
+Blender flips the array on PNG save, placing row R at PNG `y = R × cell_px` (Y-normal: row 0 at
+the top of the file). Irrlicht loads PNG without flipping — UV V=0 maps to PNG y=0 (top-left).
+PLY UV `V ∈ [R/8, (R+1)/8]` therefore correctly samples PNG `y ∈ [R×512, (R+1)×512]`.
+`generate_atlas_dds.py` copies PLY cells using the same Y-normal offset: `src_y0 = row × PNG_CELL`.
+
 **Actual V1 Tripo3D tri counts** (binding upper limits for `validate_assets.py`):
 
 | Asset       | LOD0    | LOD1  | LOD2 |
