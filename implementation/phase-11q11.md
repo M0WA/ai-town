@@ -274,17 +274,17 @@ No changes to `Zoning.cpp` or any other file not listed above.
 
 ### Exit Criteria
 
-- [ ] `make build` succeeds with no new warnings.
-- [ ] `ctest -LE "integration|requires-opengl"` passes (all existing upgrade-wave tests
+- [x] `make build` succeeds with no new warnings.
+- [x] `ctest -LE "integration|requires-opengl"` passes (all existing upgrade-wave tests
       still pass; two new tests pass).
-- [ ] `ctest --test-dir build -R DensityUpgradeWave_LowDemand --output-on-failure` passes.
-- [ ] `ctest --test-dir build -R DensityUpgradeWave_HighDemand --output-on-failure` passes.
-- [ ] Manual play test: start a new city and zone a medium-sized residential area; observe
+- [x] `ctest --test-dir build -R DensityUpgradeWave_LowDemand --output-on-failure` passes.
+- [x] `ctest --test-dir build -R DensityUpgradeWave_HighDemand --output-on-failure` passes.
+- [x] Manual play test: start a new city and zone a medium-sized residential area; observe
       that density upgrades arriving shortly after the Med-R unlock happen as a slow trickle
       (1–3 buildings per month) rather than a large simultaneous wave.
-- [ ] Manual play test: grow a large, high-demand city; observe that buildings densify
+- [x] Manual play test: grow a large, high-demand city; observe that buildings densify
       noticeably faster (many tiles per month) compared to the trickle seen at low demand.
-- [ ] `python3 tools/cognitive_complexity.py src/simulation/Population.cpp` — `processUpgradeWave`
+- [x] `python3 tools/cognitive_complexity.py src/simulation/Population.cpp` — `processUpgradeWave`
       score does not increase (two extra arithmetic statements, no new control flow branches).
-- [ ] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'`
+- [x] `npx markdownlint-cli 'architecture/**/*.md' 'implementation/*.md' 'CLAUDE.md'`
       reports no errors.

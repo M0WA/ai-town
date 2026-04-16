@@ -803,6 +803,9 @@ void CitySimulation::setModalOpen(bool open) {
 void CitySimulation::testForceUnlockDensityTier(ZoneType zone, DensityTier tier) {
     m_population.testForceUnlockDensityTier(zone, tier);
 }
+void CitySimulation::testSetZoneDemandFactor(ZoneType zone, float value) {
+    m_traffic.overrideZoneDemandFactor(zone, value);
+}
 #endif
 
 // ---------------------------------------------------------------------------

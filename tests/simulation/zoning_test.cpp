@@ -850,3 +850,136 @@ TEST_F(ZoningConstructionDelayTest, ZoningSystem_PlaceZone_NoRevenueUntilMeshSpa
         << "Residential tax revenue must be 0.0 while the zone tile is underConstruction "
            "(no building mesh spawned, population = 0).";
 }
+
+// ---------------------------------------------------------------------------
+// TEST: DensityUpgradeWave_LowDemand_UpgradesAtMostTwoTilesPerTick
+//
+// When demand = 0.78 (above the wave gate 0.50 but near the low end),
+// the demand-scaled rate is:
+//   demandExcess = (0.78 - 0.50) / (1.0 - 0.50) = 0.56
+//   scaledRate   = 0.56 × 0.20 = 0.112
+//   maxUpgrades  = max(1, floor(0.112 × 20)) = 2
+//
+// Old fixed-rate code: max(1, floor(0.20 × 20)) = 4 — would fail EXPECT_LE(2).
+//
+// Setup: 20 R-Low tiles in a 4×5 grid (cols 0–3, rows 0–4).
+// Roads at cols -1 and 4 (rows 0–4) for Low-density coverage.
+// Force-unlock Med-R via testForceUnlockDensityTier.
+// Inject demand = 0.78f via testSetZoneDemandFactor.
+// Run 1 budget tick.
+//
+// Assert: 1 ≤ upgradeCount ≤ 2
+//   Lower bound: wave fired (demand seam worked and min-clamp applied).
+//   Upper bound: demand-scaled cap limited the wave to ≤ 2 tiles.
+// ---------------------------------------------------------------------------
+TEST_F(ZoningTestNice, DensityUpgradeWave_LowDemand_UpgradesAtMostTwoTilesPerTick) {
+    // Place roads at columns -1 and 4 for road range coverage.
+    for (int z = 0; z <= 4; ++z) {
+        sim_->placeRoad(-1, z);
+        sim_->placeRoad(4, z);
+    }
+
+    // Place 20 R-Low tiles at columns 0-3, rows 0-4.
+    for (int x = 0; x <= 3; ++x) {
+        for (int z = 0; z <= 4; ++z) {
+            sim_->placeZone(x, z, ZoneType::Residential, DensityTier::Low);
+        }
+    }
+
+    // Advance past grace period.
+    clock_.advance(121.0);
+
+    // Force-unlock Med-R (bypasses 3-consecutive-month gate).
+    cs()->testForceUnlockDensityTier(ZoneType::Residential, DensityTier::Medium);
+
+    // Inject demand = 0.78 for Residential (override computed demand).
+    cs()->testSetZoneDemandFactor(ZoneType::Residential, 0.78f);
+
+    // Run 1 upgrade tick.
+    runTicks(1);
+
+    // Count tiles that upgraded to Medium density.
+    // Each upgrade converts a 2×2 block (4 tiles) to Medium.
+    int mediumTileCount = 0;
+    for (int x = 0; x <= 3; ++x) {
+        for (int z = 0; z <= 4; ++z) {
+            QueryResult qr = sim_->queryTile(x, z);
+            if (qr.densityTier == DensityTier::Medium) ++mediumTileCount;
+        }
+    }
+    int upgradeCount = mediumTileCount / 4;
+
+    EXPECT_GE(upgradeCount, 1)
+        << "Upgrade wave must fire at demand=0.78 (above gate 0.50); min-clamp ensures at "
+           "least 1 upgrade. upgradeCount=" << upgradeCount;
+    EXPECT_LE(upgradeCount, 2)
+        << "Demand-scaled cap at demand=0.78 allows at most 2 upgrades (scaledRate=0.112×20=2). "
+           "upgradeCount=" << upgradeCount;
+}
+
+// ---------------------------------------------------------------------------
+// TEST: DensityUpgradeWave_HighDemand_UpgradesAtHighRate
+//
+// When demand = 0.92 (near peak), the demand-scaled rate is:
+//   demandExcess = (0.92 - 0.50) / (1.0 - 0.50) = 0.84
+//   scaledRate   = 0.84 × 0.20 = 0.168
+//   maxUpgrades  = max(1, floor(0.168 × 20)) = 3
+//
+// Old fixed-rate code: max(1, floor(0.20 × 20)) = 4 — would fail EXPECT_LE(3).
+//
+// Setup: 20 R-Low tiles in a 4×5 grid (cols 0–3, rows 0–4).
+// Roads at cols -1 and 4 (rows 0–4) for Low-density coverage.
+// Force-unlock Med-R via testForceUnlockDensityTier.
+// Inject demand = 0.92f via testSetZoneDemandFactor.
+// Run 1 budget tick.
+//
+// Assert: 3 == upgradeCount (both EXPECT_GE and EXPECT_LE)
+//   EXPECT_GE(upgradeCount, 3): high demand produced at least 3 upgrades (more than ≤2 at low demand).
+//   EXPECT_LE(upgradeCount, 3): demand-scaled cap limited to exactly 3;
+//     old fixed code (maxUpgrades=4) would fail this bound.
+// ---------------------------------------------------------------------------
+TEST_F(ZoningTestNice, DensityUpgradeWave_HighDemand_UpgradesAtHighRate) {
+    // Place roads at columns -1 and 4 for road range coverage.
+    for (int z = 0; z <= 4; ++z) {
+        sim_->placeRoad(-1, z);
+        sim_->placeRoad(4, z);
+    }
+
+    // Place 20 R-Low tiles at columns 0-3, rows 0-4.
+    for (int x = 0; x <= 3; ++x) {
+        for (int z = 0; z <= 4; ++z) {
+            sim_->placeZone(x, z, ZoneType::Residential, DensityTier::Low);
+        }
+    }
+
+    // Advance past grace period.
+    clock_.advance(121.0);
+
+    // Force-unlock Med-R (bypasses 3-consecutive-month gate).
+    cs()->testForceUnlockDensityTier(ZoneType::Residential, DensityTier::Medium);
+
+    // Inject demand = 0.92 for Residential (override computed demand).
+    cs()->testSetZoneDemandFactor(ZoneType::Residential, 0.92f);
+
+    // Run 1 upgrade tick.
+    runTicks(1);
+
+    // Count tiles that upgraded to Medium density.
+    // Each upgrade converts a 2×2 block (4 tiles) to Medium.
+    int mediumTileCount = 0;
+    for (int x = 0; x <= 3; ++x) {
+        for (int z = 0; z <= 4; ++z) {
+            QueryResult qr = sim_->queryTile(x, z);
+            if (qr.densityTier == DensityTier::Medium) ++mediumTileCount;
+        }
+    }
+    int upgradeCount = mediumTileCount / 4;
+
+    EXPECT_GE(upgradeCount, 3)
+        << "High demand (0.92) must produce at least 3 upgrades (scaledRate=0.168×20=3). "
+           "upgradeCount=" << upgradeCount;
+    EXPECT_LE(upgradeCount, 3)
+        << "Demand-scaled cap at demand=0.92 must limit upgrades to exactly 3. "
+           "Old fixed-rate code (maxUpgrades=4) would produce 4 and fail this bound. "
+           "upgradeCount=" << upgradeCount;
+}

@@ -621,8 +621,10 @@ target_sources(simulation_tests PRIVATE
     tests/simulation/footprint_test.cpp
 )
 
-# AITOWN_TESTING_ENABLED=1 enables CitySimulation::testForceUnlockDensityTier().
-# MUST be on simulation_tests ONLY — never on the main aitown binary target.
+# AITOWN_TESTING_ENABLED=1 enables CitySimulation::testForceUnlockDensityTier() and
+# CitySimulation::testSetZoneDemandFactor(). MUST be set on both aitown_sim (compiled into
+# library) and simulation_tests (test TU). MUST NOT be set on the main aitown binary target.
+target_compile_definitions(aitown_sim PRIVATE AITOWN_TESTING_ENABLED=1)
 target_compile_definitions(simulation_tests PRIVATE AITOWN_TESTING_ENABLED=1)
 
 # ----------------------------------------------------------------------------

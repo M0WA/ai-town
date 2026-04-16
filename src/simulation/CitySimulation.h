@@ -126,6 +126,7 @@ public:
 
 #ifdef AITOWN_TESTING_ENABLED
     void testForceUnlockDensityTier(ZoneType zone, DensityTier tier);
+    void testSetZoneDemandFactor(ZoneType zone, float value);
 #endif
 
 private:
