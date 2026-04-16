@@ -804,12 +804,28 @@ def bake_basecolor_to_atlas(basecolor_path, atlas_row, atlas_col):
     Blender pixel arrays are bottom-up so the row index is flipped.
     """
     atlas_png = os.path.join(_ASSETS_DIR, "textures", "buildings", "buildings_atlas_d.png")
-    if not os.path.exists(atlas_png):
-        print(f"  WARNING: Atlas not found at {atlas_png} — skipping bake")
-        return
 
     import numpy as np
-    cell_px = 4096 // BUILDING_ATLAS_GRID  # 512 (spec: buildings atlas is 4096×4096)
+    ATLAS_PX = 4096  # spec: buildings atlas is 4096×4096
+    cell_px = ATLAS_PX // BUILDING_ATLAS_GRID  # 512
+
+    # If the atlas PNG does not exist or is the wrong size, create a blank 4096×4096
+    # canvas so subsequent writes land at the correct cell positions.
+    needs_new = not os.path.exists(atlas_png)
+    if not needs_new:
+        probe = bpy.data.images.load(atlas_png, check_existing=False)
+        if probe.size[0] != ATLAS_PX or probe.size[1] != ATLAS_PX:
+            print(f"  Atlas PNG is {probe.size[0]}×{probe.size[1]}, expected {ATLAS_PX}×{ATLAS_PX} — recreating blank canvas")
+            needs_new = True
+        bpy.data.images.remove(probe)
+
+    if needs_new:
+        blank = bpy.data.images.new("atlas_blank", width=ATLAS_PX, height=ATLAS_PX, alpha=False)
+        blank.filepath_raw = atlas_png
+        blank.file_format = 'PNG'
+        blank.save()
+        bpy.data.images.remove(blank)
+        print(f"  Created blank {ATLAS_PX}×{ATLAS_PX} atlas PNG at {atlas_png}")
 
     try:
         atlas_img = bpy.data.images.load(atlas_png, check_existing=False)

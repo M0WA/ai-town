@@ -138,11 +138,8 @@ Do not suggest alternative engines, languages, or platforms.
 
 `LICENSE.md` at the repo root lists all third-party asset attributions. **Keep it in sync whenever any of the following change:**
 
-- A new Tripo3D AI generated model is added (add a row to the CC BY 4.0 table with asset files, description, and source zip path)
-- A Tripo3D model is replaced or removed (update or remove the corresponding row)
 - A new third-party asset from a different source is added (add a new section with the appropriate license)
-
-The CC BY 4.0 attribution table must always list every asset file (or glob pattern) derived from a Tripo3D source, the human-readable description, and the path to the original source zip under `assets/tripo3d/free/`.
+- An existing third-party asset is replaced or removed (update or remove the corresponding entry)
 
 ## README Maintenance
 

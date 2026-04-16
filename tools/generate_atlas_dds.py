@@ -2000,29 +2000,101 @@ CELL_DRAW_FNS = {
 
 RESERVED_COLOR = (72, 72, 72)
 
+# ---------------------------------------------------------------------------
+# Cell-to-asset-name mapping (for PLY-first detection)
+# ---------------------------------------------------------------------------
+# Maps atlas (row, col) → building asset name so the generator can detect
+# which cells have a PLY lod0 file committed and should be preserved from the
+# converter-written atlas PNG rather than regenerated procedurally.
+CELL_ASSET_NAMES = {
+    (0, 0): 'res_low_01',    (0, 1): 'res_low_02',    (0, 2): 'res_low_03',    (0, 3): 'res_low_04',
+    (0, 4): 'res_med_01',    (0, 5): 'res_med_02',    (0, 6): 'res_med_03',    (0, 7): 'res_med_04',
+    (1, 0): 'res_high_01',   (1, 1): 'res_high_02',   (1, 2): 'res_high_03',   (1, 3): 'res_high_04',
+    (1, 4): 'com_low_01',    (1, 5): 'com_low_02',    (1, 6): 'com_low_03',    (1, 7): 'com_low_04',
+    (2, 0): 'com_med_01',    (2, 1): 'com_med_02',    (2, 2): 'com_med_03',    (2, 3): 'com_med_04',
+    (2, 4): 'com_high_01',   (2, 5): 'com_high_02',   (2, 6): 'com_high_03',   (2, 7): 'com_high_04',
+    (3, 0): 'ind_low_01',    (3, 1): 'ind_low_02',    (3, 2): 'ind_low_03',    (3, 3): 'ind_low_04',
+    (3, 4): 'ind_med_01',    (3, 5): 'ind_med_02',    (3, 6): 'ind_med_03',    (3, 7): 'ind_med_04',
+    (4, 0): 'ind_high_01',   (4, 1): 'ind_high_02',   (4, 2): 'ind_high_03',   (4, 3): 'ind_high_04',
+    (4, 4): 'svc_fire_station',  (4, 5): 'svc_police_station',
+    (4, 6): 'svc_power_plant',   (4, 7): 'svc_water_tower',
+}
+
+
+def _load_atlas_png_4k(png_path):
+    """Load the 4096×4096 atlas PNG as a flat list of (r,g,b) tuples.
+
+    The converter (convert_tripo3d_to_ply.py) bakes Tripo3D textures in Blender's
+    Y-up array at (7-R)*512, but Blender flips on save, so row R lands at PNG
+    y=R*512 (Y-normal).  Irrlicht loads PNG without flipping (V=0 = top-left of
+    the image), so PLY UV V=[R/8,(R+1)/8] samples PNG y=[R*512,(R+1)*512].
+    Returns None if the file does not exist or cannot be loaded.
+    """
+    if not os.path.exists(png_path):
+        return None
+    try:
+        from PIL import Image
+        img = Image.open(png_path).convert('RGB')
+        if img.size != (4096, 4096):
+            print(f"  WARNING: atlas PNG is {img.size}, expected (4096,4096) — skipping PLY cell preservation")
+            return None
+        return list(img.getdata())
+    except Exception as exc:
+        print(f"  WARNING: could not load atlas PNG for PLY cell preservation: {exc}")
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Render the full atlas into a flat pixel buffer
 # ---------------------------------------------------------------------------
 
-def render_atlas_pixels(atlas_w, atlas_h):
+def render_atlas_pixels(atlas_w, atlas_h, png_4k_pixels=None, ply_cells=None):
     """
     Render the full atlas into a flat list of (r, g, b) tuples.
-    Each cell is rendered at its native resolution using the draw function.
+
+    For cells in ``ply_cells`` where ``png_4k_pixels`` is available the pixels
+    are copied from the existing 4096×4096 atlas PNG (written by the PLY
+    converter) rather than generated procedurally.  The converter stores row R
+    at PNG y=(GRID_ROWS-1-R)*cell_size (Y-flipped), so this function un-flips
+    when copying into the generator's Y-normal pixel buffer.
+
+    For all other cells the draw function from CELL_DRAW_FNS is used.
     """
     cell_w = atlas_w // GRID_COLS
     cell_h = atlas_h // GRID_ROWS
+    PNG_CELL = 4096 // GRID_COLS   # 512 — native cell size in converter PNG
 
     # Initialize to reserved color
     pixels = [RESERVED_COLOR] * (atlas_w * atlas_h)
 
     for row in range(GRID_ROWS):
         for col in range(GRID_COLS):
+            # Atlas Y convention: Y-normal — row R is stored at y=R*cell_h in the PNG.
+            # The converter bakes at Blender array y=(7-R)*512 but Blender flips on
+            # save, placing row R at PNG y=R*512.  Irrlicht loads PNG such that UV
+            # V=0 maps to the top-left of the image (PNG y=0), so PLY UV
+            # V=[R/8,(R+1)/8] correctly samples PNG y=[R*cell_h,(R+1)*cell_h).
+            x0 = col * cell_w
+            y0 = row * cell_h
+
+            # --- PLY cell: copy real Tripo3D texture from converter PNG ---
+            if ply_cells and (row, col) in ply_cells and png_4k_pixels is not None:
+                # Converter stores row R at PNG y = row*PNG_CELL (Y-normal after
+                # Blender's flip-on-save).  Read from the same Y-normal position.
+                src_y0 = row * PNG_CELL
+                src_x0 = col * PNG_CELL
+                for cy in range(cell_h):
+                    src_cy = int(cy * PNG_CELL / cell_h)   # scale if atlas_w != 4096
+                    for cx in range(cell_w):
+                        src_cx = int(cx * PNG_CELL / cell_w)
+                        src_idx = (src_y0 + src_cy) * 4096 + (src_x0 + src_cx)
+                        pixels[(y0 + cy) * atlas_w + (x0 + cx)] = png_4k_pixels[src_idx]
+                print(f"    Cell ({row},{col}): copied from atlas PNG (PLY asset: {CELL_ASSET_NAMES.get((row,col))})")
+                continue
+
             fn = CELL_DRAW_FNS.get((row, col))
             if fn is None:
                 # Reserved cell: fill with dark grey
-                x0 = col * cell_w
-                y0 = row * cell_h
                 _fill_rect(pixels, atlas_w, x0, y0, x0 + cell_w, y0 + cell_h, *RESERVED_COLOR)
                 continue
 
@@ -2030,9 +2102,7 @@ def render_atlas_pixels(atlas_w, atlas_h):
             cell_buf = [RESERVED_COLOR] * (cell_w * cell_h)
             fn(cell_buf, cell_w, cell_h)
 
-            # Copy cell buffer into atlas
-            x0 = col * cell_w
-            y0 = row * cell_h
+            # Copy cell buffer into atlas at Y-normal position
             for cy in range(cell_h):
                 for cx in range(cell_w):
                     pixels[(y0 + cy) * atlas_w + (x0 + cx)] = cell_buf[cy * cell_w + cx]
@@ -2317,6 +2387,109 @@ def verify_headers(primary_path, fallback_path):
 
 
 # ---------------------------------------------------------------------------
+# Vehicle Atlas Generator
+#
+# Reads vehicle assignments from vehicle_atlas_registry.json, extracts
+# basecolor textures from Tripo3D ZIPs, and produces:
+#   assets/textures/vehicles/vehicles_diffuse_atlas_d.dds  (2048x2048, 4 mips, DXT1)
+#   assets/textures/vehicles/vehicles_diffuse_atlas_d.png  (source PNG)
+#
+# Y-normal convention: row R is stored at PNG y = R * cell_size.
+# Irrlicht samples V=0 = top of PNG, matching remap_uvs_to_atlas's V-flip.
+# ---------------------------------------------------------------------------
+
+VEHICLE_ATLAS_GRID = 4   # 4×4 grid
+VEHICLE_CELL_SIZE  = 512  # px per cell at 2048×2048
+VEHICLE_ATLAS_SIZE = 2048
+
+
+def generate_vehicle_atlas(repo_root):
+    """Generate vehicles_diffuse_atlas_d.dds and .png from Tripo3D ZIPs."""
+    import json
+    import zipfile
+    import io
+
+    vehicles_dir  = os.path.join(repo_root, 'assets', 'textures', 'vehicles')
+    zip_dir       = os.path.join(repo_root, 'assets', 'tripo3d', 'medium_poly', 'vehicles')
+    vehicles_3d   = os.path.join(repo_root, 'assets', '3d', 'vehicles')
+    registry_path = os.path.join(repo_root, 'tools', 'vehicle_atlas_registry.json')
+    out_dds       = os.path.join(vehicles_dir, 'vehicles_diffuse_atlas_d.dds')
+    out_png       = os.path.join(vehicles_dir, 'vehicles_diffuse_atlas_d.png')
+
+    print("\n=== Vehicle Diffuse Atlas DDS Generator ===\n")
+
+    # Load assignments from registry
+    with open(registry_path) as f:
+        registry = json.load(f)
+    assignments = registry.get('assignments', [])
+
+    # Build atlas pixels (RGBA kept as RGB list)
+    atlas_w = atlas_h = VEHICLE_ATLAS_SIZE
+    cell = VEHICLE_CELL_SIZE
+    pixels = [RESERVED_COLOR] * (atlas_w * atlas_h)
+
+    ok, skipped = [], []
+    for entry in assignments:
+        vid  = entry['vehicle_id']
+        row  = entry['row']
+        col  = entry['col']
+        ply  = os.path.join(vehicles_3d, f'{vid}_lod0.ply')
+        zpath = os.path.join(zip_dir, f'{vid}.zip')
+
+        if not os.path.exists(ply):
+            skipped.append(f'{vid} (no PLY)')
+            continue
+
+        if not os.path.exists(zpath):
+            skipped.append(f'{vid} (no ZIP)')
+            continue
+
+        try:
+            with zipfile.ZipFile(zpath) as zf:
+                bc_name = next((n for n in zf.namelist()
+                                if 'basecolor' in n.lower()
+                                and n.lower().endswith(('.jpg', '.jpeg', '.png'))), None)
+                if bc_name is None:
+                    skipped.append(f'{vid} (no basecolor in ZIP)')
+                    continue
+                bc_data = zf.read(bc_name)
+
+            from PIL import Image as PILImage
+            cell_img = PILImage.open(io.BytesIO(bc_data)).convert('RGB')
+            cell_img = cell_img.resize((cell, cell), PILImage.LANCZOS)
+            cell_pixels = list(cell_img.getdata())
+
+            # Y-normal: row R at atlas y = R * cell
+            x0 = col * cell
+            y0 = row * cell
+            for cy in range(cell):
+                for cx in range(cell):
+                    pixels[(y0 + cy) * atlas_w + (x0 + cx)] = cell_pixels[cy * cell + cx]
+
+            print(f"  ({row},{col}) {vid}: baked from ZIP")
+            ok.append(vid)
+        except Exception as exc:
+            skipped.append(f'{vid} (error: {exc})')
+
+    print(f"\n  Baked: {len(ok)}, Skipped: {len(skipped)}")
+    if skipped:
+        for s in skipped:
+            print(f"    SKIP: {s}")
+
+    # Generate DDS (2048×2048, 4 mip levels, DXT1)
+    print(f"\nGenerating {out_dds}")
+    generate_dds_from_pixels(out_dds, pixels, atlas_w, atlas_h, 4)
+    print(f"  {os.path.getsize(out_dds):,} bytes")
+
+    # Save source PNG
+    print(f"Generating {out_png}")
+    generate_source_png(out_png, pixels, atlas_w, atlas_h)
+    print(f"  {os.path.getsize(out_png):,} bytes")
+
+    print("\n=== Vehicle atlas generation complete ===")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -2348,27 +2521,50 @@ if __name__ == '__main__':
 
     print("=== AI Town Phase 11e -- Building Atlas DDS Generator ===\n")
 
+    # ----- Detect PLY cells and load existing atlas PNG -----
+    # Cells with a committed PLY lod0 file carry real Tripo3D textures baked by
+    # convert_tripo3d_to_ply.py.  Preserve those cells instead of overwriting
+    # them with procedural draw functions.
+    buildings_3d = os.path.join(repo_root, 'assets', '3d', 'buildings')
+    ply_cells = set()
+    for (r, c), name in CELL_ASSET_NAMES.items():
+        if os.path.exists(os.path.join(buildings_3d, f'{name}_lod0.ply')):
+            ply_cells.add((r, c))
+    if ply_cells:
+        print(f"PLY cells detected ({len(ply_cells)}): {sorted(ply_cells)}")
+    else:
+        print("No PLY cells detected — all cells will be generated procedurally.")
+
+    png_4k_pixels = None
+    if ply_cells:
+        png_4k_pixels = _load_atlas_png_4k(png_path)
+        if png_4k_pixels is None:
+            print("  WARNING: atlas PNG not available — PLY cells will fall back to procedural.")
+            ply_cells = set()
+
     # ----- Step 1: Render at 4096x4096 -----
-    print("Rendering 4096x4096 atlas pixels...")
-    pixels_4k = render_atlas_pixels(4096, 4096)
+    print("\nRendering 4096x4096 atlas pixels...")
+    pixels_4k = render_atlas_pixels(4096, 4096, png_4k_pixels=png_4k_pixels, ply_cells=ply_cells)
     print(f"  Total pixels: {len(pixels_4k):,}")
 
     # ----- Step 2: Generate primary DDS (4096x4096, 5 mips) -----
     print(f"\nGenerating primary atlas: {primary_path}")
     primary_total = generate_dds_from_pixels(primary_path, pixels_4k, 4096, 4096, 5)
 
-    # ----- Step 3: Render at 2048x2048 for fallback + PNG -----
+    # ----- Step 3: Render at 2048x2048 for fallback -----
     print("\nRendering 2048x2048 atlas pixels...")
-    pixels_2k = render_atlas_pixels(2048, 2048)
+    pixels_2k = render_atlas_pixels(2048, 2048, png_4k_pixels=png_4k_pixels, ply_cells=ply_cells)
     print(f"  Total pixels: {len(pixels_2k):,}")
 
     # ----- Step 4: Generate fallback DDS (2048x2048, 4 mips) -----
     print(f"\nGenerating fallback atlas: {fallback_path}")
     fallback_total = generate_dds_from_pixels(fallback_path, pixels_2k, 2048, 2048, 4)
 
-    # ----- Step 5: Source PNG (2048x2048) for Check #28 -----
+    # ----- Step 5: Source PNG (4096x4096) for Check #28 and converter compatibility -----
+    # Saved at 4096x4096 (512x512 per cell) so convert_tripo3d_to_ply.py can
+    # write baked textures into it correctly (cell_px = 4096 // ATLAS_GRID = 512).
     print(f"\nGenerating source PNG: {png_path}")
-    generate_source_png(png_path, pixels_2k, 2048, 2048)
+    generate_source_png(png_path, pixels_4k, 4096, 4096)
 
     # ----- Step 6: Verify -----
     verify_expected_sizes(primary_path, fallback_path)
@@ -2381,3 +2577,7 @@ if __name__ == '__main__':
     print(f"    {os.path.getsize(fallback_path):,} bytes")
     print(f"  {png_path}")
     print(f"    {os.path.getsize(png_path):,} bytes")
+
+    # ----- Vehicle atlas -----
+    print()
+    generate_vehicle_atlas(repo_root)
