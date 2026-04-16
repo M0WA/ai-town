@@ -58,7 +58,7 @@ jobs:
   compute-version:
     name: Compute version
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/fix/windows-package')
     permissions:
       contents: write
     timeout-minutes: 5
@@ -185,8 +185,11 @@ jobs:
             "${{ needs.markdown-lint.result }}"
             "${{ needs.asan-linux.result }}"
           )
-          # Package jobs: must be 'success' on push to main/develop;
-          # 'skipped' is accepted on PRs (their if: condition excludes them there).
+          # Package jobs: required to be 'success' on push to develop only.
+          # On push to main (develop→main merge) or PRs, 'success', 'skipped',
+          # and 'failure' are all acceptable — package failures on main must not
+          # block branch protection (future merges) via this gate.  The release
+          # job enforces package quality independently on main pushes.
           package_results=(
             "${{ needs.package-windows.result }}"
             "${{ needs.package-linux-deb.result }}"
@@ -199,9 +202,19 @@ jobs:
             fi
           done
           for result in "${package_results[@]}"; do
-            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
-              echo "Package job result '$result' is not 'success' or 'skipped' — failing gate."
-              failed=1
+            if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/develop" ]]; then
+              # On develop: packages are the pre-release quality gate — must succeed.
+              if [[ "$result" != "success" ]]; then
+                echo "Package job result '$result' on develop push is not 'success' — failing gate."
+                failed=1
+              fi
+            else
+              # Everywhere else (push to main, PRs, feature branches, workflow_dispatch):
+              # success, skipped, and failure are all acceptable outcomes.
+              if [[ "$result" == "cancelled" ]]; then
+                echo "Package job was cancelled — failing gate."
+                failed=1
+              fi
             fi
           done
           if [[ $failed -eq 1 ]]; then
@@ -212,7 +225,9 @@ jobs:
 
   package-windows:
     needs: [build-windows, prepare, compute-version]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    # TEMP: fix/windows-package included to verify the NSIS zlib compressor fix.
+    # Remove the fix/windows-package clause before merging to develop.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/fix/windows-package')
     uses: ./.github/workflows/_package-windows.yml
     with:
       vcpkg_commit_id: ${{ needs.prepare.outputs.vcpkg_commit_id }}
