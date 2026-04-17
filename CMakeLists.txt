@@ -1090,7 +1090,8 @@ endif() # BUILD_TESTING
 if(WIN32)
     install(TARGETS aitown RUNTIME DESTINATION .)
     # Assets directory — no trailing slash: installs assets/ as a subdirectory alongside exe.
-    install(DIRECTORY assets DESTINATION .)
+    # assets/tripo3d/ contains source ZIPs (LFS objects) — not runtime assets; exclude from packages.
+    install(DIRECTORY assets DESTINATION . PATTERN "tripo3d" EXCLUDE)
     # OpenAL Soft runtime (renamed to soft_oal.dll per Windows naming convention).
     install(FILES "${CMAKE_BINARY_DIR}/soft_oal.dll" DESTINATION .)
     # HRTF data file (required for 3D spatial audio; sourced by POST_BUILD copy rule).
@@ -1103,7 +1104,8 @@ if(WIN32)
 else()
     install(TARGETS aitown RUNTIME DESTINATION games)
     # Assets directory — trailing slash: copies contents into share/aitown/assets/.
-    install(DIRECTORY assets/ DESTINATION share/aitown/assets)
+    # assets/tripo3d/ contains source ZIPs (LFS objects) — not runtime assets; exclude from packages.
+    install(DIRECTORY assets/ DESTINATION share/aitown/assets PATTERN "tripo3d" EXCLUDE)
     # HRTF data file to OpenAL Soft standard search path.
     install(FILES "${CMAKE_BINARY_DIR}/default.mhr" DESTINATION share/openal/hrtf)
 endif()
@@ -1129,6 +1131,12 @@ set(CPACK_PACKAGE_DESCRIPTION
 # NSIS (Windows installer) settings
 set(CPACK_NSIS_DISPLAY_NAME "AI Town")
 set(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES64")
+# Use zlib compression to stay within the 32-bit makensis.exe address space limit.
+# The assets/3d/ directory contains ~185 MB of PLY files; LZMA solid compression
+# of the full ~580 MB payload exhausts the 2 GB virtual address space of the
+# 32-bit NSIS binary.  zlib /SOLID provides adequate compression with much lower
+# peak RAM usage and handles arbitrarily large payloads reliably.
+set(CPACK_NSIS_COMPRESSOR "/SOLID zlib")
 set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
 set(CPACK_NSIS_CREATE_ICONS_EXTRA
     "CreateShortcut '$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\AI Town.lnk' '$INSTDIR\\\\aitown.exe'
