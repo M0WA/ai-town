@@ -4,7 +4,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    # TEMP: fix/windows-package added to verify NSIS zlib compressor fix via push trigger.
+    # Remove before merging to develop.
+    branches: [main, develop, fix/windows-package]
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
