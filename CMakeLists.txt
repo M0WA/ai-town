@@ -1090,7 +1090,8 @@ endif() # BUILD_TESTING
 if(WIN32)
     install(TARGETS aitown RUNTIME DESTINATION .)
     # Assets directory — no trailing slash: installs assets/ as a subdirectory alongside exe.
-    install(DIRECTORY assets DESTINATION .)
+    # assets/tripo3d/ contains source ZIPs (LFS objects) — not runtime assets; exclude from packages.
+    install(DIRECTORY assets DESTINATION . PATTERN "tripo3d" EXCLUDE)
     # OpenAL Soft runtime (renamed to soft_oal.dll per Windows naming convention).
     install(FILES "${CMAKE_BINARY_DIR}/soft_oal.dll" DESTINATION .)
     # HRTF data file (required for 3D spatial audio; sourced by POST_BUILD copy rule).
@@ -1103,7 +1104,8 @@ if(WIN32)
 else()
     install(TARGETS aitown RUNTIME DESTINATION games)
     # Assets directory — trailing slash: copies contents into share/aitown/assets/.
-    install(DIRECTORY assets/ DESTINATION share/aitown/assets)
+    # assets/tripo3d/ contains source ZIPs (LFS objects) — not runtime assets; exclude from packages.
+    install(DIRECTORY assets/ DESTINATION share/aitown/assets PATTERN "tripo3d" EXCLUDE)
     # HRTF data file to OpenAL Soft standard search path.
     install(FILES "${CMAKE_BINARY_DIR}/default.mhr" DESTINATION share/openal/hrtf)
 endif()
