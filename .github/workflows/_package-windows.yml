@@ -20,6 +20,10 @@ jobs:
   package-windows:
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      # ilammy/msvc-dev-cmd and lukka/run-vcpkg have no node24 release yet;
+      # force them to run on node24 to suppress the node20-deprecation warning.
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     permissions:
       contents: read
     steps:
