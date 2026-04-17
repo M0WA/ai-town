@@ -1550,8 +1550,8 @@ on every push to `main` **or** `develop` (not only `main`) containing:
 - `CPACK_NSIS_CREATE_ICONS_EXTRA`: Start Menu and Desktop shortcuts to `aitown.exe`
 - `CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL`: `ON`
 - `install(TARGETS aitown RUNTIME DESTINATION .)` — binary to installer root
-- `install(DIRECTORY assets DESTINATION .)` — **no trailing slash**: installs `assets/` as a
-  subdirectory alongside `aitown.exe`
+- `install(DIRECTORY assets DESTINATION . PATTERN "tripo3d" EXCLUDE)` — **no trailing slash**: installs `assets/` as a
+  subdirectory alongside `aitown.exe`; `tripo3d/` excluded — contains LFS-tracked source ZIPs, not runtime assets
 - `install(FILES ${CMAKE_BINARY_DIR}/soft_oal.dll DESTINATION .)` — OpenAL Soft runtime
 - `install(FILES ${CMAKE_BINARY_DIR}/default.mhr DESTINATION .)` — HRTF data file
 - vcpkg DLLs: `install(DIRECTORY ${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/ DESTINATION . FILES_MATCHING PATTERN "*.dll")`
@@ -1641,7 +1641,7 @@ system-lib dependency set is stable across supported distros.
 - `CPACK_DEBIAN_FILE_NAME`: `DEB-DEFAULT`
 - `CPACK_PACKAGING_INSTALL_PREFIX`: `/usr`
 - `install(TARGETS aitown RUNTIME DESTINATION games)` — binary to `/usr/games/aitown`
-- `install(DIRECTORY assets/ DESTINATION share/aitown/assets)` — **trailing slash**: copies contents
+- `install(DIRECTORY assets/ DESTINATION share/aitown/assets PATTERN "tripo3d" EXCLUDE)` — **trailing slash**: copies contents; `tripo3d/` excluded — contains LFS-tracked source ZIPs, not runtime assets
 - `install(FILES ${CMAKE_BINARY_DIR}/default.mhr DESTINATION share/openal/hrtf)`
 - `CPACK_GENERATOR` is NOT set; always specify `-G DEB` on the command line
 
