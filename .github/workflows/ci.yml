@@ -4,8 +4,7 @@ name: CI
 
 on:
   push:
-    # TEMP: fix/nsis-logging added to trigger package-windows for NSIS diagnosis. Remove before merge.
-    branches: [main, develop, fix/nsis-logging]
+    branches: [main, develop]
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
@@ -59,7 +58,7 @@ jobs:
   compute-version:
     name: Compute version
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/fix/nsis-logging')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     permissions:
       contents: write
     timeout-minutes: 5
@@ -226,8 +225,7 @@ jobs:
 
   package-windows:
     needs: [build-windows, prepare, compute-version]
-    # TEMP: fix/nsis-logging added to trigger package-windows for NSIS diagnosis. Remove before merge.
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/fix/nsis-logging')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     uses: ./.github/workflows/_package-windows.yml
     with:
       vcpkg_commit_id: ${{ needs.prepare.outputs.vcpkg_commit_id }}
