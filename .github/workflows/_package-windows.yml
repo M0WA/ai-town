@@ -87,7 +87,16 @@ jobs:
       - name: Create Windows installer
         shell: pwsh
         working-directory: build
-        run: cpack -G NSIS -C Release
+        run: cpack -G NSIS -C Release --verbose
+
+      - name: Print NSIS log on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $log = "build\_CPack_Packages\win64\NSIS\NSISOutput.log"
+          $nsi = "build\_CPack_Packages\win64\NSIS\project.nsi"
+          if (Test-Path $log) { Write-Host "=== NSISOutput.log ==="; Get-Content $log }
+          if (Test-Path $nsi) { Write-Host "=== project.nsi (SetCompressor lines) ==="; Select-String -Path $nsi -Pattern "SetCompressor|Compressor" }
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
