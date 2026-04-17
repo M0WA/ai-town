@@ -4,9 +4,7 @@ name: CI
 
 on:
   push:
-    # TEMP: fix/windows-package added to verify NSIS zlib compressor fix via push trigger.
-    # Remove before merging to develop.
-    branches: [main, develop, fix/windows-package]
+    branches: [main, develop]
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
@@ -60,7 +58,7 @@ jobs:
   compute-version:
     name: Compute version
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/fix/windows-package')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     permissions:
       contents: write
     timeout-minutes: 5
@@ -227,9 +225,7 @@ jobs:
 
   package-windows:
     needs: [build-windows, prepare, compute-version]
-    # TEMP: fix/windows-package included to verify the NSIS zlib compressor fix.
-    # Remove the fix/windows-package clause before merging to develop.
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/fix/windows-package')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     uses: ./.github/workflows/_package-windows.yml
     with:
       vcpkg_commit_id: ${{ needs.prepare.outputs.vcpkg_commit_id }}
