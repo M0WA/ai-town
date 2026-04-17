@@ -210,8 +210,9 @@ jobs:
       # Step 19: Upload Windows staging artifact (on push to main or develop).
       # Ninja single-config: executable is at build/aitown.exe (not build/Release/aitown.exe).
       # Includes DLLs and default.mhr so packaging jobs can run CPack without rebuilding.
+      # TEMP: fix/nsis-logging added for NSIS diagnosis. Remove before merge.
       - name: Upload Windows staging artifact
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/fix/nsis-logging')
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
         with:
           name: aitown-staging-windows-${{ github.sha }}
