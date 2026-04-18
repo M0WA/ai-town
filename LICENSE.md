@@ -38,3 +38,25 @@ Producer.ai's free non-commercial use terms.
 
 These tracks are used solely within this private, non-commercial,
 educational-only project. **Commercial use is not permitted.**
+
+---
+
+## Third-Party Assets — Google Fonts (SIL Open Font License 1.1)
+
+The following typefaces are used for HUD bitmap font rendering and are
+distributed under the **SIL Open Font License, Version 1.1** (OFL-1.1).
+The full license text is available at <https://scripts.sil.org/OFL>.
+
+### Barlow Condensed
+
+- **Author**: Jeremy Tribby
+- **Source**: <https://fonts.google.com/specimen/Barlow+Condensed>
+- **License**: SIL Open Font License 1.1
+- **Files**: `assets/fonts/src/BarlowCondensed-*.ttf`
+
+### Share Tech Mono
+
+- **Author**: Ralph du Carrois (Carrois Type Design)
+- **Source**: <https://fonts.google.com/specimen/Share+Tech+Mono>
+- **License**: SIL Open Font License 1.1
+- **Files**: `assets/fonts/src/ShareTechMono-Regular.ttf`
