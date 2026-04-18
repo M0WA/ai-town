@@ -576,7 +576,7 @@ Resets the grace-period state so the cost-waiver label appears correctly for bot
 void incrementNotificationBadge();
 ```
 
-Increments the bell icon's unread-count badge overlay by 1. Called by `UIManager::incrementNotificationBadge()` (null-guarded via `if (m_hud)`) whenever `NotificationManager` collapses a Normal card to the notification log due to slot-overflow displacement. Updates the badge counter element text and ensures the badge overlay is visible. Phase 11q13 addition.
+Increments the bell icon's unread-count badge overlay by 1. Called by `UIManager::incrementNotificationBadge()` (null-guarded via `if (m_hud)`) on three badge-eligible disposal paths: (1) slot-overflow displacement collapse, (2) player-dismiss via `dismissCard()`, and (3) auto-dismiss via `update()` timer expiry. Queue-capacity eviction does NOT trigger a badge increment. Updates the badge counter element text and ensures the badge overlay is visible. Phase 11q13 addition.
 
 Required private members of the `HUD` class relevant to the budget detail overlay:
 

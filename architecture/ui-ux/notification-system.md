@@ -97,7 +97,7 @@ Corner radius: **10 px** on all edges of each toast card.
 
 The log panel uses the Glacier Glass deep-navy style:
 
-- `setElementBackground(handle, 13, 27, 42, 217)` (alpha 217 ≈ 0.85 × 255)
+- `setElementBackground(handle, 4, 12, 28, 217)` (alpha 217 ≈ 0.85 × 255; Glacier Glass base)
 
 ### CRITICAL Toast Row Priority Badge
 
@@ -131,14 +131,14 @@ The notification log panel is a scrollable history overlay toggled by the bell i
 - **Session persistence**: the log persists for the duration of the play session; it is NOT cleared on save or load within the same session
 - **Dismiss on outside click**: clicking anywhere outside the panel bounds closes the log panel. Outside clicks do not consume scroll-wheel or middle-mouse-button events — those pass through to the camera/3D view
 - **Panel background**: The log panel has a dark semi-opaque background applied via
-  `setElementBackground(handle, 13, 27, 42, 217)` immediately after the panel element is created
+  `setElementBackground(handle, 4, 12, 28, 217)` immediately after the panel element is created
   by `toggleLog()`. This produces the Glacier Glass deep-navy fill (r=13, g=27, b=42) at approximately
   85% opacity (a=217), ensuring log entries are legible against any terrain or city view behind the panel.
 
   **`setElementBackground` parameter order**: the signature is `(handle, r, g, b, a)` — alpha is
   the **LAST** parameter. Passing `(handle, 217, 13, 27, 42)` would set r=217 (bright tint) and
   a=42 (16% opacity — near-transparent), making the background nearly invisible. The correct call is
-  `(handle, 13, 27, 42, 217)`.
+  `(handle, 4, 12, 28, 217)`.
 
 - Implementation: `NotificationManager` class creates/manages `IGUIStaticText` or custom `IGUIElement` overlays
 
@@ -186,7 +186,7 @@ NotificationManager(IUIBackend* backend, ICitySimulation* sim, IClock* clock, IA
 
 All five parameters are stored as non-owning pointers. `m_audio` is the `IAudioSystem*` added in
 Phase 10. Before Phase 10, `nullptr` is passed; every audio call site is guarded by `if (m_audio)`.
-`m_badgeNotifier` is the `IHUDBadgeNotifier*` added in Phase 10; every badge call site is guarded by
+`m_badgeNotifier` is the `IHUDBadgeNotifier*` added in Phase 11q13; every badge call site is guarded by
 `if (m_badgeNotifier)`.
 
 `IAudioSystem` is forward-declared in `NotificationManager.h` — the full header is included only in

@@ -74,8 +74,8 @@ if (m_sceneBackgroundActive) drawSceneBackground();
 if (m_hoveredTileMesh && m_hoverVisible) driver->drawMeshBuffer(m_hoveredTileMesh->getMeshBuffer(0));
 uiManager->draw();              // 2D HUD: per-panel Z-order state update (visibility, text, alpha)
 guiEnvironment->drawAll();      // Render all visible GUI elements (buttons, labels, etc.)
-uiManager->drawOverlays();       // Transient fillColoredRect draws: minimap tile colours, viewport outline,
-                                 // notification severity strips, and active-button washes and borders —
+uiManager->drawOverlays();       // Transient fillColoredRect and drawNineSlice draws: minimap tile colours, viewport outline,
+                                 // notification severity strips, panel rounded-corner backgrounds, and active-button washes and borders —
                                  // must occur after drawAll() to avoid being overdrawn by the GUI environment's background fills
 driver->endScene();
 ```
@@ -114,7 +114,7 @@ driver->endScene();
 3. Scene background blit (conditional) — if `setSceneBackground()` is active (set by `UIManager::transitionToMainMenu()`), `IrrlichtRenderer::drawScene()` blits `loading_screen.png` as a fullscreen image above the 3D scene output but below all GUI elements. This covers the main menu state, the transition from "Start City" click through the loading loop until the first gameplay frame, and save-game loading. `UIManager::transitionToGameplay()` calls `clearSceneBackground()` to disable this blit. Note: this path is distinct from the blocking terrain-generation loops in `main.cpp`, which call `drawFullscreenTexture` directly and do not use `setSceneBackground`.
 4. `uiManager->draw()` — calls each panel's `draw()` method in explicit Z-order (slots 1–10 per `ui-manager.md`). Each panel's `draw()` updates element state (visibility, text, alpha) but does NOT render pixels.
 5. `guiEnvironment->drawAll()` — renders all visible `IGUIElement` nodes. Because step 4 has already set the correct visibility on every element (non-active panels hide theirs), only the intended elements are painted.
-6. `uiManager->drawOverlays()` — transient `fillColoredRect` draws: minimap tile colours, viewport outline, notification severity strips, and active-button washes and borders. These render above `IGUIElement` nodes painted in step 5.
+6. `uiManager->drawOverlays()` — transient `fillColoredRect` and `drawNineSlice` draws: minimap tile colours, viewport outline, notification severity strips, panel rounded-corner backgrounds, and active-button washes and borders. These render above `IGUIElement` nodes painted in step 5.
 
 The Z-order concern (scrim must cover panels; modal must be topmost) is handled by visibility management in step 4 — panels that should be behind have their elements hidden before `drawAll()` paints. `UIManager::draw()` must be called before `guiEnvironment->drawAll()` — calling it after would render stale element state.
 
@@ -145,7 +145,7 @@ in this order each frame.
 | 8c   | Hover tile highlight `drawMeshBuffer()` if `m_hoveredTileMesh && m_hoverVisible` (Phase 9b)                                                                                                                                       | Render     |
 | 9    | `uiManager->draw()` — 2D HUD: per-panel Z-order state update (visibility, text, alpha)                                                                                                                                            | UI         |
 | 10   | `guiEnvironment->drawAll()` — renders all visible `IGUIElement` nodes                                                                                                                                                             | UI         |
-| 10b  | `uiManager->drawOverlays()` — transient `fillColoredRect` draws: minimap tile colours, viewport outline, notification severity strips, and active-button washes and borders; renders above `IGUIElement` nodes painted in step 10 | UI         |
+| 10b  | `uiManager->drawOverlays()` — transient `fillColoredRect` and `drawNineSlice` draws: minimap tile colours, viewport outline, notification severity strips, panel rounded-corner backgrounds, and active-button washes and borders; renders above `IGUIElement` nodes painted in step 10 | UI         |
 | 11   | `driver->endScene()` + 60 FPS frame-cap sleep                                                                                                                                                                                     | Render     |
 
 **Ordering constraints** (violations are bugs):
