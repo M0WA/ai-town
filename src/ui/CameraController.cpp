@@ -108,8 +108,8 @@ bool CameraController::handleMMBUp(const InputEvent& /*e*/) {
 }
 
 bool CameraController::handleMouseMoved(const InputEvent& e) {
-    const float dx = static_cast<float>(e.physX - m_prevPhysX);
-    const float dy = static_cast<float>(e.physY - m_prevPhysY);
+    const auto dx = static_cast<float>(e.physX - m_prevPhysX);
+    const auto dy = static_cast<float>(e.physY - m_prevPhysY);
     bool consumed = false;
 
     if (m_rmbDragActive || m_mmbDragActive) {

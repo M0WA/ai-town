@@ -765,8 +765,8 @@ bool IrrlichtRenderer::pickTerrainTile(int screenX, int screenY,
     if (std::fabs(rd.Y) < 1e-5f) return false;
 
     // ---- DDA Step 1: Starting tile (clamp to map) ----
-    int cx = static_cast<int>(ro.X / m_cellSize);
-    int cz = static_cast<int>(ro.Z / m_cellSize);
+    auto cx = static_cast<int>(ro.X / m_cellSize);
+    auto cz = static_cast<int>(ro.Z / m_cellSize);
     cx = std::max(0, std::min(cx, m_mapTilesX - 1));
     cz = std::max(0, std::min(cz, m_mapTilesZ - 1));
 
@@ -1210,8 +1210,8 @@ void IrrlichtRenderer::setZoneOverlay(
         if (written >= kMaxOverlayQuads) break;
 
         // Decode tile index from key.
-        int tx = static_cast<int>(kv.first % mapTilesX);
-        int tz = static_cast<int>(kv.first / mapTilesX);
+        auto tx = static_cast<int>(kv.first % mapTilesX);
+        auto tz = static_cast<int>(kv.first / mapTilesX);
 
         // Skip out-of-bounds tiles.
         if (tx < 0 || tx >= mapTilesX || tz < 0 || tz >= mapTilesZ) continue;
@@ -1321,8 +1321,8 @@ ScreenRect IrrlichtRenderer::getTileScreenBounds(int tileX, int tileZ) const
 
         // Convert NDC to pixel coordinates.
         // NDC (+1,-1) = top-left in most conventions; Irrlicht uses Y-down screen.
-        int sx = static_cast<int>((ndcX  + 1.0f) * 0.5f * static_cast<float>(screenSize.Width));
-        int sy = static_cast<int>((1.0f - ndcY) * 0.5f * static_cast<float>(screenSize.Height));
+        auto sx = static_cast<int>((ndcX  + 1.0f) * 0.5f * static_cast<float>(screenSize.Width));
+        auto sy = static_cast<int>((1.0f - ndcY) * 0.5f * static_cast<float>(screenSize.Height));
 
         minX = std::min(minX, sx);
         minY = std::min(minY, sy);
@@ -1739,7 +1739,7 @@ bool IrrlichtRenderer::initRoadShader()
 
     // srgbOk drives u_srgbLinear in the callback (0 when sRGB, 1 when linear upload).
     // road.frag uses this to decide whether to apply the linear→sRGB inverse correction.
-    RoadShaderCallback* cb = new RoadShaderCallback(srgbOk, texHandle);
+    auto* cb = new RoadShaderCallback(srgbOk, texHandle);
     s32 matType = gpu->addHighLevelShaderMaterialFromFiles(
         vsPath.c_str(), "main", video::EVST_VS_1_1,
         fsPath.c_str(), "main", video::EPST_PS_1_1,
@@ -1813,7 +1813,7 @@ void IrrlichtRenderer::initTerrainShader()
     };
 
     // Construct callback — raw heap per shader-loading.md (Irrlicht calls grab() internally).
-    TerrainShaderCallback* cb = new TerrainShaderCallback(
+    auto* cb = new TerrainShaderCallback(
         m_renderSystem, m_terrainTextureCache.get(), splatPath, detailPaths);
 
     // Build absolute shader paths.
@@ -2774,7 +2774,7 @@ static SMesh* buildCloudDomeMesh()
     SMesh*       mesh = new SMesh();
     SMeshBuffer* buf  = new SMeshBuffer();
 
-    const float piF = static_cast<float>(M_PI);
+    const auto piF = static_cast<float>(M_PI);
 
     // -----------------------------------------------------------------------
     // Vertex 0: shared apex (single vertex, no degenerate triangles at the top).
@@ -2932,7 +2932,7 @@ void IrrlichtRenderer::initCloudPlane()
             // Irrlicht also calls grab() internally on the passed pointer.  The caller's
             // reference is dropped in IrrlichtRenderer::~IrrlichtRenderer().
             // Never std::unique_ptr — causes double-free (see CLAUDE.md shader callbacks).
-            CloudDomeShaderCallback* cb = new CloudDomeShaderCallback();
+            auto* cb = new CloudDomeShaderCallback();
             irr::s32 matType = gpu->addHighLevelShaderMaterialFromFiles(
                 vsPath.c_str(), "main", irr::video::EVST_VS_1_1,
                 fsPath.c_str(), "main", irr::video::EPST_PS_1_1,
@@ -3166,8 +3166,8 @@ void IrrlichtRenderer::moveVehicleAgent(AgentHandle handle, float worldX, float 
 
     // Sample bilinear terrain height at world position + road surface bias.
     float y = 0.0f;
-    int tileX = static_cast<int>(worldX / kTileSize);
-    int tileZ = static_cast<int>(worldZ / kTileSize);
+    auto tileX = static_cast<int>(worldX / kTileSize);
+    auto tileZ = static_cast<int>(worldZ / kTileSize);
     if (m_terrain) {
         const float rawHeight = m_terrain->getHeightAtWorld(worldX, worldZ);
         y = rawHeight + kRoadSurfaceYBias;

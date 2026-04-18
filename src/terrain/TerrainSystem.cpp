@@ -310,7 +310,7 @@ void TerrainSystem::update(float /*dt*/) {
 // ---------------------------------------------------------------------------
 void TerrainSystem::flushPendingRebuilds(ITerrainLoadProgress* cb) {
     double start = m_clock ? m_clock->nowSeconds() : 0.0;
-    int total = static_cast<int>(m_rebuildDeque.size());
+    auto total = static_cast<int>(m_rebuildDeque.size());
     int done  = 0;
 
     // Per-flush deduplication set.
@@ -580,7 +580,7 @@ void TerrainSystem::buildOneChunk(int cx, int cz, int chunkTiles, float cellSize
     const int mapVertX   = m_mapTilesX + 1;        // full-map vertex width
     const int chunksX    = (m_mapTilesX + chunkTiles - 1) / chunkTiles;
 
-    uint64_t chunkId = static_cast<uint64_t>(cz * chunksX + cx);
+    auto chunkId = static_cast<uint64_t>(cz * chunksX + cx);
 
     // World-space origin of this chunk's (0,0) vertex corner.
     float worldOriginX = static_cast<float>(cx * chunkTiles) * cellSize;
@@ -749,7 +749,7 @@ void TerrainSystem::writeHeightAndSyncChunks(int tx, int tz, float h) {
 
     auto syncChunk = [&](int ccx, int ccz, int llx, int llz) {
         if (ccx < 0 || ccz < 0) return;
-        uint64_t cid = static_cast<uint64_t>(ccz * chunksX + ccx);
+        auto cid = static_cast<uint64_t>(ccz * chunksX + ccx);
         auto it = m_chunkHeightmaps.find(cid);
         if (it == m_chunkHeightmaps.end()) return;
         if (llx < 0 || llx >= chunkVerts || llz < 0 || llz >= chunkVerts) return;
@@ -913,8 +913,8 @@ float TerrainSystem::getHeightAtWorld(float worldX, float worldZ) const {
     const float tx = worldX / kTileSize;
     const float tz = worldZ / kTileSize;
 
-    const int x0 = static_cast<int>(std::floor(tx));
-    const int z0 = static_cast<int>(std::floor(tz));
+    const auto x0 = static_cast<int>(std::floor(tx));
+    const auto z0 = static_cast<int>(std::floor(tz));
     const int x1 = x0 + 1;
     const int z1 = z0 + 1;
 
