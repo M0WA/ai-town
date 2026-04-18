@@ -71,8 +71,8 @@
         { "com_low",  "com_med",  "com_high"  },
         { "ind_low",  "ind_med",  "ind_high"  },
     };
-    int zi = static_cast<int>(zone);
-    int di = static_cast<int>(density);
+    auto zi = static_cast<int>(zone);
+    auto di = static_cast<int>(density);
     if (zi < 0 || zi > 2 || di < 0 || di > 2) return {};
     return std::string(kZonePrefix[zi][di]) + "_01";
 }
@@ -301,8 +301,8 @@ float Zoning::computeRadialCoverage(int tileX, int tileZ, ServiceBuildingType ty
         if (sb.type != type) continue;
         float radius = computeServiceCoverageRadius(type, sb.degraded);
         float radiusTiles = radius / kTileSizeMeters;
-        float dx = static_cast<float>(sb.x - tileX);
-        float dz = static_cast<float>(sb.z - tileZ);
+        auto dx = static_cast<float>(sb.x - tileX);
+        auto dz = static_cast<float>(sb.z - tileZ);
         float dist = std::sqrt(dx * dx + dz * dz);
         if (dist <= radiusTiles) {
             return 1.0f;
@@ -367,8 +367,8 @@ float Zoning::computePowerCoverage(int tileX, int tileZ) const {
         if (it == bfsDepth.end()) {
             float radiusTiles = computeServiceCoverageRadius(ServiceBuildingType::PowerPlant, sb.degraded)
                                 / kTileSizeMeters;
-            float fdx = static_cast<float>(tileX - sb.x);
-            float fdz = static_cast<float>(tileZ - sb.z);
+            auto fdx = static_cast<float>(tileX - sb.x);
+            auto fdz = static_cast<float>(tileZ - sb.z);
             float dist = std::sqrt(fdx * fdx + fdz * fdz);
             if (dist <= radiusTiles) return 1.0f;
             continue;
@@ -378,7 +378,7 @@ float Zoning::computePowerCoverage(int tileX, int tileZ) const {
 
         if (m_budgetSurplusPctRef <=
             SimulationConstants::service_deficit_radius_halving_threshold) {
-            int coverDepth = static_cast<int>(
+            auto coverDepth = static_cast<int>(
                 std::floor(static_cast<float>(maxDepth) * 0.70f));
             if (targetDepth > coverDepth) continue;
         }
@@ -401,8 +401,8 @@ void Zoning::addRadialFallbackCoverage(const ServiceBuilding& sb, float radiusTi
             int nz = sb.z + dz;
             int64_t nkey = tileKey(nx, nz);
             if (bfsDepth.count(nkey)) continue;
-            float fdx = static_cast<float>(dx);
-            float fdz = static_cast<float>(dz);
+            auto fdx = static_cast<float>(dx);
+            auto fdz = static_cast<float>(dz);
             if (std::sqrt(fdx * fdx + fdz * fdz) <= radiusTiles) {
                 m_powerCoverageCache.insert(nkey);
             }
@@ -620,8 +620,8 @@ void Zoning::applyDesirabilityScores(bool hasFireStation, bool hasPolice,
     for (auto& [key, tile] : m_tiles) {
         if (!tile.isZoned) continue;
 
-        int x = static_cast<int>(key >> 32);
-        int z = static_cast<int>(static_cast<uint32_t>(key));
+        auto x = static_cast<int>(key >> 32);
+        auto z = static_cast<int>(static_cast<uint32_t>(key));
 
         tile.desirability = computeTileDesirability(tile, x, z,
                                                     hasFireStation, hasPolice,
@@ -699,8 +699,8 @@ void Zoning::doProximityTick(std::queue<SimulationNotification>& notifications) 
     for (auto& [key, tile] : m_tiles) {
         if (!tile.isZoned || tile.footprintOriginX != -1) continue;
 
-        int ox = static_cast<int>(static_cast<int64_t>(key) >> 32);
-        int oz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
+        auto ox = static_cast<int>(static_cast<int64_t>(key) >> 32);
+        auto oz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
         int fp = footprintSize(tile.density);
         int dist = nearestRoadDistance(m_tiles, ox, oz, fp);
 
@@ -710,7 +710,7 @@ void Zoning::doProximityTick(std::queue<SimulationNotification>& notifications) 
             notifications.push({NotificationType::BuildingAbandoned, ox, oz, 0});
         } else if (dist <= 3 && tile.isAbandoned) {
             tile.isAbandoned = false;
-            float maxPop = static_cast<float>(maxPopulationForTile(tile.zone, tile.density));
+            auto maxPop = static_cast<float>(maxPopulationForTile(tile.zone, tile.density));
             tile.population  = maxPop * 0.5f;
             notifications.push({NotificationType::BuildingRecovered, ox, oz, 0});
         }

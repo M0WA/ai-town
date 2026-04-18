@@ -184,8 +184,8 @@ void Population::accumulateHouseDemand(const Zoning& zoning,
     float effective_demand_factor = traffic.getZoneDemandFactor(tile.zone);
     if (effective_demand_factor >= SimulationConstants::construction_delay_demand_threshold) {
         tile.underConstruction = false;
-        int tileX = static_cast<int>(key >> 32);
-        int tileZ = static_cast<int>(static_cast<uint32_t>(key));
+        auto tileX = static_cast<int>(key >> 32);
+        auto tileZ = static_cast<int>(static_cast<uint32_t>(key));
         std::string baseName = Zoning::zoneAssetBaseName(tile.zone, tile.density);
         int variantNum = tile.buildingVariantNum;
         if (baseName.size() >= 2 && variantNum >= 1 && variantNum <= 4) {
@@ -232,8 +232,8 @@ Population::scanUnlockCandidates(const Zoning& zoning, ZoneType targetZone,
         if (tile.zone != targetZone) continue;
         if (tile.density != currentRequired) continue;
         if (tile.footprintOriginX != -1) continue;
-        int tx = static_cast<int>(key >> 32);
-        int tz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
+        auto tx = static_cast<int>(key >> 32);
+        auto tz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
         candidates.push_back({key, tx, tz});
     }
     return candidates;
@@ -405,7 +405,7 @@ bool Population::applyDensityUpgrade(Zoning& zoning, int tx, int tz, int64_t can
 
     for (auto& ot : outerTiles) {
         if (!renderer) break;
-        int zoneIdx = static_cast<int>(ot.zone);
+        auto zoneIdx = static_cast<int>(ot.zone);
         int idx = zoneIdx * 3 + 0;
         zoning.m_buildingVariantCounters[idx]++;
         int variantNum = ((zoning.m_buildingVariantCounters[idx] - 1) % 4) + 1;
@@ -426,8 +426,8 @@ bool Population::applyDensityUpgrade(Zoning& zoning, int tx, int tz, int64_t can
 
     // Place upgraded building mesh (after notifyUpgradeResult removes the old one).
     if (renderer) {
-        int zoneIdx2 = static_cast<int>(targetZone);
-        int tierIdx2 = static_cast<int>(targetDensity);
+        auto zoneIdx2 = static_cast<int>(targetZone);
+        auto tierIdx2 = static_cast<int>(targetDensity);
         int idx2     = zoneIdx2 * 3 + tierIdx2;
         zoning.m_buildingVariantCounters[idx2]++;
         int variantNum = ((zoning.m_buildingVariantCounters[idx2] - 1) % 4) + 1;

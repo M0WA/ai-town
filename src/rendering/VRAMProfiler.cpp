@@ -45,7 +45,7 @@ float VRAMProfiler::usedMB() const
         glGetIntegerv(GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX, &totalKB);
         glGetIntegerv(GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX, &availKB);
         if (totalKB <= 0) { return -1.0f; }
-        float usedKB = static_cast<float>(totalKB - availKB);
+        auto usedKB = static_cast<float>(totalKB - availKB);
         return usedKB / 1024.0f;
     }
     case Method::ATI:

@@ -26,7 +26,7 @@ bool seekToStart(OggVorbis_File* vf) noexcept {
 int decodeFrames(OggVorbis_File* vf, int16_t* pcmBuf, int maxFrames, int channels) noexcept {
     if (!vf || !pcmBuf || maxFrames <= 0 || channels <= 0) return 0;
 
-    int bytesWanted = maxFrames * channels * static_cast<int>(sizeof(int16_t));
+    auto bytesWanted = maxFrames * channels * static_cast<int>(sizeof(int16_t));
     char* buf = reinterpret_cast<char*>(pcmBuf);
     int   totalBytes = 0;
     int   bitstream  = 0;

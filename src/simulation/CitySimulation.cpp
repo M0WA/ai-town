@@ -244,7 +244,7 @@ void CitySimulation::recordUndoAction(const UndoAction& action) {
 
     float sv = speedValue(m_timing.getSpeedMultiplier());
     if (sv > 0.0f) {
-        double realSecondsRemaining = static_cast<double>(
+        auto realSecondsRemaining = static_cast<double>(
             (2.0f * SimulationConstants::SECONDS_PER_BUDGET_TICK - m_timing.m_accumulatedSimSeconds) / sv);
         m_undoExpiryWallSeconds = m_clock->nowSeconds() + realSecondsRemaining;
     } else {
@@ -410,8 +410,8 @@ void CitySimulation::placeZone(int tileX, int tileZ, ZoneType type, DensityTier 
 
     // Variant counter + deferred mesh spawn.
     {
-        int zoneIdx = static_cast<int>(type);
-        int tierIdx = static_cast<int>(tier);
+        auto zoneIdx = static_cast<int>(type);
+        auto tierIdx = static_cast<int>(tier);
         int idx     = zoneIdx * 3 + tierIdx;
         m_zoning.m_buildingVariantCounters[idx]++;
         int variantNum = ((m_zoning.m_buildingVariantCounters[idx] - 1) % 4) + 1;
@@ -843,8 +843,8 @@ std::string CitySimulation::serializeToJson() const {
 
     nlohmann::json tilesArr = nlohmann::json::array();
     for (const auto& [key, tile] : m_zoning.m_tiles) {
-        int tx = static_cast<int>(key >> 32);
-        int tz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
+        auto tx = static_cast<int>(key >> 32);
+        auto tz = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFFLL));
         nlohmann::json tobj;
         tobj["x"] = tx;
         tobj["z"] = tz;

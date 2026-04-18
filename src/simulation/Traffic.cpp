@@ -83,8 +83,8 @@ std::vector<RoadSegmentSpeed> Traffic::getRoadSegmentSpeeds(const Zoning& zoning
     speeds.reserve(m_trafficSignals.size() + 8);
     for (const auto& kv : zoning.tiles()) {
         if (!kv.second.isRoad) continue;
-        int tx = static_cast<int>(static_cast<int64_t>(kv.first) >> 32);
-        int tz = static_cast<int>(static_cast<uint32_t>(kv.first & 0xFFFFFFFFLL));
+        auto tx = static_cast<int>(static_cast<int64_t>(kv.first) >> 32);
+        auto tz = static_cast<int>(static_cast<uint32_t>(kv.first & 0xFFFFFFFFLL));
         RoadSegmentSpeed rss;
         rss.tileX = tx;
         rss.tileZ = tz;
@@ -271,8 +271,8 @@ void Traffic::spawnVehiclesForRoad(int tileX, int tileZ, int roadTileCount,
     v.srcX = tileX; v.srcZ = tileZ;
     v.dstX = dstX;  v.dstZ = dstZ;
     v.progress = 0.0f;
-    float dx = static_cast<float>(dstX - tileX);
-    float dz = static_cast<float>(dstZ - tileZ);
+    auto dx = static_cast<float>(dstX - tileX);
+    auto dz = static_cast<float>(dstZ - tileZ);
     v.headingDeg = std::atan2(dx, dz) * (180.0f / kPiF);
     v.worldX = (static_cast<float>(tileX) + 0.5f) * kTileSizeMeters;
     v.worldZ = (static_cast<float>(tileZ) + 0.5f) * kTileSizeMeters;
@@ -316,8 +316,8 @@ void Traffic::computeTrafficDemand(const Zoning& zoning, int totalTicks) {
     for (auto& [key, tile] : zoning.tiles()) {
         if (!tile.isZoned) continue;
 
-        int x = static_cast<int>(key >> 32);
-        int z = static_cast<int>(static_cast<uint32_t>(key));
+        auto x = static_cast<int>(key >> 32);
+        auto z = static_cast<int>(static_cast<uint32_t>(key));
 
         bool hasRoadAdjacentTile = false;
         for (int d = 0; d < 4; ++d) {
@@ -534,8 +534,8 @@ void Traffic::doTrafficVehicleTick(float realDeltaSeconds, Zoning& zoning,
             v.dstX = nextX;
             v.dstZ = nextZ;
             v.progress -= 1.0f;
-            float dx = static_cast<float>(v.dstX - v.srcX);
-            float dz = static_cast<float>(v.dstZ - v.srcZ);
+            auto dx = static_cast<float>(v.dstX - v.srcX);
+            auto dz = static_cast<float>(v.dstZ - v.srcZ);
             v.headingDeg = std::atan2(dx, dz) * (180.0f / kPiF);
         }
         float t = std::max(0.0f, std::min(1.0f, v.progress));

@@ -283,7 +283,7 @@ static bool runFrame(AppSystems& sys) {
 
     // Compute real delta — computed ONCE per frame, BEFORE step 2.
     const double currentTime  = sys.wallClock.nowSeconds();
-    const float  realDeltaSeconds = static_cast<float>(currentTime - sys.prevTime);
+    const auto  realDeltaSeconds = static_cast<float>(currentTime - sys.prevTime);
     sys.prevTime = currentTime;
 
     // Step 1: Poll events — handled by EventReceiver::OnEvent() via device->run().
@@ -433,7 +433,7 @@ static bool runFrame(AppSystems& sys) {
         double loadPrev2 = sys.wallClock.nowSeconds();
         while (device->run() && sys.terrainSystem->pendingRebuildCount() > 0) {
             const double loadNow2  = sys.wallClock.nowSeconds();
-            const float  loadDt2   = static_cast<float>(loadNow2 - loadPrev2);
+            const auto  loadDt2   = static_cast<float>(loadNow2 - loadPrev2);
             loadPrev2 = loadNow2;
             sys.uiManager->update(loadDt2);
             sys.terrainSystem->update(loadDt2);
@@ -486,7 +486,7 @@ static bool runFrame(AppSystems& sys) {
             double loadPrevL = sys.wallClock.nowSeconds();
             while (device->run() && sys.terrainSystem->pendingRebuildCount() > 0) {
                 const double loadNowL  = sys.wallClock.nowSeconds();
-                const float  loadDtL   = static_cast<float>(loadNowL - loadPrevL);
+                const auto  loadDtL   = static_cast<float>(loadNowL - loadPrevL);
                 loadPrevL = loadNowL;
                 sys.uiManager->update(loadDtL);
                 sys.terrainSystem->update(loadDtL);

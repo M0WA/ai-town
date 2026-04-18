@@ -223,7 +223,7 @@ void Economy::checkAndIssueForcedLoan(bool inGracePeriod, IClock& /*clock*/,
     }
 
     float revenueCap = std::max(m_currentMonthlyRevenue, 1000.0f);
-    int64_t debtCap = static_cast<int64_t>(3.0f * revenueCap);
+    auto debtCap = static_cast<int64_t>(3.0f * revenueCap);
 
     if (outstandingDebt >= debtCap) {
         if (m_outstandingBondUses > 0) {
@@ -324,7 +324,7 @@ void Economy::processLoanRepayments() {
 // ---------------------------------------------------------------------------
 
 int64_t Economy::computeTaxRevenue(ZoneType zone, const Zoning& zoning, const Traffic& traffic) const {
-    int zoneIdx = static_cast<int>(zone);
+    auto zoneIdx = static_cast<int>(zone);
     float taxRate = m_taxRates[zoneIdx];
 
     auto incomeForDensity = [](DensityTier d) -> int {
@@ -339,7 +339,7 @@ int64_t Economy::computeTaxRevenue(ZoneType zone, const Zoning& zoning, const Tr
     int64_t total = 0;
     for (auto& [key, tile] : zoning.tiles()) {
         if (!tile.isZoned || tile.zone != zone) continue;
-        int pop = static_cast<int>(tile.population);
+        auto pop = static_cast<int>(tile.population);
         int income = incomeForDensity(tile.density);
         total += static_cast<int64_t>(static_cast<float>(income * pop) * taxRate);
     }
@@ -414,8 +414,8 @@ int64_t Economy::computeUtilityFeeRevenue(const Zoning& zoning) const {
     for (auto& [key, tile] : zoning.tiles()) {
         if (!tile.isZoned || tile.zone != ZoneType::Residential) continue;
 
-        int x = static_cast<int>(key >> 32);
-        int z = static_cast<int>(static_cast<uint32_t>(key));
+        auto x = static_cast<int>(key >> 32);
+        auto z = static_cast<int>(static_cast<uint32_t>(key));
 
         if (hasPower) {
             if (zoning.isPowerCovered(x, z)) {
