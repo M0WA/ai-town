@@ -96,7 +96,7 @@ ARG USERNAME=ci
 RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
   && mkdir /commandhistory \
   && touch /commandhistory/.bash_history \
-  && chown -R $USERNAME /commandhistory
+  && chown -R "$USERNAME" /commandhistory
 
 # Set `DEVCONTAINER` environment variable to help with orientation
 ENV DEVCONTAINER=true
@@ -197,6 +197,6 @@ RUN sh -c "$(curl --proto '=https' --tlsv1.2 --fail --location https://github.co
 RUN pip3 install --break-system-packages numpy Pillow trimesh Wand scipy pypng tree-sitter tree-sitter-cpp
 
 # Install Claude
-RUN npm install -g --ignore-scripts @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+RUN npm install -g --ignore-scripts "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
 USER ci
