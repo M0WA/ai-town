@@ -8,7 +8,7 @@
 
 `hud-layout.md` has been updated on this branch to replace the old "Glass City deep-navy"
 visual theme with a new **Glacier Glass + Silver Chrome** design. The reference mockup is
-`hud-option-a-mercury.html` at the repo root. This phase implements all spec changes that
+`architecture/ui-ux/HUD/design-proposal-accepted.html`. This phase implements all spec changes that
 are now inconsistent with the existing C++ HUD code:
 
 1. Panel background `setElementBackground(...)` values updated to the new ultra-low-opacity
@@ -1997,7 +1997,7 @@ the glyph advance values in the bitmap font `.xml` files to match the mockup spa
       default 0) that inflates each glyph `rect` width by the specified amount (added to
       the right edge of each glyph rect). This widens the advance without changing the
       glyph image.
-- [ ] Determine the target letter-spacing value from `hud-option-a-mercury.html` CSS
+- [ ] Determine the target letter-spacing value from `architecture/ui-ux/HUD/design-proposal-accepted.html` CSS
       (inspect `letter-spacing` property on `.top-labels`, `.mm-ov`, and panel text
       elements). Convert from CSS `em`/`px` to bitmap-font pixel units at each tier
       (720/1080/1440).

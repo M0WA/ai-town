@@ -349,7 +349,7 @@ elements per §IUIBackend Method Contract method 18).
 
 ### Phase 11q13 V1 Appearance Subset
 
-The following CSS effect from `hud-option-a-mercury.html` is deferred to **Phase 11q14**:
+The following CSS effect from `architecture/ui-ux/HUD/design-proposal-accepted.html` is deferred to **Phase 11q14**:
 
 - `backdrop-filter: blur(...)` — requires RTT + GLSL Kawase blur shader (High effort);
   keeping current semi-transparent solid fill via `setElementBackground` for Phase 11q13
