@@ -347,15 +347,15 @@ elements per §IUIBackend Method Contract method 18).
 
 ### Phase 11q13 V1 Appearance Subset
 
-The following CSS effects from `hud-option-a-mercury.html` are V1 engine constraints (not
-implemented, not deferred):
+The following CSS effect from `hud-option-a-mercury.html` is deferred to **Phase 11q14**:
 
-- `backdrop-filter: blur(...)` — not supported by Irrlicht
-- `border-radius` on panels and buttons — not supported by Irrlicht IGUIStaticText/IGUIButton
-- CSS `letter-spacing` — not supported by Irrlicht IGUIFont
-- `box-shadow` — not supported
-- Hover CSS transitions (`.mm-ov` transition) — hover state is a discrete sprite-swap,
-  not animated
+- `backdrop-filter: blur(...)` — requires RTT + GLSL Kawase blur shader (High effort);
+  keeping current semi-transparent solid fill via `setElementBackground` for Phase 11q13
+
+The following CSS effect is a permanent engine constraint (not implemented, not deferred):
+
+- `box-shadow` — not supported by Irrlicht; no practical custom-rendering workaround
+  at acceptable cost
 
 The following ARE implemented in Phase 11q13:
 
@@ -366,6 +366,14 @@ The following ARE implemented in Phase 11q13:
   (button dispatch)
 - (e) `kMinimapToggleActiveBorder` border render via `fillColoredRect` outline for active
   button
+- (f) **`border-radius`** on panels and buttons — 9-slice sprite textures with pre-rendered
+  rounded corners; `draw2DImage` composites 9 slices per panel; `drawNineSlice` helper in
+  `IrrlichtUIBackend` (see Deliverable 13)
+- (g) **CSS `letter-spacing`** — widened glyph `rect` values in bitmap font `.xml` files;
+  data-only change, zero runtime cost (see Deliverable 14)
+- (h) **Animated hover transitions** — alpha-lerp overlay elements per button; `update(dt)`
+  interpolates overlay alpha via `setElementAlpha()`; smooth fade-in/out replaces discrete
+  sprite-swap (see Deliverable 15)
 
 ## Visual Design — Glacier Glass + Silver Chrome
 
@@ -377,12 +385,12 @@ All HUD panels use the Glacier Glass + Silver Chrome palette defined in
 | Panel | Background |
 |---|---|
 | Resource/budget bar | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` = `0x42040C1C` — no corner radius |
-| Left toolbar panel | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 8 px radius on right/bottom inner edges |
-| Zone sub-panel | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 8 px radius on all inner edges |
-| Utilities sub-panel | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 8 px radius on all inner edges |
-| Budget detail panel | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 8 px radius |
-| Grace period indicator | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 8 px radius |
-| Notification card bg | `SColor(71, 4, 12, 30)` = `kNotifCardBg` = `0x47040C1E` — 8 px radius |
+| Left toolbar panel | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 10 px radius on right/bottom inner edges |
+| Zone sub-panel | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 10 px radius on all inner edges |
+| Utilities sub-panel | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 10 px radius on all inner edges |
+| Budget detail panel | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 10 px radius |
+| Grace period indicator | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 10 px radius |
+| Notification card bg | `SColor(71, 4, 12, 30)` = `kNotifCardBg` = `0x47040C1E` — 10 px radius |
 
 ### Toolbar Icon States
 

@@ -79,9 +79,9 @@ text. All three severity tiers receive a 3 px left severity strip drawn by
 - WARNING: `kNotifStripWarning` (reserved; colour TBD for future warning toasts)
 - Normal/INFO: `kNotifStripInfo` = `#2878DC` (`0xCC2878DCu`, teal-cyan)
 
-Corner radius: **8 px** on all edges of each toast card.
+Corner radius: **10 px** on all edges of each toast card.
 
-**V1 engine limitation**: Irrlicht `IGUIStaticText` does not support native corner-radius rendering; V1 notification cards are rendered as flat rectangles. The 8 px corner radius is a post-V1 visual refinement target.
+**V1 rounded corners**: V1 implements rounded corners via 9-slice sprite rendering using the `panel_corner_10px.png` asset (Deliverable 13 of Phase 11q13). The 10 px corner radius is achieved by slicing the notification card background into nine regions and stretching only the center and edge strips, preserving the curved corners at any card size.
 
 ### Toast Text
 

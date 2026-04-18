@@ -75,6 +75,24 @@ does **not** use `IVideoDriver::getTexture()`. Font atlas PNG files under `asset
 therefore **exempt from the DDS-only runtime texture rule**. No DDS conversion is required for
 any file under `assets/fonts/`.
 
+## Small UI Overlay PNG Exception
+
+Runtime UI overlay textures that are **128x128 or smaller** and require precise alpha-channel
+fidelity (e.g. anti-aliased corner masks, rounded-rect clip overlays) are **exempt from the
+DDS-only runtime texture rule** and may ship as RGBA8 uncompressed PNG. DXT1/DXT5 block
+compression destroys sub-pixel alpha gradients at these small dimensions, producing visible
+banding on curved edges. The file-size overhead of an uncompressed 64x64 RGBA PNG (~16 KB) is
+negligible compared to atlas DDS payloads. These files are loaded via
+`IVideoDriver::getTexture()` (Irrlicht linear pool) and rendered with `draw2DImage`.
+
+Qualifying criteria — all three must hold:
+
+1. Dimensions are at most 128x128 (width AND height).
+2. The texture is used exclusively for 2D HUD/UI overlay rendering (`draw2DImage`).
+3. The texture requires smooth alpha gradients that BC compression would degrade.
+
+Files that do not meet all three criteria must remain DDS.
+
 ## DDS Authoring Pipeline
 
 All DDS textures must be produced via a validated command-line pipeline rather than DCC-tool GUI exporters. The canonical pipeline entry point is `tools/export_textures.py` (to be created in Phase 9 when full atlas textures are produced). Direct invocation of the tools below is permitted for individual asset iteration, but CI must call only `export_textures.py`.

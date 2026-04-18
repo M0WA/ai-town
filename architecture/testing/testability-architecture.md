@@ -82,10 +82,26 @@ public:
     //     In MockUIBackend: MOCK_METHOD stub. In StubUIBackend: no-op override.
     //     Added in Phase 11p. See architecture/ui-ux/ui-manager.md §IUIBackend Method Contract.
     virtual void fillColoredRect(int x, int y, int w, int h, int r, int g, int b, int a) = 0;
+
+    // --- Method 23: setElementTextColorA ---
+    //     Set the text colour and alpha of an element (0 = transparent, 255 = opaque).
+    //     Used by the Glacier Glass theme for per-element colour + fade transitions.
+    //     In IrrlichtUIBackend: calls IGUIStaticText::setOverrideColor with SColor(a,r,g,b).
+    //     In MockUIBackend: MOCK_METHOD stub.
+    //     Added in Phase 11q13. See architecture/ui-ux/ui-manager.md §IUIBackend Method Contract.
+    virtual void setElementTextColorA(UIElementHandle handle, int r, int g, int b, int a) = 0;
+
+    // --- Method 24: drawNineSlice ---
+    //     Draw a 9-slice panel: 4 rounded corners (from panel_corners_10px.png 2×2 grid),
+    //     4 edge strips, and 1 centre fill. cornerRadius is in virtual-space pixels (10 px V1).
+    //     In IrrlichtUIBackend: 9 draw2DImage/draw2DRectangle calls.
+    //     In MockUIBackend: MOCK_METHOD stub.
+    //     Added in Phase 11q13. See architecture/ui-ux/ui-manager.md §IUIBackend Method Contract.
+    virtual void drawNineSlice(int x, int y, int w, int h, int cornerRadius, int r, int g, int b, int a) = 0;
 };
 ```
 
-`MockUIBackend` **source location**: `tests/ui/MockUIBackend.h`. The file contains 22 `MOCK_METHOD` entries — one per `IUIBackend` virtual method — as of Phase 11p (method 19 `setElementMonoFont` added in Phase 10; method 20 `setElementRect` added in Phase 10; method 21 `setElementTextColor` added post-Phase-10; method 22 `fillColoredRect` added in Phase 11p). **Rule**: whenever a new virtual method is added to `IUIBackend`, a matching `MOCK_METHOD` entry MUST be added to `tests/ui/MockUIBackend.h` in the same commit. The spec description above (inline `IUIBackend` class block) and `tests/ui/MockUIBackend.h` must always have the same method count. `ui-manager.md` §IUIBackend Method Contract is the production-facing authority; this file is the test-facing authority; both must remain consistent.
+`MockUIBackend` **source location**: `tests/ui/MockUIBackend.h`. The file contains 24 `MOCK_METHOD` entries — one per `IUIBackend` virtual method — as of Phase 11q13 (method 19 `setElementMonoFont` added in Phase 10; method 20 `setElementRect` added in Phase 10; method 21 `setElementTextColor` added post-Phase-10; method 22 `fillColoredRect` added in Phase 11p; method 23 `setElementTextColorA` added in Phase 11q13; method 24 `drawNineSlice` added in Phase 11q13). **Rule**: whenever a new virtual method is added to `IUIBackend`, a matching `MOCK_METHOD` entry MUST be added to `tests/ui/MockUIBackend.h` in the same commit. The spec description above (inline `IUIBackend` class block) and `tests/ui/MockUIBackend.h` must always have the same method count. `ui-manager.md` §IUIBackend Method Contract is the production-facing authority; this file is the test-facing authority; both must remain consistent.
 
 `MockUIBackend` returns arbitrary non-zero integer handles (e.g., an incrementing counter) with no real objects — unit tests that call UIManager methods never dereference Irrlicht pointers, making `src/ui/` genuinely headless-testable and the 95% coverage gate achievable.
 
@@ -250,6 +266,20 @@ public:
 `NiceMock<MockUIBackend>` is used (not `StrictMock`) because the `HUD` constructor emits many `addStaticText` and `addButton` calls during initialization that `StrictMock` would reject without exhaustive setup. Under the lazy-allocation design, the `NotificationManager` constructor itself emits **zero** `addStaticText`/`addButton` calls — handles are created only when a card first becomes visible in `refreshVisibleSlots()`, never in the constructor. The `NiceMock` is therefore required by the `HUD` constructor path, not by `NotificationManager` construction.
 
 `Times()` qualifiers on critical `EXPECT_CALL` assertions (audio fire counts, badge increment counts, element-rect calls) compensate for the relaxation.
+
+**Fixture members** (Phase 11q13 addition):
+
+```cpp
+StrictMock<MockHUDBadgeNotifier> badge_;
+```
+
+The `NotificationManager` constructor in this fixture uses the 5-parameter form:
+
+```cpp
+NotificationManager(IUIBackend*, ICitySimulation*, IClock*, IAudioSystem*, IHUDBadgeNotifier*)
+```
+
+Tests that do not exercise badge updates may pass `nullptr` for the fifth parameter instead of `&badge_`.
 
 ## SettingsPanelTest Fixture (Phase 8)
 
@@ -620,6 +650,7 @@ public:
   - Maintaining a consistent order allows test fixtures to reuse the same member declaration block (`MockUIBackend backend_; NiceMock<MockAudioSystem> audio_; NiceMock<MockCitySimulation> sim_; ManualClock clock_;`) without reordering per panel.
   - Confirmed examples: `UIManager(IUIBackend*, IAudioSystem*, ICitySimulation*, IClock*)` (Phase 3+), `NotificationManager` receives `IClock*` at construction forwarded from UIManager, `FinancesPanel` (Phase 11m) follows the same order.
   - Classes that do not need all four dependencies MUST still respect left-to-right subset ordering (e.g., a panel that needs only `IUIBackend*` and `IClock*` must NOT reorder them to `IClock*` first).
+  - Exception: `NotificationManager` uses `(IUIBackend*, ICitySimulation*, IClock*, IAudioSystem*, IHUDBadgeNotifier*)` -- this is a documented legacy deviation preserved for backward compatibility with existing call sites.
 
 - **Thread-safety annotations**: Use Clang's thread-safety analysis attributes (`GUARDED_BY`, `REQUIRES`, `EXCLUDES`) on Clang builds; document-only `// thread-safe` or `// main-thread-only` comments as fallback on MSVC. Enable `-Wthread-safety` in CMake for Clang builds.
 

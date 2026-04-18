@@ -9,7 +9,7 @@
 
 ## IUIBackend Method Contract
 
-The total method count is **22**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
+The total method count is **24**. `testability-architecture.md` is the test-facing authority (`MockUIBackend`); `ui-manager.md` is the production-facing authority (`IrrlichtUIBackend`). Both files must remain consistent — any method added to one must be reflected in the other.
 
 Methods 1–17 were established in Phase 8. Method 18 (`setElementBackground`) was added in Phase 9b (minimap dark-panel fix — see `architecture/ui-ux/minimap.md` §IUIBackend method 18). Method 19 (`setElementMonoFont`) was added in Phase 10 (monospace numeric readout requirement — see below). Method 20 (`setElementRect`) was added in Phase 10 (modal dialog centring fix — see `architecture/ui-ux/modal-dialog-system.md` §Element Repositioning). Method 21 (`setElementTextColor`) was added post-Phase-10 (service coverage overlay text colour; already present in `src/interfaces/IUIBackend.h` and `tests/ui/MockUIBackend.h` — no plan step required). Method 22 (`fillColoredRect`) was added in Phase 11p (minimap per-frame tile colour rendering — see `architecture/ui-ux/minimap.md` §Service Coverage overlay).
 
@@ -142,6 +142,20 @@ public:
     //     provides a no-op override.
     //     Added in Phase 11p for minimap per-frame tile colour rendering.
     virtual void fillColoredRect(int x, int y, int w, int h, int r, int g, int b, int a) = 0;
+
+    // --- Method 23: setElementTextColorA ---
+    //     Set the text colour and alpha of an element (0 = transparent, 255 = opaque).
+    //     Used by the Glacier Glass theme for per-element colour + fade transitions.
+    //     Added in Phase 11q13 for animated hover transitions.
+    virtual void setElementTextColorA(UIElementHandle handle, int r, int g, int b, int a) = 0;
+
+    // --- Method 24: drawNineSlice ---
+    //     Draw a 9-slice panel: 4 rounded corners (from panel_corners_10px.png 2×2 grid),
+    //     4 edge strips, and 1 centre fill. cornerRadius is in virtual-space pixels (10 px V1).
+    //     Colour (r,g,b,a) tints the centre fill and edge strips via draw2DRectangle;
+    //     corners use draw2DImage with useAlphaChannel = true.
+    //     Added in Phase 11q13 for Glacier Glass rounded-corner panels.
+    virtual void drawNineSlice(int x, int y, int w, int h, int cornerRadius, int r, int g, int b, int a) = 0;
 };
 ```
 

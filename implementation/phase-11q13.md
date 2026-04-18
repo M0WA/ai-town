@@ -36,10 +36,12 @@ are now inconsistent with the existing C++ HUD code:
    and notification right-rail positioning.
 
 > **Scope policy**: Nothing in this phase is deferred to a later phase or to a post-V1
-> backlog. Any V1 feature that cannot be completed within this phase's scope must be
-> split into a separate phase (next phase would be **phase-11q14**) rather than silently
-> omitted. Irrlicht engine limitations (e.g. no `backdrop-filter`, no `border-radius`,
-> no CSS letter-spacing) are documented as technical constraints, not deferrals. UI code
+> backlog except **`backdrop-filter: blur(...)`** which is deferred to **phase-11q14**
+> (RTT + GLSL Kawase blur — High effort; keeping current semi-transparent solid fill
+> for now). `border-radius`, `letter-spacing`, and animated hover transitions ARE
+> implemented in this phase via custom rendering approaches (see Deliverables 13–15).
+> Any other V1 feature that cannot be completed within this phase's scope must be
+> split into a separate phase rather than silently omitted. UI code
 > (HUD, NotificationManager, Minimap, UIManager) **may be refactored** as needed to
 > accommodate the new Glacier Glass design cleanly — refactors that reduce complexity or
 > remove legacy code are in scope even if not explicitly listed as deliverables.
@@ -67,7 +69,8 @@ Chrome values:
       (decomposed from `kChromeRimColor`). Called from
       `UIManager::drawOverlays()` post-drawAll.
 - [ ] Notification card backgrounds are handled in Deliverable 3 (`NotificationManager.cpp`).
-- [ ] Irrlicht does not support `backdrop-filter`; these flat `setElementBackground` values
+- [ ] Irrlicht does not natively support `backdrop-filter`; frosted-glass blur is deferred
+      to Phase 11q14. These flat `setElementBackground` values
       are the canonical in-engine approximation. Do NOT add any additional rendering path.
 - [ ] **Add HUD panel-background elements for the 5 HUD panels**: In `HUD.cpp` constructor,
       after querying the backend for available screen area, add `UIElementHandle` members to
@@ -82,6 +85,10 @@ Chrome values:
       | Zone sub-panel | `m_zonePanelBg` | per `hud-layout.md §Zone Sub-Panel` |
       | Utilities sub-panel | `m_utilsPanelBg` | per `hud-layout.md §Utilities Sub-Panel` |
       | Grace Period Indicator | `m_gracePeriodBg` | per `hud-layout.md §Grace Period Indicator` |
+
+      > **Note**: Deliverable 13 replaces these `setElementBackground` handles with
+      > `drawNineSlice` calls and removes `m_topBarBg` etc. Implement D1 first to
+      > establish layout; D13 then upgrades to rounded-corner rendering.
 
       Add `constexpr uint32_t kGlacierPanelBg = 0x42040C1Cu;` to `src/ui/ui_constants.h`
       (SColor(66, 4, 12, 28) = 0x42040C1C). Each background element must be created BEFORE
@@ -157,13 +164,11 @@ not a deferral — no follow-up phase is required for the animation baseline.
 
 **Flat-rectangle rendering note (border-radius):** `border-radius: 10px` is specified
 in the CSS mockup spec. Irrlicht `IGUIStaticText` does **not** support native corner
-radius rendering — consistent with the V1 limitation noted for all Glacier Glass
-panels in `architecture/ui-ux/hud-layout.md §V1 Limitations`. Cards are rendered as
-flat rectangles. All card child-element coordinates (icon, title, message, timestamp,
-dismiss button) assume flat-rectangle rendering — **no padding adjustments** for
-corner-radius clipping are needed. The coordinates listed below (cardLeft+11,
-cardLeft+38, cardRight−24, etc.) are the final on-screen positions; they do not
-need to be inset further to avoid clipping at rounded corners.
+radius rendering. Phase 11q13 implements rounded corners via **9-slice sprite textures**
+(see Deliverable 13). A pre-authored corner-quarter PNG asset is stretched via
+`draw2DImage` for each corner/edge region. All card child-element coordinates (icon,
+title, message, timestamp, dismiss button) assume the 9-slice panel background and
+include appropriate padding to avoid clipping at rounded corners.
 
 - [ ] Card panel handle MUST be created via `addStaticText`:
 
@@ -991,11 +996,11 @@ in this phase; see Deliverable 5e and `architecture/ui-ux/ui-manager.md`):
       as part of this phase:
       1. In `src/interfaces/IUIBackend.h`: add `virtual void setElementTextColorA(UIElementHandle handle, int r, int g, int b, int a) = 0;`
          as method 23 (after `setElementTextColor`). Update the IUIBackend method-count comment
-         from 22 to 23.
+         from 22 to 24 (method 24 = `drawNineSlice`, added in Deliverable 13).
       2. In `src/rendering/IrrlichtUIBackend.h`: add the override declaration.
       3. In `src/rendering/IrrlichtUIBackend.cpp`: implement — cast handle to `IGUIStaticText*`; call `setOverrideColor(SColor(a, r, g, b))` + `enableOverrideColor(true)`. For `IGUIButton` elements, the text colour is set via the global skin path: `m_guiEnv->getSkin()->setColor(EGDC_BUTTON_TEXT, SColor(a,r,g,b))` — see INVESTIGATION RESULT below for the rationale.
       4. In `tests/ui/MockUIBackend.h`: add `MOCK_METHOD(void, setElementTextColorA, (UIElementHandle, int, int, int, int), (override));`
-      5. In `architecture/ui-ux/ui-manager.md`: update method count from 22→23 and add method 23 contract.
+      5. In `architecture/ui-ux/ui-manager.md`: update method count from 22→24 and add method 23 + 24 contracts.
       Add `src/interfaces/IUIBackend.h`, `src/rendering/IrrlichtUIBackend.h`, `src/rendering/IrrlichtUIBackend.cpp`,
       `tests/ui/MockUIBackend.h`, and `architecture/ui-ux/ui-manager.md` to the Files Changed table
       as non-VERIFY entries (if not already listed for substantive changes).
@@ -1046,13 +1051,13 @@ in this phase; see Deliverable 5e and `architecture/ui-ux/ui-manager.md`):
       Document the grep/inspection result (file:line and element type) in the PR
       description for reviewer sign-off.
 
-- [ ] **VERIFY: `MockUIBackend.h` MOCK_METHOD count equals 23**:
-      `grep -c "MOCK_METHOD" tests/ui/MockUIBackend.h` returns exactly **23**. If it
-      returns **22**, the `setElementTextColorA` mock entry is missing — add it in the
-      same commit (per the Deliverable 6 implementation steps above):
-      `MOCK_METHOD(void, setElementTextColorA, (UIElementHandle handle, int r, int g, int b, int a), (override));`
-      The count of 23 accounts for all `IUIBackend` virtual methods including
-      `setElementTextColorA` (method 23) added in this phase.
+- [ ] **VERIFY: `MockUIBackend.h` MOCK_METHOD count equals 24**:
+      `grep -c "MOCK_METHOD" tests/ui/MockUIBackend.h` returns exactly **24**. If it
+      returns **22**, both `setElementTextColorA` and `drawNineSlice` mock entries are missing.
+      If it returns **23**, the `drawNineSlice` mock entry (method 24, Deliverable 13) is missing — add it in the
+      same commit. `MOCK_METHOD(void, setElementTextColorA, (UIElementHandle handle, int r, int g, int b, int a), (override));`
+      The count of 24 accounts for all `IUIBackend` virtual methods including
+      `setElementTextColorA` (method 23) and `drawNineSlice` (method 24) added in this phase.
 - [ ] Fully-opaque colour rows (alpha = 255) use `IUIBackend::setElementTextColor(handle, r, g, b)` (method 21). Alpha-bearing rows (sub-labels, bell icon) use `IUIBackend::setElementTextColorA(handle, r, g, b, a)` (method 23 — **added in this phase**; see implementation steps in this deliverable).
 - [ ] Red flashing budget indicator ARGB: update the constant `kDeficitPulseArgb` (or
       equivalent inline literal) in `HUD.cpp`/`ui_constants.h` from `0x80F04E37u` to
@@ -1241,8 +1246,10 @@ at the bottom of `ui_constants.h` will fail and force reconciliation.
   `CMakeLists.txt` from Phase 11m — if not, add it in the same commit.
   - [ ] Verify `target_include_directories(ui_tests PRIVATE tests/simulation/)` is
         present in `CMakeLists.txt` (grep or open the file).
-- Full constructor: `HUD(backend_, audio_, sim_, clock_)` with `NiceMock<MockAudioSystem> audio_`, `NiceMock<MockCitySimulation> sim_`, `ManualClock clock_`; `NotificationManager(backend_, sim_, clock_, audio_)`.
-  Note: `NotificationManager`'s constructor parameter order `(IUIBackend*, ICitySimulation*, IClock*, IAudioSystem*)` is a **legacy deviation** from the canonical order `(IUIBackend*, IAudioSystem*, ICitySimulation*, IClock*)` documented in `architecture/testing/testability-architecture.md §Canonical UI class constructor parameter order`. This deviation is intentional to preserve existing caller compatibility — do not reorder without updating all call sites in `src/` and `tests/`.
+- Full constructor: `HUD(backend_, audio_, sim_, clock_)` with `StrictMock<MockAudioSystem> audio_`, `NiceMock<MockCitySimulation> sim_`, `ManualClock clock_`; `NotificationManager(backend_, sim_, clock_, audio_)`.
+  Mock policy exception: `audio_` uses `StrictMock<MockAudioSystem>` (not `NiceMock`) because
+  audio side-effects (`playSound`) must be explicitly expected — silent swallowing hides bugs.
+  Note: `NotificationManager`'s constructor parameter order `(IUIBackend*, ICitySimulation*, IClock*, IAudioSystem*)` is a **legacy deviation** from the canonical order `(IUIBackend*, IAudioSystem*, ICitySimulation*, IClock*)` documented in `architecture/testing/testability-architecture.md §Canonical UI class constructor parameter order`. This deviation is intentional and is explicitly documented in that spec section as an exception. Do not reorder without updating all call sites in `src/` and `tests/`.
 - **Member declaration order** (critical for destruction order — C++ destroys in reverse
   declaration order): declare mock members in the fixture class in this order so that
   `audio_` is destroyed before `backend_` and before any `sim_` / `clock_` references
@@ -1250,7 +1257,7 @@ at the bottom of `ui_constants.h` will fail and force reconciliation.
   1. `NiceMock<MockUIBackend> backend_;`
   2. `NiceMock<MockCitySimulation> sim_;`
   3. `ManualClock clock_;`
-  4. `NiceMock<MockAudioSystem> audio_;` — **declared AFTER `backend_`** so that in C++
+  4. `StrictMock<MockAudioSystem> audio_;` — **declared AFTER `backend_`** so that in C++
      reverse destruction order (last declared → first destroyed) it is destroyed **BEFORE**
      `backend_`, satisfying the "audio mock destroyed before backend mock" invariant. Note:
      "declared after = destroyed before" is the correct C++ rule.
@@ -1363,7 +1370,7 @@ at the bottom of `ui_constants.h` will fail and force reconciliation.
 - [ ] Register the new test file in `CMakeLists.txt`:
       `target_sources(ui_tests PRIVATE tests/ui/HUDGlacierGlassTest.cpp)`.
       The `ui_tests` target already links `aitown_ui` and has the correct include paths.
-      (7 tests total: 5 original + Test 6 sim_ dispatch + Test 7 hover sprite-swap)
+      (10 tests total: 5 original + Test 6 sim_ dispatch + Test 7 hover sprite-swap + Test 8 drawNineSlice + Test 9 hover-alpha-lerp + Test 10 hover-exit)
 
 #### 9. `architecture/ui-ux/resolution-ui-scaling.md` — VERIFY only (already updated in earlier phase)
 
@@ -1445,6 +1452,8 @@ are preserved; only the visual/layout sections change:
 - [ ] Add `int findSlotIndexForDismissButton(UIElementHandle h) const` to `§NotificationManager API`
       with contract: returns slot index [0..kNotifMaxVisible) whose `hDismiss` matches h,
       or -1 if not found.
+- [ ] Update minimap.md §Visual Design — Glacier Glass §Minimap Background: replace old panel background values (rgba(13,27,42,0.85) / setElementBackground(h,13,27,42,217) for m_mapBg and rgba(13,27,42,0.82) / setElementBackground(h,13,27,42,209) for m_legendPanel) with kGlacierPanelBg SColor(66,4,12,28) values. Note old values as superseded.
+- [ ] Explicitly update notification log panel background in notification-system.md to Glacier Glass values: setElementBackground(h, 4, 12, 28, 66) (kGlacierPanelBg) — consistent with all other panels.
 
 #### 11. Tests — `tests/ui/NotificationRailTest.cpp` (new file)
 
@@ -1887,6 +1896,94 @@ This phase requires the HUD bitmap fonts to be baked from the correct typefaces.
       `hud_mono_font_1440.xml`
 - [ ] After regeneration, each XML file must contain the typeface name
       "Barlow Condensed" or "Share Tech Mono" in its glyph metadata.
+- [ ] Verify `LICENSE.md` contains Barlow Condensed and Share Tech Mono entries
+      under "SIL Open Font License 1.1"; add if missing.
+
+#### 13. Rounded corners — 9-slice sprite rendering
+
+Irrlicht `IGUIStaticText`/`IGUIButton` do not support `border-radius`. This deliverable
+implements rounded corners via pre-baked 9-slice corner textures composited with
+`driver->draw2DImage()`.
+
+- [ ] Author `assets/textures/ui/panel_corners_10px.png` — a 128×128 RGBA PNG containing
+      all four pre-flipped quarter-circle corners (10 px radius, anti-aliased alpha) in a
+      2×2 grid layout: top-left corner at (0,0)–(64,64), top-right at (64,0)–(128,64),
+      bottom-left at (0,64)–(64,128), bottom-right at (64,64)–(128,128). Each quadrant is
+      a distinct pre-rotated variant — Irrlicht `draw2DImage` does **not** flip source rects,
+      so all four orientations must be pre-baked. Authoritative asset; committed to repo.
+      This PNG is loaded at runtime via `IVideoDriver::getTexture()` — permitted under the
+      small UI overlay PNG exception (≤128×128 RGBA8) added to `2d-texture-standards.md`.
+- [ ] Add `drawNineSlice(int x, int y, int w, int h, int cornerRadius, int r, int g, int b, int a)` to `IUIBackend`:
+      1. In `src/interfaces/IUIBackend.h`: add `virtual void drawNineSlice(int x, int y, int w, int h, int cornerRadius, int r, int g, int b, int a) = 0;` as method 24. Update method-count comment from 23 to 24.
+      2. In `src/rendering/IrrlichtUIBackend.h`: add override declaration.
+      3. In `src/rendering/IrrlichtUIBackend.cpp`: implement — 9 `draw2DImage` calls
+         (4 corners via `panel_corners_10px.png` 2×2 grid — TL at 0,0–64,64; TR at 64,0–128,64; BL at 0,64–64,128; BR at 64,64–128,128 — no source-rect flips needed, 4 edge strips,
+         1 centre fill via `draw2DRectangle`). Uses `useAlphaChannel = true` for corners.
+      4. In `tests/ui/MockUIBackend.h`: add `MOCK_METHOD` entry (method 24).
+- [ ] Replace `setElementBackground` panel-background calls for all 7 panels (top bar,
+      toolbar, Zone, Utilities, Grace Period, minimap, notification cards) with
+      `drawNineSlice` calls in the `drawOverlays()` post-drawAll pass. Panel backgrounds
+      become draw-time renders, not element properties. Remove the `IGUIStaticText`
+      background panel handles (`m_topBarBg`, etc.) — they are superseded by `drawNineSlice`.
+- [ ] Add unit test `HUDGlacierGlass_DrawNineSlice_Called_ForEachPanel`: verify
+      `drawNineSlice` is called at least once per panel region in `drawOverlays()`.
+
+#### 14. Letter spacing — bitmap font glyph widening
+
+Irrlicht `IGUIFont::draw()` has no letter-spacing parameter. This deliverable widens
+the glyph advance values in the bitmap font `.xml` files to match the mockup spacing.
+
+- [ ] In `tools/generate_bitmap_fonts.py`: add a `--letter-spacing` parameter (integer,
+      default 0) that inflates each glyph `rect` width by the specified amount (added to
+      the right edge of each glyph rect). This widens the advance without changing the
+      glyph image.
+- [ ] Determine the target letter-spacing value from `hud-option-a-mercury.html` CSS
+      (inspect `letter-spacing` property on `.top-labels`, `.mm-ov`, and panel text
+      elements). Convert from CSS `em`/`px` to bitmap-font pixel units at each tier
+      (720/1080/1440).
+- [ ] Re-run `python3 tools/generate_bitmap_fonts.py --letter-spacing <N>` to regenerate
+      all 6 font files with the new spacing.
+- [ ] Visual verification: screenshot comparison of HUD text with and without spacing
+      shows visible inter-character gaps matching the HTML mockup. No automated test
+      required — this is a data-only change with no code path impact.
+
+#### 15. Animated hover transitions — alpha-lerp overlay
+
+The HTML mockup uses CSS `transition` for smooth hover effects on buttons. This
+deliverable replaces the discrete sprite-swap hover with a smooth alpha-animated
+overlay.
+
+- [ ] Add per-button hover state tracking to `HUD.h`:
+
+          struct ButtonHoverState {
+              UIElementHandle overlay{kInvalidUIElement};
+              float           t{0.0f};        // 0.0 = idle, 1.0 = fully hovered
+              bool            hovering{false};
+          };
+
+- [ ] For each button that needs hover transitions (minimap toggles, toolbar buttons,
+      speed buttons): create a companion `IGUIStaticText` overlay element positioned
+      exactly over the button, with `setElementBackground` set to the hover highlight
+      colour and initial alpha 0. Set the overlay as a **child sub-element** of the
+      button (`IGUIElement::addChild()` + `setSubElement(true)`) so it does not intercept
+      click events.
+- [ ] In `HUD::update(float dt)` (called each frame before `drawAll()`):
+      For each `ButtonHoverState`: if `hovering`, lerp `t` toward 1.0; else lerp toward
+      0.0. Rate: `t += dt / kHoverTransitionDuration` (constant, e.g. 0.15 seconds).
+      Call `m_backend->setElementAlpha(overlay, (int)(t * targetAlpha))`.
+- [ ] In `HUD::onEvent()` mouse-move handler: hit-test each button rect; update
+      `hovering` flag. This replaces the existing discrete sprite-swap for hover state.
+      The active/inactive sprite-swap on click is preserved — the hover overlay is
+      additive on top of the current sprite.
+- [ ] Add `constexpr float kHoverTransitionDuration = 0.15f;` to `src/ui/ui_constants.h`.
+- [ ] Add unit test `HUDGlacierGlass_HoverTransition_AlphaLerps`: post a simulated
+      mouse-enter event, advance `ManualClock` by `kHoverTransitionDuration / 2`, call
+      `hud.update(dt)`, verify `setElementAlpha` was called with an intermediate alpha
+      value (not 0 and not full target alpha). Advance again to full duration, verify
+      `setElementAlpha` was called with target alpha.
+- [ ] Add unit test `HUDGlacierGlass_HoverExit_AlphaReturnsToZero`: post mouse-enter,
+      advance to full hover, post mouse-exit, advance by `kHoverTransitionDuration`,
+      verify `setElementAlpha` was called with 0.
 
 ---
 
@@ -1902,17 +1999,17 @@ This phase requires the HUD bitmap fonts to be baked from the correct typefaces.
 | `src/ui/NotificationManager.h`                                                  | Remove `refreshCriticalVisibility()` and `refreshNormalVisibility()` private method declarations; remove `UIElementHandle handle` field from `CriticalToast` and `NormalToast` structs; add public `void drawOverlay()` method declaration; add private `void refreshVisibleSlots()` method declaration; add `CardSlot m_slots[kNotifMaxVisible]` + `int m_visibleCount{0}` + `double m_lastToastSoundTime{-1.0e30}` private members; add `IHUDBadgeNotifier* m_badge{nullptr}` private member; add fifth nullable constructor parameter `IHUDBadgeNotifier* badgeNotifier = nullptr`; add `std::unordered_map<UIElementHandle, int> m_dismissButtonToSlot` private member; add `NotificationLog m_log` private member (owned by `NotificationManager`; ring-buffer log of collapsed/evicted card data); add public `const NotificationLog& getLog() const` accessor (returns `m_log` for test assertions); add `bool soundFired{false}` field to `CriticalToast` struct (edge-detection for fire-on-display — prevents re-fire on subsequent `refreshVisibleSlots()` calls); add `bool soundFired{false}` field to `NormalToast` struct (same edge-detection purpose); add public `int findSlotIndexForDismissButton(UIElementHandle) const` accessor; add public `void dismissCard(int slotIndex)`; **add public `void onInput(const InputEvent& ev)`** (Priority 2 keyboard dismiss path — called by `UIManager::onEvent()` via `m_notificationManager->onInput(ev)` and callable directly from tests without a `UIManager` fixture member); **add public `int getFocusedCriticalIndex() const`** test accessor (exposes `m_focusedCriticalIndex` for the `NotifRail_DismissMiddleCritical_FocusFollowsShift` test); **add public `int getNormalQueueSize() const`** test accessor (returns `(int)m_normalQueue.size()` — used by `NotifRail_NormalCard_AutoDismiss_AfterFiveSeconds` assertion (b) to verify the Normal queue is empty after auto-dismiss; log-based checks are not valid here because auto-dismissed cards are never appended to the log)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `src/ui/UIManager.cpp`                                                          | Expand `drawMinimapOverlay()` → `drawOverlays()` post-drawAll (step 10b) which also calls `m_notifications->drawOverlay()`; add minimap toggle button click routing in `onEvent()` that dispatches to `m_hud->onMinimapOverlayClick(...)` via the new HUD getters; add dismiss-button routing via `m_notifications->findSlotIndexForDismissButton(caller)` → `m_notifications->dismissCard(slotIndex)`; **add single-line keyboard delegation `m_notificationManager->onInput(ev)` in `onEvent()` — the old inline Priority 2 `dismissCriticalToast(queueEntry.handle)` call is removed and all keyboard dismiss routing now lives inside `NotificationManager::onInput()`**; implement `void UIManager::incrementNotificationBadge() { if (m_hud) m_hud->incrementNotificationBadge(); }` (null-safe — NotificationManager is constructed before HUD)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `src/ui/UIManager.h`                                                            | Add `IHUDBadgeNotifier` as a base class: `class UIManager : public IHUDBadgeNotifier`; add `void incrementNotificationBadge() override;` to UIManager's public declarations; add `#include "src/interfaces/IHUDBadgeNotifier.h"` to required includes; add `NotificationManager& getNotificationManager()` public accessor; rename `drawMinimapOverlay()` → `drawOverlays()` declaration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `src/interfaces/IUIBackend.h`                                                   | Add `virtual void setElementTextColorA(UIElementHandle handle, int r, int g, int b, int a) = 0;` as method 23; update method-count comment from 22 to 23                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `src/interfaces/IUIBackend.h`                                                   | Add `virtual void setElementTextColorA(UIElementHandle handle, int r, int g, int b, int a) = 0;` as method 23; add `virtual void drawNineSlice(int x, int y, int w, int h, int cornerRadius, int r, int g, int b, int a) = 0;` as method 24 (Deliverable 13); update method-count comment from 22 to 24 |
 | `src/rendering/IrrlichtUIBackend.h`                                             | Add override declaration for `setElementTextColorA`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `src/rendering/IrrlichtUIBackend.cpp`                                           | Add `setElementTextColorA` implementation — cast handle to `IGUIStaticText*`, call `setOverrideColor(SColor(a,r,g,b))` + `enableOverrideColor(true)` for static text elements. **Note**: `IGUIButton::setOverrideColor()` does NOT exist in vcpkg Irrlicht; for button text colour, use the global skin path `m_guiEnv->getSkin()->setColor(EGDC_BUTTON_TEXT, SColor(a,r,g,b))` — documented in `architecture/ui-ux/ui-manager.md §method 21/23`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `tests/ui/MockUIBackend.h`                                                      | Add `MOCK_METHOD(void, setElementTextColorA, (UIElementHandle handle, int r, int g, int b, int a), (override));` as method 23 mock entry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `tests/ui/MockUIBackend.h`                                                      | Add `MOCK_METHOD(void, setElementTextColorA, (UIElementHandle handle, int r, int g, int b, int a), (override));` as method 23; add `MOCK_METHOD` for `drawNineSlice` as method 24 (Deliverable 13); update method-count to 24 |
 | `src/interfaces/ICitySimulation.h`                                              | Add `enum class MinimapOverlay { Map, Traffic, Service };` and `virtual void setMinimapOverlay(MinimapOverlay overlay) = 0;`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `tests/ui/MockCitySimulation.h`                                                 | Add `MOCK_METHOD(void, setMinimapOverlay, (MinimapOverlay), (override));`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `src/interfaces/IHUDBadgeNotifier.h`                                            | **NEW** — lightweight interface with single `virtual void incrementNotificationBadge() = 0` method; injected into `NotificationManager` as fifth nullable constructor parameter (see Deliverable 3 IHUDBadgeNotifier injection section)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `tests/ui/MockHUDBadgeNotifier.h`                                               | **NEW** — `MOCK_METHOD(void, incrementNotificationBadge, (), (override));`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `src/ui/hud_sprite_ids.h`                                                       | Add `kSpriteNotifCritical` (ID 324), `kSpriteNotifWarning` (ID 325), `kSpriteNotifInfo` (ID 326) — row 10 cols 4–6; add `kSpriteMinimapMapActive` … `kSpriteMinimapServiceHover` (9 constants — active/inactive/hover × 3, row 11 cols 0-8 → IDs 352–360)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `src/ui/ui_constants.h`                                                         | Add Glacier Glass palette constants as **packed ARGB `uint32_t`** (0xAARRGGBB format): `kColorLabelPrimary`, `kColorLabelSecondary`, `kColorValueAmber`, `kColorValuePositive`, `kColorValueNegative`, `kColorRatingPill`, `kColorCyanActive`, `kColorBellInactive`, `kColorPendingRate`, `kActiveButtonBorderColor`, `kDeficitPulseArgb`, **`kBankruptcyCountdownArgb` (0xFFFF3830u — fully-opaque vivid red, Month-2 bankruptcy countdown per `game-over-flow.md`)**, `kNotifStripCritical`, `kNotifStripWarning`, `kNotifStripInfo`, `kNotifCardBg`, `kChromeStripColor`, **`kChromeRimColor = kChromeStripColor`** (alias for 2px top-edge chrome rim on minimap panel and notification cards), `kGlacierPanelBg` (SColor(66,4,12,28) for HUD panel backgrounds), `kMinimapToggleActiveBorder` (0xA500C8F0 — SColor(165,0,200,240), 2 px active border for the active minimap toggle button drawn via four `fillColoredRect` calls in `drawOverlays()` step 10b), `kDotMap`, `kDotTraffic`, `kDotService` (packed ARGB for minimap toggle dot indicators); add layout constants `kNotifCardLeft`, `kNotifCardRight`, `kNotifRailTop`, `kNotifCardGap`, `kNotifCardH`, `kNotifMaxVisible`, `kNotifCardIconLeft`, `kNotifCardTextLeft`, `kNotifCardTextWidth`, `kNotifCardDismissLeft`, `kMMBtnTop`, `kMMBtnBottom`, `kMMBtnHeight`, `kMMBtnWidth`, `kMMBtnGap`, `kMMBtnMapX`, `kMMBtnTrafficX`, `kMMBtnServiceX`, `kMMBtnRight`, **`kMinimapRight`** (= `kMMBtnRight` = 1920, alias for minimap right edge used by input-arbitration carve-out), **`kMinimapBottom`** (= 1080, full-height widget footprint bottom). Update existing constants: `kMinimapWidgetTop` → 838, `kMinimapWidgetTopOverlayActive` → **722** (legend panel top — carve-out expands when overlay active), **`kMinimapWidgetLeft` → 1720** (= `kMMBtnMapX` in V1) with inline comment `// kMinimapWidgetLeft = 1720 (= kMMBtnMapX) in V1`. Add `static_assert`s: `kMinimapWidgetTop == kMMBtnTop`, `kMinimapWidgetTopOverlayActive == 722`, `kMinimapWidgetLeft == kMMBtnMapX`, `kMinimapRight == kMMBtnRight`. **No Irrlicht include added.** |
-| `tests/ui/HUDGlacierGlassTest.cpp`                                              | **NEW** — 7 unit tests for chrome strip, minimap toggle mutual exclusivity, toggle state after sequential clicks, sim_ dispatch for Map/Traffic/Service, and hover sprite-swap                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `tests/ui/HUDGlacierGlassTest.cpp`                                              | **NEW** — 10 unit tests for chrome strip, minimap toggle mutual exclusivity, toggle state after sequential clicks, sim_ dispatch for Map/Traffic/Service, hover sprite-swap, `HUDGlacierGlass_DrawNineSlice_Called_ForEachPanel` (Deliverable 13), `HUDGlacierGlass_HoverTransition_AlphaLerps` (Deliverable 15), and `HUDGlacierGlass_HoverExit_AlphaReturnsToZero` (Deliverable 15)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `tests/ui/NotificationRailTest.cpp`                                             | **NEW** — 25 unit tests (23 NotifRail*\* + 2 HUDGlacierGlass_SetElementTextColorA*\*): right-rail card positioning, dismiss-shift (all 7 handles repositioned), Normal-first collapse (CRITICAL preserved), collapse-appends-to-log + badge increment, 11th-Normal eviction appends to log + LOG_WARN, severity strip fillColoredRect, card background (addStaticText-before-setElementBackground ordering), auto-pause contract preserved, layout-integrity invariant (fourth card bottom < kMMBtnTop − 16), **Normal card 5-second auto-dismiss timer (`NotifRail_NormalCard_AutoDismiss_AfterFiveSeconds`)**; audio rules: CRITICAL audio fires on display (not on enqueue); `NotifRail_PostCriticalDuringModalActive_UIToastNotFiredWhileModalActive` verifies audio is suppressed during `postCritical()` and fires exactly once on `setModalActive(false)` when the card becomes visible; CRITICAL 150 ms rate-limit burst test, Normal deferred-fire contract (queued-while-full, evicted-11th-never-fires, already-visible-no-refire via `soundFired` flag); setElementRect reposition lock (addStaticText.Times(0) + addButton.Times(0)); setElementTextColorA palette assertions; modal suppression hides all visible cards; findSlotIndexForDismissButton lookup contract; CRITICAL no-auto-resume on dismissCard; keyboard dismiss via m_focusedCriticalIndex; focus-follows-shift on middle-card dismiss; **`NotifRail_EnterDismissesFocusedNonSlot0Critical_RotatesAndDismissesCorrectCard`** (Tab+Enter on slot-1 CRITICAL dismisses slot-1 not slot-0; slot-0 card remains live; no-auto-resume holds). Note: `UIManagerDrawOrder_DrawOverlays_CalledAfterDrawAll` goes in `ui_manager_draw_order_test.cpp`, not here.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `tests/ui/notification_system_test.cpp`                                         | Update coordinate-based assertions from old top-center y:20/y:130 positions to the new right-rail positions (y:64, y:151, …); **also** update existing `EXPECT_CALL(audio_, playSound(UI_TOAST, SoundPriority::NORMAL, 1.0f))` assertions to `SoundPriority::HIGH` throughout this file (aligns with `source-pool.md` / `notification-system.md` — see Deliverable 3 audio priority correction bullet)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `tests/ui/ui_manager_draw_order_test.cpp`                                       | Update `DrawOrder_BackToFront_MatchesSpec` (replace kNotificationSentinel `setElementVisible` expectation with `fillColoredRect(1616, 64, 3, 80, 200, 40, 30, 204)`); in `DrawOrder_BackToFront_MatchesSpec`, after the `Minimap::drawOverlay()` step 3 `InSequence` assertion and before the notification strip assertion (step 5), add the step 4 chrome rim assertion: `EXPECT_CALL(backend_, fillColoredRect(kMMBtnMapX, kMapY, kMMBtnRight - kMMBtnMapX, 2, 230, 242, 252, 242)).Times(AtLeast(1));` — this locks that the chrome rim fires after `Minimap::drawOverlay()` and before the notification severity strip, matching the Deliverable 4 draw-order spec; update `UIManagerDrawOrder_ModalActive` (remove kNotificationSentinel expectation — modal hides all cards, `drawOverlay()` emits nothing, no ordering assertion; update comment to `// NotificationManager: modal hides all cards, drawOverlay emits nothing, no ordering assertion (Phase 11q13+)`; scrim and modal sentinel assertions remain); add new test `UIManagerDrawOrder_DrawOverlays_CalledAfterDrawAll`: post a CRITICAL toast, call `uiManager.drawOverlays()`, assert `fillColoredRect(1616, 64, 3, 80, 200, 40, 30, 204)` fires at least once                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -1936,12 +2033,18 @@ This phase requires the HUD bitmap fonts to be baked from the correct typefaces.
 | `assets/textures/ui/hud_sprites_ui.png`                                         | Add row 10 cols 4–6 notification severity icon artwork (IDs 324–326) and row 11 cols 0–8 minimap toggle sprites (IDs 352–360) |
 | `assets/fonts/src/BarlowCondensed-*.ttf`                                        | Add source font files from Google Fonts (OFL license) if not already present |
 | `assets/fonts/src/ShareTechMono-Regular.ttf`                                    | Add source font file from Google Fonts (OFL license) if not already present |
+| `LICENSE.md`                                                                    | Add Barlow Condensed + Share Tech Mono entries under SIL OFL 1.1 (Deliverable 12) |
 | `assets/fonts/hud_font_720.xml`                                                 | Regenerated from Barlow Condensed via `tools/generate_bitmap_fonts.py` |
 | `assets/fonts/hud_font_1080.xml`                                                | Regenerated from Barlow Condensed |
 | `assets/fonts/hud_font_1440.xml`                                                | Regenerated from Barlow Condensed |
 | `assets/fonts/hud_mono_font_720.xml`                                            | Regenerated from Share Tech Mono via `tools/generate_bitmap_fonts.py` |
 | `assets/fonts/hud_mono_font_1080.xml`                                           | Regenerated from Share Tech Mono |
 | `assets/fonts/hud_mono_font_1440.xml`                                           | Regenerated from Share Tech Mono |
+| `assets/textures/ui/panel_corners_10px.png`                                     | **NEW** — 128×128 RGBA PNG with 4 pre-flipped quarter-circle corners in 2×2 grid (10 px radius, anti-aliased alpha) for 9-slice panel rendering (Deliverable 13) |
+| `src/interfaces/IUIBackend.h`                                                   | Add `drawNineSlice` as method 24; update method-count comment 23→24 (Deliverable 13) |
+| `src/rendering/IrrlichtUIBackend.cpp`                                           | Add `drawNineSlice` implementation — 9 `draw2DImage` calls (4 corners, 4 edges, 1 centre fill) (Deliverable 13); add `setElementTextColorA` implementation (Deliverable 6) |
+| `tests/ui/MockUIBackend.h`                                                      | Add `MOCK_METHOD` for `drawNineSlice` (method 24); update method-count comment 23→24 (Deliverable 13) |
+| `tools/generate_bitmap_fonts.py`                                                | Add `--letter-spacing` parameter that inflates glyph `rect` width in generated `.xml` font files (Deliverable 14) |
 
 ---
 
@@ -1954,7 +2057,7 @@ anatomy + drawOverlay);
 ~40 lines changed in `UIManager.cpp` (drawOverlays expansion + onEvent routing);
 ~30 lines new in `HUD.h` / `NotificationManager.h` (new members + CardSlot struct);
 ~50 lines new in `hud_sprite_ids.h` + `ui_constants.h` (constants);
-~120 lines new in `HUDGlacierGlassTest.cpp` (7 tests: 5 original + Test 6 sim_ dispatch + Test 7 hover);
+~170 lines new in `HUDGlacierGlassTest.cpp` (10 tests: 5 original + Test 6 sim_ dispatch + Test 7 hover + Test 8 drawNineSlice + Test 9 hover-alpha-lerp + Test 10 hover-exit);
 ~460 lines new in `NotificationRailTest.cpp` (23 tests);
 ~10 lines changed in `notification_system_test.cpp` (coordinate updates);
 ~15 lines changed in `resolution-ui-scaling.md`;
@@ -1968,7 +2071,7 @@ anatomy + drawOverlay);
       `m_btnMinimapTraffic`, `m_btnMinimapService` are all valid handles after construction.
 - [ ] Clicking a minimap toggle button deactivates the other two and activates the clicked
       one (verified by the 5 `HUDGlacierGlass_*` unit tests passing).
-- [ ] All 7 `HUDGlacierGlassTest` tests pass under `ctest --test-dir build -LE "integration|requires-opengl"` (includes Test 6 sim_ dispatch and Test 7 hover sprite-swap).
+- [ ] All 10 `HUDGlacierGlassTest` tests pass under `ctest --test-dir build -LE "integration|requires-opengl"` (includes Test 6 sim_ dispatch, Test 7 hover sprite-swap, Test 8 `HUDGlacierGlass_DrawNineSlice_Called_ForEachPanel` from Deliverable 13, Test 9 `HUDGlacierGlass_HoverTransition_AlphaLerps` and Test 10 `HUDGlacierGlass_HoverExit_AlphaReturnsToZero` from Deliverable 15).
 - [ ] All 25 `NotificationRailTest` tests pass under `ctest --test-dir build -LE "integration|requires-opengl"`.
 - [ ] Third notification rail card bottom edge (y = 318) is < kMMBtnTop − 16 (= 822); cards never overlap the minimap toggle row (verified by `NotifRail_ThirdCard_BottomAboveMinimapToggles` test).
 - [ ] Notification cards appear at `x:1616–1908, top:64` when posted (no cards appear in
@@ -2000,8 +2103,8 @@ anatomy + drawOverlay);
 - [ ] **Anti-literal gate (named-constant decomposition required)**: grep for literal `setElementBackground(` / `fillColoredRect(` calls with raw numeric arguments in `src/ui/HUD.cpp` and `src/ui/NotificationManager.cpp` confirms zero occurrences — all use named constant decomposition (from `kChromeStripColor`, `kNotifCardBg`, `kNotifStripCritical`, `kNotifStripWarning`, `kNotifStripInfo`, `kActiveButtonWashColor`, `kActiveButtonBorderColor`, etc.) via `(v>>16)&0xFF, (v>>8)&0xFF, v&0xFF, v>>24` or an equivalent helper.
 - [ ] `ui_constants.h` contains no `#include <irr*>` directive and no `irr::video::SColor`
       type references (grep confirms).
-- [ ] `grep -c "MOCK_METHOD" tests/ui/MockUIBackend.h` returns **23** (covers all
-      `IUIBackend` virtual methods including `setElementTextColorA`).
+- [ ] `grep -c "MOCK_METHOD" tests/ui/MockUIBackend.h` returns **24** (covers all
+      `IUIBackend` virtual methods including `setElementTextColorA` and `drawNineSlice`).
 - [ ] `hud_sprite_ids.h` `static_assert(kSpriteNotifCritical == 324, ...)`
 - [ ] `hud_sprite_ids.h` `static_assert(kSpriteNotifWarning == 325, ...)`
 - [ ] `hud_sprite_ids.h` `static_assert(kSpriteNotifInfo == 326, ...)`
@@ -2027,3 +2130,14 @@ anatomy + drawOverlay);
       cols 0–8 (IDs 352–360) are present and non-empty in `assets/textures/ui/hud_sprites_ui.png`.
 - [ ] Build succeeds on Linux (`make build`).
 - [ ] All existing tests pass (`make test`).
+- [ ] **Rounded corners (Deliverable 13)**: `assets/textures/ui/panel_corners_10px.png` exists
+      and is a 128×128 RGBA PNG (2×2 grid of pre-flipped corners). `drawNineSlice` method exists in `IUIBackend.h` (method 24).
+      `HUDGlacierGlass_DrawNineSlice_Called_ForEachPanel` test passes.
+- [ ] **Letter spacing (Deliverable 14)**: `tools/generate_bitmap_fonts.py --help` shows
+      `--letter-spacing` parameter. All 6 `.xml` font files have glyph widths wider than
+      the default (diff confirms inflated `rect` values).
+- [ ] **Hover transitions (Deliverable 15)**: `kHoverTransitionDuration` is declared in
+      `ui_constants.h`. `HUDGlacierGlass_HoverTransition_AlphaLerps` and
+      `HUDGlacierGlass_HoverExit_AlphaReturnsToZero` tests pass.
+- [ ] `grep -c "MOCK_METHOD" tests/ui/MockUIBackend.h` returns **24** (includes
+      `drawNineSlice` as method 24).
