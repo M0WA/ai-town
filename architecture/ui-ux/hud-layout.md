@@ -312,7 +312,7 @@ zone coding; reuse `kOverlayArgbResidential`, `kOverlayArgbCommercial`, and
 
 ## Minimap Overlay Toggles
 
-Three toggle buttons below the minimap render area, added in Phase 11q13:
+Three toggle buttons above the minimap render area, added in Phase 11q13:
 
 | Button  | Left edge (virtual) | Y     | Width | Height |
 |---------|---------------------|-------|-------|--------|
@@ -323,16 +323,18 @@ Three toggle buttons below the minimap render area, added in Phase 11q13:
 Total row width: 200 px (matches minimap width). Gap between top of row and minimap render
 area: 4 px.
 
-**Toggle button labels**: Uppercase strings `"MAP"`, `"TRAFFIC"`, `"SERVICE"` are passed to
-`addButton()`. Irrlicht has no CSS `text-transform` equivalent — only the literal string
-passed to `addButton()` is rendered. Title-case (`"Map"`, `"Traffic"`, `"Service"`) is
-incorrect and must not be used.
+**Toggle button labels**: Buttons are created with empty labels (`addButton("", ...)`)
+because per-button text colour requires child `IGUIStaticText` overlays. The uppercase
+strings `"MAP"`, `"TRAFFIC"`, `"SERVICE"` are passed to the child `addStaticText()` overlays,
+not to `addButton()`. Irrlicht has no CSS `text-transform` equivalent — only the literal
+string passed to `addStaticText()` is rendered. Title-case (`"Map"`, `"Traffic"`,
+`"Service"`) is incorrect and must not be used.
 
 **Active state**: background fill `rgba(4,20,56,92)` drawn via `fillColoredRect`. Border
 `kMinimapToggleActiveBorder` = `0xA500C8F0` (`SColor(165,0,200,240)` = `rgba(0,200,240,0.65)`).
-Text colour `#60C8E8` via `setElementTextColor`.
+Text colour `#60C8E8` via `setElementTextColor` on child `IGUIStaticText` label overlay.
 **Inactive state**: background fill `rgba(4,12,28,71)`. Text colour `rgba(140,180,220,0.55)`
-via `setElementTextColorA`.
+via `setElementTextColorA` on child `IGUIStaticText` label overlay.
 **Dot indicator**: 5×5 px filled circle drawn left of text label via `fillColoredRect`.
 
 - Map dot: `#A8C8F0`
