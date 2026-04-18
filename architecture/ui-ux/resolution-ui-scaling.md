@@ -195,11 +195,11 @@ is created — and is **not dynamic**. Resolution changes during a session are n
 
 ### Resolution Tier Boundaries
 
-| Screen height | Tier | Physical cell height | Font files |
-|---|---|---|---|
-| < 900 px | 720p tier | 22 px | `hud_font_720.xml`, `hud_mono_font_720.xml` |
-| 900 – 1259 px | 1080p tier | 33 px | `hud_font_1080.xml`, `hud_mono_font_1080.xml` |
-| ≥ 1260 px | 1440p tier | 44 px | `hud_font_1440.xml`, `hud_mono_font_1440.xml` |
+| Screen height | Tier       | Physical cell height | Font files                                    |
+| ------------- | ---------- | -------------------- | --------------------------------------------- |
+| < 900 px      | 720p tier  | 22 px                | `hud_font_720.xml`, `hud_mono_font_720.xml`   |
+| 900 – 1259 px | 1080p tier | 33 px                | `hud_font_1080.xml`, `hud_mono_font_1080.xml` |
+| ≥ 1260 px     | 1440p tier | 44 px                | `hud_font_1440.xml`, `hud_mono_font_1440.xml` |
 
 Boundaries chosen so that 720 p (720 px) and 768 p (768 px) use the 720p tier; 1080 p (1080 px)
 uses the 1080p tier; 1440 p (1440 px) and 4K (2160 px) use the 1440p tier.
@@ -237,7 +237,7 @@ The selected tier determines which font XML pair is loaded via
 - **Typeface requirements**: Numeric readouts (tax rates, treasury balance, population counts, percentages) must use a **monospace typeface** (prevents layout shift as digits change). Labels (zone types, panel titles, button text) must use a **sans-serif typeface** for legibility at small sizes.
 - **These rules apply to all UI elements**: HUD resource bar, demand pressure bars (must supplement color with zone-type letters R/C/I), toolbar tooltip text, Query Panel fields, Finances Panel rows, notification toasts, modal dialog body text, and minimap legend labels.
 
-## Visual Design — Glass City: Canonical Colour Palette
+## Visual Design — Glacier Glass + Silver Chrome: Canonical Colour Palette
 
 The following values are the **locked canonical palette** for all UI panels, HUD elements,
 modals, and overlays in AI Town. Every file in `architecture/ui-ux/` that specifies colours
@@ -246,10 +246,11 @@ categories below without updating this table first.
 
 ### Panel Backgrounds
 
-| Element | Value | Usage |
-|---|---|---|
-| Resource/budget bar | `rgba(13, 27, 42, 0.88)` | Full-width top bar; 0px corner radius |
-| All other panels | `rgba(13, 27, 42, 0.78–0.88)` | Toolbar, sub-panels, inspector, minimap bg, modals |
+| Element                      | Value                                                      | Usage                                              |
+| ---------------------------- | ---------------------------------------------------------- | -------------------------------------------------- |
+| Generic panel background     | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` = `0x42040C1C` | Toolbar, sub-panels, inspector, minimap bg, modals |
+| Notification card background | `SColor(71, 4, 12, 30)` = `kNotifCardBg` = `0x47040C1E`    | CRITICAL and Normal toast card backgrounds         |
+| Resource/budget bar          | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg`                | Full-width top bar; 0px corner radius              |
 
 Panel backgrounds use deep navy — not milky white. The alpha range `0.78–0.88` allows
 individual panels to tune opacity; the resource bar is fixed at the upper end (`0.88`) for
@@ -264,40 +265,43 @@ legibility against the sky.
 
 ### Accent and State Colours
 
-| Token | Hex | Usage |
-|---|---|---|
-| Accent / teal | `#00C9C8` | Active borders, focus rings, active-state glow |
-| Active border | `rgba(0, 201, 200, 0.75)` | 2 px border on active buttons and icon cells |
-| Amber / values | `#F0B429` | All HUD numeric values: treasury, population, demand bars, date |
-| Amber / undo warning | `#F0B429` | Undo countdown amber state |
-| Near-white / labels | `#EBF4F6` | Primary label text |
-| Mid-blue / sub-labels | `#4A7FA5` | Secondary / sub-labels, less prominent text |
-| Error / deficit red | `#F04E37` | Deficit indicators, error states |
-| Warning amber | `#E8960C` | Warning states (distinct from value amber `#F0B429`) |
-| Surplus green | `#80C850` | Budget surplus positive balance indicator (used in `finances-panel.md` §Budget Section) |
+| Token                 | Hex                                                 | Usage                                                                                   |
+| --------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Accent / teal         | `#00C9C8`                                           | Active borders, focus rings, active-state glow                                          |
+| Active border         | `rgba(0,200,255,0.76)` = `kActiveButtonBorderColor` | 2 px border on active buttons and icon cells                                            |
+| Chrome strip          | `#E6F2FC` alpha ≈ 95%                               | Silver Chrome top-rim accent                                                            |
+| Amber / values        | `#F0B429`                                           | All HUD numeric values: treasury, population, demand bars, date                         |
+| Amber / undo warning  | `#F0B429`                                           | Undo countdown amber state                                                              |
+| Near-white / labels   | `#EBF4F6`                                           | Primary label text                                                                      |
+| Mid-blue / sub-labels | `#4A7FA5`                                           | Secondary / sub-labels, less prominent text                                             |
+| Positive value        | `#70E898`                                           | Budget surplus, positive growth                                                         |
+| Deficit value         | `#FF7870`                                           | Deficit indicators, error states                                                        |
+| Rating pill           | `#8ECAFF`                                           | City rating display pill                                                                |
+| Warning amber         | `#E8960C`                                           | Warning states (distinct from value amber `#F0B429`)                                    |
+| Surplus green         | `#80C850`                                           | Budget surplus positive balance indicator (used in `finances-panel.md` §Budget Section) |
 
 ### Button Tile States
 
 All toolbar, sub-panel, modal, and settings buttons use this three-state tile spec:
 
-| State | Background | Border |
-|---|---|---|
-| Inactive | `rgba(255, 255, 255, 0.08)` | 1 px `rgba(255, 255, 255, 0.18)` |
-| Hover | `rgba(255, 255, 255, 0.15)` | 1 px `rgba(255, 255, 255, 0.35)` |
-| Active | `rgba(0, 201, 200, 0.22)` teal wash | 2 px `rgba(0, 201, 200, 0.75)` + 4 px baked glow |
+| State    | Background                          | Border                                                                     |
+| -------- | ----------------------------------- | -------------------------------------------------------------------------- |
+| Inactive | `rgba(255, 255, 255, 0.08)`         | 1 px `rgba(255, 255, 255, 0.18)`                                           |
+| Hover    | `rgba(255, 255, 255, 0.15)`         | 1 px `rgba(255, 255, 255, 0.35)`                                           |
+| Active   | `kActiveButtonWashColor` = `rgba(0, 200, 255, 0.16)` cyan wash | 2 px `rgba(0,200,255,0.76)` = `kActiveButtonBorderColor` + 4 px baked glow |
 
 "Baked glow" on the active state means the glow is pre-authored into the sprite cell
 (see `architecture/asset-standards/2d-texture-standards.md` UI Sprite Sheet Art Style
-— Glass City), not a runtime blur. The `IUIBackend` interface does not expose a blur
-operation; the glow must be part of the active-state icon art.
+— Glacier Glass + Silver Chrome), not a runtime blur. The `IUIBackend` interface does not
+expose a blur operation; the glow must be part of the active-state icon art.
 
 ### Icon States
 
-| State | Style | Opacity | Border/Glow |
-|---|---|---|---|
-| Inactive | **Outlined — 2 px stroke only**, no fill | 65% | None |
-| Hover | **2 px outlined stroke** | 85% | 1 px `rgba(255,255,255,0.35)` |
-| Active | **Filled solid icon** | 100% | 2 px teal border + baked glow |
+| State    | Style                                    | Opacity | Border/Glow                   |
+| -------- | ---------------------------------------- | ------- | ----------------------------- |
+| Inactive | **Outlined — 2 px stroke only**, no fill | 65%     | None                          |
+| Hover    | **2 px outlined stroke**                 | 85%     | 1 px `rgba(255,255,255,0.35)` |
+| Active   | **Filled solid icon**                    | 100%    | 2 px teal border + baked glow |
 
 Icons "gain weight" on selection: the visual transition from outlined-stroke to filled-solid
 communicates mode activation without relying solely on colour or border changes. All three
@@ -345,21 +349,24 @@ Button tiles are independent interactive cells and receive uniform 8 px radius r
 
 ### Superseded Values
 
-The following values from earlier specs are **superseded** by the Glass City palette and
-must not be used for new work:
+The following values from earlier specs are **superseded** by the Glacier Glass + Silver Chrome
+palette and must not be used for new work:
 
-| Old value | Category | Replacement |
-|---|---|---|
-| Milky/white frosted background | Panel background | `rgba(13, 27, 42, 0.78–0.88)` |
-| `rgba(0, 200, 220, 35)` active tint | Active state signal | Teal wash `rgba(0, 201, 200, 0.22)` + 2 px border |
-| Weak cyan-teal accent | Accent colour | `#00C9C8` |
-| White or default for numeric values | Value colour | `#F0B429` amber |
+| Old value                               | Category             | Replacement                                                                  |
+| --------------------------------------- | -------------------- | ---------------------------------------------------------------------------- |
+| Milky/white frosted background          | Panel background     | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg`                                  |
+| `rgba(0, 200, 220, 35)` active tint     | Active state signal  | Teal wash `rgba(0, 201, 200, 0.22)` + 2 px `kActiveButtonBorderColor` border |
+| Weak cyan-teal accent                   | Accent colour        | `#00C9C8`                                                                    |
+| White or default for numeric values     | Value colour         | `#F0B429` amber                                                              |
+| `#F04E37` deficit red                   | Deficit indicator    | `#FF7870`                                                                    |
+| `rgba(0, 201, 200, 0.75)` active border | Active button border | `rgba(0,200,255,0.76)` = `kActiveButtonBorderColor`                          |
+| `rgba(13, 27, 42, 0.78–0.88)` deep navy | Panel backgrounds    | `kGlacierPanelBg` / `kNotifCardBg`                                           |
 
 > **Implementation note**: The superseded "Frosted Glass" sprite sheet art style section in
 > `architecture/asset-standards/2d-texture-standards.md` documents the Phase 10 signed-off
-> sprite sheet. That section is now extended (not replaced) by the Glass City spec in the
-> same file. New icon authoring follows Glass City; the signed-off Phase 10 sheet is a
-> historical record of what was delivered before Glass City was adopted.
+> sprite sheet. That section is now extended (not replaced) by the Glacier Glass + Silver Chrome
+> spec in the same file. New icon authoring follows Glacier Glass; the signed-off Phase 10 sheet
+> is a historical record of what was delivered before the palette was adopted.
 
 ## Colorblind Accessibility
 
@@ -371,14 +378,14 @@ must not be used for new work:
   - **Residential (R)**: diagonal hatching at 45°
   - **Commercial (C)**: horizontal lines
   - **Industrial (I)**: cross-hatch
+
 - **Service Coverage overlay on minimap**: In colorblind mode, use distinct geometric pattern overlays (e.g., diagonal hatching for fire, horizontal lines for police, dotted for power, cross-hatch for water) in addition to tint colors.
 - **Zone placement preview/cursor tint**: In colorblind mode, zone type cursors must include a zone-type label overlay (small "R", "C", or "I" text) so players can confirm zone type without relying on color.
 - **3D zone colour overlay** (the `setZoneOverlay` semi-transparent quad layer introduced in Phase 9b):
   **Phase 11m supersession**: Phase 11m replaces the static per-zone-type ARGB colours below with a
   density-tier-based fixed-color overlay system. Unbuilt zoned tiles receive a fixed colour keyed on
   zone type × density tier (Low/Medium/High) with no demand computation (see
-  `architecture/game-design/zoning-system.md`, "Unbuilt Zone Overlay Colors (Phase 11m)"), at alpha
-  180. Built tiles carry no overlay. The static ARGB constants below apply only to code written before
+  `architecture/game-design/zoning-system.md`, "Unbuilt Zone Overlay Colors (Phase 11m)"), at alpha 180. Built tiles carry no overlay. The static ARGB constants below apply only to code written before
   Phase 11m. After Phase 11m, `m_overlayMap` entries are populated exclusively by
   `computeZoneOverlayColor()` using the density-tier lookup table.
 
@@ -398,6 +405,7 @@ must not be used for new work:
   `IrrlichtRenderer::setZoneOverlay()` at Y + 0.15f from the UI sprite sheet glyph texture.
   `UIManager` selected the ARGB variant by querying `m_settings->isColorblindMode()`. This spec is
   retained for reference; implementation is superseded by Phase 11m density-tier-based fixed-color overlay system.
+
 - **Tile hover highlight** (the `setTileHoverHighlight` per-tool ARGB introduced in Phase 9b):
   In standard mode, hover highlight colours are: Zone = `0x80FF00FF` (magenta), Road = `0x8000FFFF` (cyan), Utilities = `0x80FF8000` (orange), Demolish = `0x80FF0000` (red), Query = `0x80FFFFFF` (white). All five hues are distinguishable in standard mode.
   In colorblind mode, the hover highlight MUST additionally render a tool-type icon or letter in the highlight quad to supplement color: Zone shows a small 'Z' glyph, Road shows 'R', Utilities shows 'U', Demolish shows 'X'. Query retains the white highlight (white is colorblind-safe). The glyph is rendered as a sprite from the UI sprite sheet, centered on the tile, using the same Y + 0.05f offset as the hover quad. The actual hover highlight ARGB colours do not change in colorblind mode for the hover highlight (unlike the zone overlay) — the colours are bright and high-contrast enough that deuteranopia does not cause confusion between them. The glyph is additive supplemental encoding. **Implementation scope**: The hover highlight colorblind glyph is deferred to Phase 12 (colorblind QA pass), consistent with the Phase 8 colorblind delivery schedule. Phase 9b delivers only the standard-mode hover ARGB colours. The architecture commitment is made here so Phase 12 has a concrete spec.

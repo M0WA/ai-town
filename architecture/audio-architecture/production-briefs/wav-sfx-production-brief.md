@@ -19,12 +19,12 @@ Stinger WAV assets (`stinger_crisis.wav`, `stinger_milestone.wav`) are specified
 
 ## Universal WAV SFX Parameters
 
-| Parameter | Value for all assets in this brief |
-|---|---|
-| Format | WAV PCM (uncompressed linear PCM — audio format tag 0x0001) |
-| Sample rate | 44100 Hz |
-| Bit depth | 16-bit signed integer |
-| Channels | Mono (1 channel) — see rationale below |
+| Parameter            | Value for all assets in this brief                               |
+| -------------------- | ---------------------------------------------------------------- |
+| Format               | WAV PCM (uncompressed linear PCM — audio format tag 0x0001)      |
+| Sample rate          | 44100 Hz                                                         |
+| Bit depth            | 16-bit signed integer                                            |
+| Channels             | Mono (1 channel) — see rationale below                           |
 | Loudness measurement | Integrated LUFS (ITU-R BS.1770-3), measured on the authored file |
 
 **Why all WAV SFX are mono**: OpenAL Soft requires mono buffers for positional 3D
@@ -49,14 +49,14 @@ distance-based processing. No per-asset cooldown enforced in `CitySimulation`.
 
 #### `sfx_build_place.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | < 1 s |
-| Loudness | −24 LUFS / −1 dBTP |
-| Positional | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`) |
-| Priority | NORMAL |
-| EFX bypass | No |
-| Trigger | `CitySimulation::placeZone()` and `placeServiceBuilding()` on success |
+| Parameter  | Value                                                                 |
+| ---------- | --------------------------------------------------------------------- |
+| Duration   | < 1 s                                                                 |
+| Loudness   | −24 LUFS / −1 dBTP                                                    |
+| Positional | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`)                                 |
+| Priority   | NORMAL                                                                |
+| EFX bypass | No                                                                    |
+| Trigger    | `CitySimulation::placeZone()` and `placeServiceBuilding()` on success |
 
 **Character**: a brief, satisfying "click-thud" or construction-start sound representing
 a building foundation being placed or a zone being designated. Should feel constructive
@@ -73,14 +73,14 @@ listener it will be nearly inaudible; at 10 m it will be clearly present.
 
 #### `sfx_build_demolish.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | < 1 s |
-| Loudness | −24 LUFS / −1 dBTP |
-| Positional | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`) |
-| Priority | NORMAL |
-| EFX bypass | No |
-| Trigger | `CitySimulation::demolishTile()` on success |
+| Parameter  | Value                                       |
+| ---------- | ------------------------------------------- |
+| Duration   | < 1 s                                       |
+| Loudness   | −24 LUFS / −1 dBTP                          |
+| Positional | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`)       |
+| Priority   | NORMAL                                      |
+| EFX bypass | No                                          |
+| Trigger    | `CitySimulation::demolishTile()` on success |
 
 **Character**: a short deconstruction sound — the opposite emotional valence of
 `sfx_build_place`. Should convey removal or demolition without being alarming. A brief
@@ -96,14 +96,14 @@ colleague without context.
 
 #### `sfx_road_build.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | < 1 s |
-| Loudness | −24 LUFS / −1 dBTP |
-| Positional | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`) |
-| Priority | NORMAL |
-| EFX bypass | No |
-| Trigger | `CitySimulation::placeRoad()` on success |
+| Parameter  | Value                                    |
+| ---------- | ---------------------------------------- |
+| Duration   | < 1 s                                    |
+| Loudness   | −24 LUFS / −1 dBTP                       |
+| Positional | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`)    |
+| Priority   | NORMAL                                   |
+| EFX bypass | No                                       |
+| Trigger    | `CitySimulation::placeRoad()` on success |
 
 **Character**: a short road-laying or asphalt-placement sound. Distinct from
 `sfx_build_place` — roads have a different construction character (rolling, laying flat
@@ -114,15 +114,15 @@ texture quality. Duration 0.3–0.6 s recommended.
 
 #### `sfx_earthworks.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | < 1 s |
-| Loudness | −24 LUFS / −1 dBTP |
-| Positional | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`); world-space tile position |
-| Priority | NORMAL |
-| EFX bypass | YES — `AL_DIRECT_FILTER = AL_FILTER_NULL` (construction on open unoccluded tiles) |
-| `AL_SOURCE_RELATIVE` | `AL_FALSE` (world-space positional — NOT `AL_TRUE`) |
-| Trigger | `placeZone()`, `placeRoad()`, `placeServiceBuilding()` when `earthworksCostOverride > 0` |
+| Parameter            | Value                                                                                    |
+| -------------------- | ---------------------------------------------------------------------------------------- |
+| Duration             | < 1 s                                                                                    |
+| Loudness             | −24 LUFS / −1 dBTP                                                                       |
+| Positional           | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`); world-space tile position                         |
+| Priority             | NORMAL                                                                                   |
+| EFX bypass           | YES — `AL_DIRECT_FILTER = AL_FILTER_NULL` (construction on open unoccluded tiles)        |
+| `AL_SOURCE_RELATIVE` | `AL_FALSE` (world-space positional — NOT `AL_TRUE`)                                      |
+| Trigger              | `placeZone()`, `placeRoad()`, `placeServiceBuilding()` when `earthworksCostOverride > 0` |
 
 **Character**: terrain levelling — earth moving, ground preparation. A heavier, lower
 sound than `sfx_build_place` — conveys soil movement or grading. A brief earth-and-stone
@@ -148,14 +148,14 @@ pool pressure.
 
 #### `sfx_fire_alert.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | 2–4 s |
-| Loudness | −18 LUFS / −1 dBTP |
-| Positional | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`) |
-| Priority | CRITICAL |
-| EFX bypass | No (positional, benefits from occlusion) |
-| Trigger | `Zoning::doDesirabilityTick()` (called from `CitySimulation::doBudgetTick()`) on tile desirability ≤ 20 with `!tile.alertFired` |
+| Parameter  | Value                                                                                                                           |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Duration   | 2–4 s                                                                                                                           |
+| Loudness   | −18 LUFS / −1 dBTP                                                                                                              |
+| Positional | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`)                                                                                           |
+| Priority   | CRITICAL                                                                                                                        |
+| EFX bypass | No (positional, benefits from occlusion)                                                                                        |
+| Trigger    | `Zoning::doDesirabilityTick()` (called from `CitySimulation::doBudgetTick()`) on tile desirability ≤ 20 with `!tile.alertFired` |
 
 **Character**: a fire alarm or emergency tone at mid-distance. Should convey fire
 emergency clearly. A repeating electronic alarm tone (two-tone yelp pattern or continuous
@@ -175,14 +175,14 @@ conventional characters — use these conventions.
 
 #### `sfx_police_alert.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | 2–4 s |
-| Loudness | −18 LUFS / −1 dBTP |
-| Positional | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`) |
-| Priority | CRITICAL |
-| EFX bypass | No |
-| Trigger | `Zoning::doDesirabilityTick()` (called from `CitySimulation::doBudgetTick()`) on tile desirability ≤ 20 with `!tile.alertFired`, when the tile is within Police Station coverage radius but NOT within Fire Station coverage radius |
+| Parameter  | Value                                                                                                                                                                                                                               |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Duration   | 2–4 s                                                                                                                                                                                                                               |
+| Loudness   | −18 LUFS / −1 dBTP                                                                                                                                                                                                                  |
+| Positional | Yes (`AL_SOURCE_RELATIVE = AL_FALSE`)                                                                                                                                                                                               |
+| Priority   | CRITICAL                                                                                                                                                                                                                            |
+| EFX bypass | No                                                                                                                                                                                                                                  |
+| Trigger    | `Zoning::doDesirabilityTick()` (called from `CitySimulation::doBudgetTick()`) on tile desirability ≤ 20 with `!tile.alertFired`, when the tile is within Police Station coverage radius but NOT within Fire Station coverage radius |
 
 **Character**: a police siren or emergency tone, distinct from the fire alarm. A single-
 tone or two-tone police siren pattern (wail or yelp) is appropriate. Duration 2–4 s.
@@ -213,14 +213,14 @@ They represent infrastructure state changes that affect the whole city, not a sp
 
 #### `sfx_power_out.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | 1–2 s |
-| Loudness | −22 LUFS / −1 dBTP |
-| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
-| Priority | NORMAL |
-| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `Zoning::doServiceDegradationTick()` (called from `CitySimulation::doBudgetTick()`) on zone tile losing power coverage (`tile.wasPowered` transition) |
+| Parameter  | Value                                                                                                                                                 |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Duration   | 1–2 s                                                                                                                                                 |
+| Loudness   | −22 LUFS / −1 dBTP                                                                                                                                    |
+| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`)                                                                                                                   |
+| Priority   | NORMAL                                                                                                                                                |
+| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`)                                                                                                             |
+| Trigger    | `Zoning::doServiceDegradationTick()` (called from `CitySimulation::doBudgetTick()`) on zone tile losing power coverage (`tile.wasPowered` transition) |
 
 **Character**: the sound of power going out. A brief electrical snap or buzz followed by
 silence — the sudden absence of electrical hum. A short (< 0.5 s) electrical arc or
@@ -235,14 +235,14 @@ pressure drop. Make these clearly distinct.
 
 #### `sfx_water_out.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | 1–2 s |
-| Loudness | −22 LUFS / −1 dBTP |
-| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
-| Priority | NORMAL |
-| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `Zoning::doServiceDegradationTick()` (called from `CitySimulation::doBudgetTick()`) on zone tile losing water coverage (`tile.wasWaterCovered` transition) |
+| Parameter  | Value                                                                                                                                                      |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Duration   | 1–2 s                                                                                                                                                      |
+| Loudness   | −22 LUFS / −1 dBTP                                                                                                                                         |
+| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`)                                                                                                                        |
+| Priority   | NORMAL                                                                                                                                                     |
+| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`)                                                                                                                  |
+| Trigger    | `Zoning::doServiceDegradationTick()` (called from `CitySimulation::doBudgetTick()`) on zone tile losing water coverage (`tile.wasWaterCovered` transition) |
 
 **Character**: the sound of water supply disruption. A brief rushing water sound
 followed by a cutoff — as if a pipe pressure has dropped. Alternatively, a gurgling
@@ -252,14 +252,14 @@ or draining sound. Duration 1–2 s.
 
 #### `sfx_service_degrade.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | 1–2 s |
-| Loudness | −22 LUFS / −1 dBTP |
-| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
-| Priority | NORMAL |
-| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `Zoning::doServiceDegradationTick()` (called from `CitySimulation::doBudgetTick()`) on Fire Station, Police Station, or Water Tower RNG degradation success |
+| Parameter  | Value                                                                                                                                                       |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Duration   | 1–2 s                                                                                                                                                       |
+| Loudness   | −22 LUFS / −1 dBTP                                                                                                                                          |
+| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`)                                                                                                                         |
+| Priority   | NORMAL                                                                                                                                                      |
+| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`)                                                                                                                   |
+| Trigger    | `Zoning::doServiceDegradationTick()` (called from `CitySimulation::doBudgetTick()`) on Fire Station, Police Station, or Water Tower RNG degradation success |
 
 **Character**: a warning tone indicating a service building has entered reduced-coverage
 state. Should convey advisory warning — not an emergency (that is `sfx_fire_alert`/
@@ -277,14 +277,14 @@ These three SFX fire non-positionally in response to budget and economy events.
 
 #### `sfx_budget_warn.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | 1–2 s (minimum 1 s) |
-| Loudness | −24 LUFS / −1 dBTP |
-| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
-| Priority | NORMAL |
-| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `Economy::doEconomyTick()` (called from `CitySimulation::doBudgetTick()`) on first crossing of −25% budget surplus threshold in a deficit streak |
+| Parameter  | Value                                                                                                                                            |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Duration   | 1–2 s (minimum 1 s)                                                                                                                              |
+| Loudness   | −24 LUFS / −1 dBTP                                                                                                                               |
+| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`)                                                                                                              |
+| Priority   | NORMAL                                                                                                                                           |
+| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`)                                                                                                        |
+| Trigger    | `Economy::doEconomyTick()` (called from `CitySimulation::doBudgetTick()`) on first crossing of −25% budget surplus threshold in a deficit streak |
 
 **Character**: a budget deficit warning — the city's finances have crossed a significant
 negative threshold. Should convey financial concern without the full alarm of the crisis
@@ -302,14 +302,14 @@ is distinguishable when the `stinger_crisis` follows within 1–2 s.
 
 #### `sfx_loan_issued.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | < 1 s |
-| Loudness | −24 LUFS / −1 dBTP |
-| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
-| Priority | NORMAL |
-| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `Economy::checkAndIssueForcedLoan()` (called from `Economy::doEconomyTick()`) on forced loan issuance |
+| Parameter  | Value                                                                                                 |
+| ---------- | ----------------------------------------------------------------------------------------------------- |
+| Duration   | < 1 s                                                                                                 |
+| Loudness   | −24 LUFS / −1 dBTP                                                                                    |
+| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`)                                                                   |
+| Priority   | NORMAL                                                                                                |
+| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`)                                                             |
+| Trigger    | `Economy::checkAndIssueForcedLoan()` (called from `Economy::doEconomyTick()`) on forced loan issuance |
 
 **Character**: a brief acknowledgement that a loan has been issued — a financial
 transaction sound. Not celebratory (the loan is forced by the game, not a player choice),
@@ -320,14 +320,14 @@ onset. Should be distinct from `sfx_budget_warn` in character.
 
 #### `sfx_zone_upgrade.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | 1–2 s |
-| Loudness | −22 LUFS / −1 dBTP |
-| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
-| Priority | NORMAL |
-| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `Population::doDensityUnlockTick()` on tile density tier upgrade (cap: 3 calls per invocation) |
+| Parameter  | Value                                                                                          |
+| ---------- | ---------------------------------------------------------------------------------------------- |
+| Duration   | 1–2 s                                                                                          |
+| Loudness   | −22 LUFS / −1 dBTP                                                                             |
+| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`)                                                            |
+| Priority   | NORMAL                                                                                         |
+| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`)                                                      |
+| Trigger    | `Population::doDensityUnlockTick()` on tile density tier upgrade (cap: 3 calls per invocation) |
 
 **Character**: a zone tile has been automatically upgraded to a higher density tier —
 a positive, rewarding sound. Should feel like growth and progress, not a crisis. A brief
@@ -351,14 +351,14 @@ immediate — any perceptible latency between player action and sound is unaccep
 
 #### `ui_click.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | < 0.2 s |
-| Loudness | −24 LUFS / −1 dBTP |
-| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
-| Priority | NORMAL |
-| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `UIManager::onEvent()` on toolbar and sub-panel button press |
+| Parameter  | Value                                                        |
+| ---------- | ------------------------------------------------------------ |
+| Duration   | < 0.2 s                                                      |
+| Loudness   | −24 LUFS / −1 dBTP                                           |
+| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`)                          |
+| Priority   | HIGH                                                         |
+| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`)                    |
+| Trigger    | `UIManager::onEvent()` on toolbar and sub-panel button press |
 
 **Character**: a brief, neutral UI button confirmation sound. Not a click in the
 literal sense of a mouse switch (that would be too mechanical and annoying at −24 LUFS);
@@ -375,14 +375,14 @@ will stack audibly when the player clicks rapidly. Keep the energy within the fi
 
 #### `ui_toast.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | < 0.3 s |
-| Loudness | −22 LUFS / −1 dBTP |
-| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
-| Priority | NORMAL |
-| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `NotificationManager::postCritical()` / `postNormal()` when toast becomes visible |
+| Parameter  | Value                                                                             |
+| ---------- | --------------------------------------------------------------------------------- |
+| Duration   | < 0.3 s                                                                           |
+| Loudness   | −22 LUFS / −1 dBTP                                                                |
+| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`)                                               |
+| Priority   | HIGH                                                                              |
+| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`)                                         |
+| Trigger    | `NotificationManager::postCritical()` / `postNormal()` when toast becomes visible |
 
 **Character**: a notification arrival sound — a brief, clear chime indicating that
 a message or alert has appeared on screen. Should have higher urgency than `ui_click`
@@ -397,14 +397,14 @@ including any decay.
 
 #### `ui_menu_open.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | < 0.3 s |
-| Loudness | −24 LUFS / −1 dBTP |
-| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
-| Priority | NORMAL |
-| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `UIManager::updateSubPanelVisibility()` when a sub-panel becomes visible |
+| Parameter  | Value                                                                    |
+| ---------- | ------------------------------------------------------------------------ |
+| Duration   | < 0.3 s                                                                  |
+| Loudness   | −24 LUFS / −1 dBTP                                                       |
+| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`)                                      |
+| Priority   | HIGH                                                                     |
+| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`)                                |
+| Trigger    | `UIManager::updateSubPanelVisibility()` when a sub-panel becomes visible |
 
 **Character**: a panel or menu opening sound — a brief, upward-toned interaction
 feedback. Should feel like a drawer or panel opening (not an alert). A subtle whoosh or
@@ -418,14 +418,14 @@ states of the same design language.
 
 #### `ui_menu_close.wav`
 
-| Parameter | Value |
-|---|---|
-| Duration | < 0.3 s |
-| Loudness | −24 LUFS / −1 dBTP |
-| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`) |
-| Priority | NORMAL |
-| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`) |
-| Trigger | `UIManager::updateSubPanelVisibility()` when a sub-panel becomes hidden |
+| Parameter  | Value                                                                   |
+| ---------- | ----------------------------------------------------------------------- |
+| Duration   | < 0.3 s                                                                 |
+| Loudness   | −24 LUFS / −1 dBTP                                                      |
+| Positional | No (`AL_SOURCE_RELATIVE = AL_TRUE`)                                     |
+| Priority   | HIGH                                                                    |
+| EFX bypass | Yes (`AL_DIRECT_FILTER = AL_FILTER_NULL`)                               |
+| Trigger    | `UIManager::updateSubPanelVisibility()` when a sub-panel becomes hidden |
 
 **Character**: a panel or menu closing sound — a brief, downward-toned interaction
 feedback. A subtle downward sweep or soft close impact. Must be clearly distinguishable
@@ -452,7 +452,7 @@ same authoring procedure:
 3. **Apply true-peak limiting** with ceiling at the specified dBTP value. Use a true-peak
    limiter (not a sample-peak limiter) — short WAV SFX can have true-peak values
    significantly above the sample peak due to inter-sample peaks.
-4. **Export as WAV PCM**: 44100 Hz, 16-bit, mono, uncompressed. Use "PCM (*.wav)" or
+4. **Export as WAV PCM**: 44100 Hz, 16-bit, mono, uncompressed. Use "PCM (\*.wav)" or
    "Microsoft WAV" with no compression, not ADPCM or any other compressed WAV variant.
 5. **Verify with the `wave` Python stdlib module** or a DAW inspector: channels = 1,
    sample rate = 44100, audio format = PCM (0x0001). The `validate_assets.py` Check #19
@@ -463,24 +463,24 @@ same authoring procedure:
 
 ## Loudness Reference Summary
 
-| Asset | Target LUFS | True-peak ceiling | Duration range |
-|---|---|---|---|
-| `sfx_build_place.wav` | −24 LUFS | −1 dBTP | < 1 s |
-| `sfx_build_demolish.wav` | −24 LUFS | −1 dBTP | < 1 s |
-| `sfx_road_build.wav` | −24 LUFS | −1 dBTP | < 1 s |
-| `sfx_earthworks.wav` | −24 LUFS | −1 dBTP | < 1 s |
-| `sfx_fire_alert.wav` | −18 LUFS | −1 dBTP | 2–4 s |
-| `sfx_police_alert.wav` | −18 LUFS | −1 dBTP | 2–4 s |
-| `sfx_power_out.wav` | −22 LUFS | −1 dBTP | 1–2 s |
-| `sfx_water_out.wav` | −22 LUFS | −1 dBTP | 1–2 s |
-| `sfx_service_degrade.wav` | −22 LUFS | −1 dBTP | 1–2 s |
-| `sfx_budget_warn.wav` | −24 LUFS | −1 dBTP | 1–2 s (min 1 s) |
-| `sfx_loan_issued.wav` | −24 LUFS | −1 dBTP | < 1 s |
-| `sfx_zone_upgrade.wav` | −22 LUFS | −1 dBTP | 1–2 s |
-| `ui_click.wav` | −24 LUFS | −1 dBTP | < 0.2 s |
-| `ui_toast.wav` | −22 LUFS | −1 dBTP | < 0.3 s |
-| `ui_menu_open.wav` | −24 LUFS | −1 dBTP | < 0.3 s |
-| `ui_menu_close.wav` | −24 LUFS | −1 dBTP | < 0.3 s |
+| Asset                     | Target LUFS | True-peak ceiling | Duration range  |
+| ------------------------- | ----------- | ----------------- | --------------- |
+| `sfx_build_place.wav`     | −24 LUFS    | −1 dBTP           | < 1 s           |
+| `sfx_build_demolish.wav`  | −24 LUFS    | −1 dBTP           | < 1 s           |
+| `sfx_road_build.wav`      | −24 LUFS    | −1 dBTP           | < 1 s           |
+| `sfx_earthworks.wav`      | −24 LUFS    | −1 dBTP           | < 1 s           |
+| `sfx_fire_alert.wav`      | −18 LUFS    | −1 dBTP           | 2–4 s           |
+| `sfx_police_alert.wav`    | −18 LUFS    | −1 dBTP           | 2–4 s           |
+| `sfx_power_out.wav`       | −22 LUFS    | −1 dBTP           | 1–2 s           |
+| `sfx_water_out.wav`       | −22 LUFS    | −1 dBTP           | 1–2 s           |
+| `sfx_service_degrade.wav` | −22 LUFS    | −1 dBTP           | 1–2 s           |
+| `sfx_budget_warn.wav`     | −24 LUFS    | −1 dBTP           | 1–2 s (min 1 s) |
+| `sfx_loan_issued.wav`     | −24 LUFS    | −1 dBTP           | < 1 s           |
+| `sfx_zone_upgrade.wav`    | −22 LUFS    | −1 dBTP           | 1–2 s           |
+| `ui_click.wav`            | −24 LUFS    | −1 dBTP           | < 0.2 s         |
+| `ui_toast.wav`            | −22 LUFS    | −1 dBTP           | < 0.3 s         |
+| `ui_menu_open.wav`        | −24 LUFS    | −1 dBTP           | < 0.3 s         |
+| `ui_menu_close.wav`       | −24 LUFS    | −1 dBTP           | < 0.3 s         |
 
 ---
 

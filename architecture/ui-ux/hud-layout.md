@@ -3,7 +3,7 @@
 - Minimap (bottom-right corner, 200×200 px in virtual 1920×1080 space)
 - Resource/budget bar (top bar, full width, virtual y: 0–56 px): treasury balance (`ICitySimulation::getTreasury()`), outstanding debt indicator (`getOutstandingDebt()` — hidden when debt is zero), City Rating label (`getCityRating()` → `CityRatingTier` display name), population count (`getPopulation()`), and current in-game date/time display. **Red flashing budget indicator**: when `ICitySimulation::getConsecutiveDeficitMonths() >= 2`, a red-tinted pulsing overlay (alpha oscillation 0.3–1.0 at ~1 Hz) activates on the treasury field, distinct from the standard deficit indicator. Removed immediately when `getConsecutiveDeficitMonths()` returns 0 (streak broken). Implementation: `UIManager::update()` polls `getConsecutiveDeficitMonths()` each frame and calls `setElementAlpha()` with a sine-wave value when active. See [Game Over Flow](../game-design/game-over-flow.md) for streak mechanics.
 - Time controls and speed selector (top-right, virtual x: 1600–1796 px, y: 8–56 px): four mutually exclusive buttons — Pause (⏸), 1× (▶), 3× (▶▶), 10× (▶▶▶). Active button has accent-color border; inactive buttons have default border. Dispatches `ICitySimulation::setSpeed(SpeedMultiplier)` on click. **Polling contract**: `UIManager::update()` polls `ICitySimulation::getSpeedMultiplier()` every frame (not only on player input) and updates the active button highlight to match — this is required for auto-slow events from `CitySimulation::tick()` (deficit month-1 auto-slow to 1×) to be reflected without UI-layer polling gaps. **State matrix** (per [Notification System](notification-system.md)): speed buttons are disabled (grayed, non-interactive via `setElementEnabled(..., false)`) only when a blocking modal is active; the speed selector remains **enabled** during CRITICAL-toast-only auto-pause (no modal) so the player can pre-set speed for resume. See the authoritative state matrix in `notification-system.md` for all state combinations. See [Settings / Pause Menu](settings-pause-menu.md) for Escape → pause interaction.
-- Notification/alert area (top-center for transient toasts); see Notification System for stacking rules
+- Notification/alert area (permanent right-side rail (x:1616–1908, top:64)); see Notification System for stacking rules
 - Primary toolbar with tool modes: Zone, Road, Utilities, Demolish, Query — **left panel**, virtual bounds: x: **8–72 px** (8 px left margin so the toolbar does not clip at the window edge on non-16:9 resolutions and ultrawide aspect ratios), y: 64–600 px (below resource bar, above minimap area). Each tool mode is a 48×48 px icon button with 8 px padding. Active tool highlighted with accent-color border.
 
   **Toolbar y-range — visual bounds vs. input carve-out (MUST read before implementing):**
@@ -310,21 +310,79 @@ minimap top-down render (R=green, C=blue, I=yellow — consistent with the minim
 zone coding; reuse `kOverlayArgbResidential`, `kOverlayArgbCommercial`, and
 `kOverlayArgbIndustrial` from `ui_constants.h`.
 
-## Visual Design — Glass City
+## Minimap Overlay Toggles
+
+Three toggle buttons below the minimap render area, added in Phase 11q13:
+
+| Button  | Left edge (virtual) | Y     | Width | Height |
+|---------|---------------------|-------|-------|--------|
+| Map     | 1720                | 838   | 64    | 22     |
+| Traffic | 1788                | 838   | 64    | 22     |
+| Service | 1856                | 838   | 64    | 22     |
+
+Total row width: 200 px (matches minimap width). Gap between top of row and minimap render
+area: 4 px.
+
+**Toggle button labels**: Uppercase strings `"MAP"`, `"TRAFFIC"`, `"SERVICE"` are passed to
+`addButton()`. Irrlicht has no CSS `text-transform` equivalent — only the literal string
+passed to `addButton()` is rendered. Title-case (`"Map"`, `"Traffic"`, `"Service"`) is
+incorrect and must not be used.
+
+**Active state**: background fill `rgba(4,20,56,92)` drawn via `fillColoredRect`. Border
+`kMinimapToggleActiveBorder` = `0xA500C8F0` (`SColor(165,0,200,240)` = `rgba(0,200,240,0.65)`).
+Text colour `#60C8E8` via `setElementTextColor`.
+**Inactive state**: background fill `rgba(4,12,28,71)`. Text colour `rgba(140,180,220,0.55)`
+via `setElementTextColorA`.
+**Dot indicator**: 5×5 px filled circle drawn left of text label via `fillColoredRect`.
+
+- Map dot: `#A8C8F0`
+- Traffic dot: `#FF7050`
+- Service dot: `#50D890`
+
+**Chrome top rim**: 2 px `fillColoredRect` at y=838, using `kChromeRimColor` constants.
+**Draw path**: All fills and rims are drawn in `UIManager::drawOverlays()` (post-drawAll step),
+NOT in `HUD::draw()`.
+**`setElementBackground` is NOT called on toggle buttons** (it is a no-op on IGUIButton
+elements per §IUIBackend Method Contract method 18).
+
+### Phase 11q13 V1 Appearance Subset
+
+The following CSS effects from `hud-option-a-mercury.html` are V1 engine constraints (not
+implemented, not deferred):
+
+- `backdrop-filter: blur(...)` — not supported by Irrlicht
+- `border-radius` on panels and buttons — not supported by Irrlicht IGUIStaticText/IGUIButton
+- CSS `letter-spacing` — not supported by Irrlicht IGUIFont
+- `box-shadow` — not supported
+- Hover CSS transitions (`.mm-ov` transition) — hover state is a discrete sprite-swap,
+  not animated
+
+The following ARE implemented in Phase 11q13:
+
+- (a) Toggle button background fills via `fillColoredRect` (active/inactive)
+- (b) Dot indicator via `fillColoredRect`
+- (c) Chrome top rim via `fillColoredRect`
+- (d) Active/inactive text colour via `setElementTextColor` / `setElementTextColorA`
+  (button dispatch)
+- (e) `kMinimapToggleActiveBorder` border render via `fillColoredRect` outline for active
+  button
+
+## Visual Design — Glacier Glass + Silver Chrome
 
 ### Panel Backgrounds
 
-All HUD panels use the Glass City deep-navy palette defined in
-`architecture/ui-ux/resolution-ui-scaling.md` Visual Design — Glass City section.
+All HUD panels use the Glacier Glass + Silver Chrome palette defined in
+`architecture/ui-ux/resolution-ui-scaling.md` Visual Design — Glacier Glass + Silver Chrome section.
 
 | Panel | Background |
 |---|---|
-| Resource/budget bar | `rgba(13, 27, 42, 0.88)` — no corner radius |
-| Left toolbar panel | `rgba(13, 27, 42, 0.82)` — 8 px radius on right/bottom inner edges |
-| Zone sub-panel | `rgba(13, 27, 42, 0.80)` — 8 px radius on all inner edges |
-| Utilities sub-panel | `rgba(13, 27, 42, 0.80)` — 8 px radius on all inner edges |
-| Budget detail panel | `rgba(13, 27, 42, 0.85)` — 8 px radius |
-| Grace period indicator | `rgba(13, 27, 42, 0.78)` — 8 px radius |
+| Resource/budget bar | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` = `0x42040C1C` — no corner radius |
+| Left toolbar panel | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 8 px radius on right/bottom inner edges |
+| Zone sub-panel | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 8 px radius on all inner edges |
+| Utilities sub-panel | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 8 px radius on all inner edges |
+| Budget detail panel | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 8 px radius |
+| Grace period indicator | `SColor(66, 4, 12, 28)` = `kGlacierPanelBg` — 8 px radius |
+| Notification card bg | `SColor(71, 4, 12, 30)` = `kNotifCardBg` = `0x47040C1E` — 8 px radius |
 
 ### Toolbar Icon States
 
@@ -335,7 +393,7 @@ use the icon state spec below. Both the inactive and active cells are separate s
 | State | Icon style | Opacity | Border |
 |---|---|---|---|
 | Inactive | **Outlined — 2 px stroke, no fill** | 65% | None |
-| Active | **Filled solid icon** | 100% | 2 px teal `rgba(0, 201, 200, 0.75)` + baked glow |
+| Active | **Filled solid icon** | 100% | 2 px `rgba(0,200,255,0.76)` = `kActiveButtonBorderColor` + baked glow |
 
 The teal border and glow are pre-baked into the active sprite cell. No runtime blur is
 applied. The `kSpriteZone*Active`, `kSpriteUtil*Active`, etc. constants reference the
@@ -347,29 +405,32 @@ All buttons in toolbar and sub-panels use the three-state tile:
 
 - **Inactive**: `rgba(255, 255, 255, 0.08)` background, 1 px `rgba(255, 255, 255, 0.18)` border
 - **Hover**: `rgba(255, 255, 255, 0.15)` background, 1 px `rgba(255, 255, 255, 0.35)` border
-- **Active**: `rgba(0, 201, 200, 0.22)` teal wash, 2 px `rgba(0, 201, 200, 0.75)` border + 4 px baked glow
+- **Active**: `kActiveButtonWashColor` = `rgba(0, 200, 255, 0.16)` cyan wash, 2 px `rgba(0,200,255,0.76)` = `kActiveButtonBorderColor` + 4 px baked glow
 
 This replaces the earlier "accent-color border only" description for the active button state.
 The teal wash + 2 px border is the single authoritative active-state signal.
 
 ### Text Colours in HUD
 
-All HUD text follows the Glass City palette (see `resolution-ui-scaling.md` canonical table):
+All HUD text follows the Glacier Glass + Silver Chrome palette (see `resolution-ui-scaling.md` canonical table):
 
 | Content type | Colour |
 |---|---|
 | Numeric values (treasury, population, date, demand %) | `#F0B429` warm amber |
-| Primary labels | `#EBF4F6` near-white |
-| Secondary / sub-labels | `#4A7FA5` mid-blue |
-| Deficit / error indicator | `#F04E37` red |
+| Primary labels | `#D0E8F8` near-white (Glacier Glass) |
+| Secondary / sub-labels | `rgba(180,210,240,0.58)` dim blue |
+| Positive value (budget surplus, growth) | `#70E898` green |
+| Deficit value | `#FF7870` red |
+| Rating pill | `#8ECAFF` blue |
 | Warning (undo countdown amber, grace period near-expiry) | `#E8960C` warning amber |
 | Undo countdown text turns amber when `remainingSeconds < 5.0` | `#F0B429` (value amber, same token) |
+| Chrome strip | `#E6F2FC` alpha ≈ 95% |
 
 **Red flashing budget indicator** (consecutive deficit): the pulsing overlay on the treasury
-field remains red. The ARGB for the overlay pulse is `0x80F04E37` (alpha 128, red `#F04E37`)
+field remains red. The ARGB for the overlay pulse is `0x80FF7870` (alpha 128, deficit red `#FF7870`)
 in Irrlicht `SColor` format, replacing any previously unspecified red tint. The alpha
 oscillates 0.3–1.0 via `setElementAlpha()` as described in the layout spec above; the colour
-component itself is fixed at `#F04E37`.
+component itself is fixed at `#FF7870`.
 
 **Unsaved-changes dot**: fixed amber fill `#F0B429` (value amber token). Authored at
 creation time; does not change colour dynamically.
@@ -445,14 +506,19 @@ sound fires.
 
 ### `ui_toast` — Notification toast displayed
 
-**Call site**: `NotificationManager::postCritical()` and `NotificationManager::postNormal()`,
-immediately after the toast element is created and made visible via
-`m_backend->setElementVisible(handle, true)`.
+**Call site**: `NotificationManager::refreshVisibleSlots()`, on the not-visible → visible
+slot transition for each card (CRITICAL or Normal), rate-limited 150 ms via
+`m_lastToastSoundTime`. Neither `postCritical()` nor `postNormal()` calls `playSound`
+directly.
 
 ```cpp
-// In NotificationManager::postCritical() / postNormal(), after toast element creation:
-if (m_audio) {
-    m_audio->playSound(UI_TOAST, SoundPriority::HIGH, 1.0f);
+// In NotificationManager::refreshVisibleSlots(), on slot not-visible → visible transition:
+if (!slot.soundFired) {
+    slot.soundFired = true;  // set UNCONDITIONALLY before rate-limit gate
+    if (m_clock->nowSeconds() - m_lastToastSoundTime >= 0.150) {
+        if (m_audio) m_audio->playSound(UI_TOAST, SoundPriority::HIGH, 1.0f);
+        m_lastToastSoundTime = m_clock->nowSeconds();
+    }
 }
 ```
 
@@ -460,8 +526,8 @@ if (m_audio) {
 enqueue — only when the toast becomes visible on screen). If a toast is queued but not yet
 visible (because the max simultaneous limit is reached), `ui_toast` does NOT fire until the
 toast actually appears. `NotificationManager` holds `IAudioSystem* m_audio{nullptr}` injected
-at construction (Phase 10 adds this parameter to the constructor alongside the existing
-`IUIBackend*`, `ICitySimulation*`, and `IClock*`).
+at construction. See `architecture/ui-ux/notification-system.md §Phase 10 audio call sites`
+for the authoritative unified fire-on-display contract.
 
 ## HUD Class Structure
 
@@ -498,6 +564,12 @@ void notifyGameStarted();
 
 Resets the grace-period state so the cost-waiver label appears correctly for both the first game and all subsequent new games. Must be called by `UIManager::transitionToGameplay()` each time a new game session begins. Internally, resets `m_gameStartTime` (stores current `IClock` time) and sets `m_gracePeriodExpired = false`. Phase 11m: fixes the bug where `m_gracePeriodExpired` was never reset for second games.
 
+```cpp
+void incrementNotificationBadge();
+```
+
+Increments the bell icon's unread-count badge overlay by 1. Called by `UIManager::incrementNotificationBadge()` (null-guarded via `if (m_hud)`) whenever `NotificationManager` collapses a Normal card to the notification log due to slot-overflow displacement. Updates the badge counter element text and ensures the badge overlay is visible. Phase 11q13 addition.
+
 Required private members of the `HUD` class relevant to the budget detail overlay:
 
 ```cpp
@@ -515,6 +587,20 @@ FinancesPanel* m_finances{nullptr}; // owned by HUD; opened via T key or resourc
 **Budget Detail Panel removed**: The separate Budget Detail Panel has been merged into the Finances Panel (see `architecture/ui-ux/finances-panel.md`). Hovering over the treasury balance field no longer opens any panel. The Finances Panel is opened exclusively via the T key or a click on the resource/budget bar.
 
 ## Font Loading
+
+AI Town HUD uses two typefaces baked into Irrlicht-compatible bitmap fonts:
+
+- **Proportional sans-serif**: **Barlow Condensed** (weights 300, 400, 500, 600, 700)
+  Source: `assets/fonts/src/BarlowCondensed-Light.ttf` through `BarlowCondensed-Bold.ttf`
+  Baked XML: `assets/fonts/hud_font_<tier>.xml` (one per resolution tier: 720, 1080, 1440)
+- **Monospace**: **Share Tech Mono** (Regular)
+  Source: `assets/fonts/src/ShareTechMono-Regular.ttf`
+  Baked XML: `assets/fonts/hud_mono_font_<tier>.xml` (one per resolution tier)
+
+Fonts are baked via `python3 tools/generate_bitmap_fonts.py` from the TTF sources.
+The proportional font is applied via `IGUIElement::setOverrideFont()` to all standard HUD labels.
+The monospace font is applied to treasury/population/date values, undo countdown, and notification
+timestamps.
 
 Irrlicht's built-in default GUI font renders at approximately 8 physical pixels tall — unreadably
 small at 1920×1080 and non-compliant with the 14 px virtual / 11 px physical minimums defined in

@@ -61,9 +61,9 @@
     `CameraController`; Minimap accesses it via the class name (no instance required).
 - **Interaction**: Click-to-pan camera to clicked minimap position
 - **Overlay toggle**: An extensible icon-button row on the minimap border; **one button per overlay type** (radio behavior — only one overlay active at a time; clicking active overlay deactivates it). For V1 with Service Coverage and Traffic Congestion overlays, the row has two icon buttons plus the implicit "off" state. This architecture scales to additional overlays (demand heat map, etc.) without UX redesign.
-  - **Toggle button position**: The overlay toggle row is anchored to the **top edge of the minimap**. The minimap occupies virtual bounds x: 1720–1920 px, y: 880–1080 px (bottom-right corner). The **full overlay toggle row** spans virtual x: 1576–1752 px, y: 848–880 px (supporting up to 4 overlay buttons). The rightmost button (first, e.g. Service Coverage) sits at x: 1720–1752 px; additional overlay buttons extend leftward from x:1720 (each 32×32 px with 4 px gap between buttons). **Up to 4 overlay toggle buttons are supported; each button is 32 px wide with 4 px gap; the leftmost button's left edge is no further left than x: 1576 (= 1720 − 4 × (32+4)). The full overlay toggle row occupies x: 1576–1752, y: 848–880 px. The input-arbitration widget footprint for the minimap widget is dynamic: when no overlay is active it spans (x: 1576–1920, y: 848–1080); when any overlay is active it expands upward to (x: 1576–1920, y: 732–1080) to cover the legend panel (y:732–832) and label strip (y:832–848). `Minimap::getWidgetFootprint()` returns the correct current footprint (computed from `m_overlayActive`); UIManager must call `getWidgetFootprint()` each frame to keep arbitration bounds in sync with overlay state. The `kMinimapWidgetTop` (y:848, no overlay) and `kMinimapWidgetTopOverlayActive` (y:732, overlay active) constants in `ui_constants.h` encode these two Y values.**
+  - **Toggle button position**: The overlay toggle row is anchored **above the minimap render area**. The minimap render area occupies virtual bounds x: 1720–1920 px, y: 864–1064 px (bottom-right corner). The toggle row has **three 64×22 px buttons** at y:838–860 with 4 px gaps between them: Map at x:1720, Traffic at x:1788, Service at x:1856 (each 64 px wide, 4 px gap). A 4 px gap separates the toggle row bottom (y:860) from the minimap render area top (y:864). Active button state uses a 2 px border drawn with `kMinimapToggleActiveBorder` = `0xA500C8F0` (SColor(165, 0, 200, 240) — rgba(0,200,240,0.65)). Each button has a 5×5 px dot indicator drawn via `fillColoredRect` in `UIManager::drawOverlays()`: Map = `#A8C8F0` (steel blue), Traffic = `#FF7050` (coral), Service = `#50D890` (teal-green). **The toggle row supports 3 buttons in V1; each button is 64 px wide with 4 px gap. The full overlay toggle row occupies x: 1720–1920, y: 838–860 px. The input-arbitration widget footprint for the minimap widget is dynamic: when no overlay is active it spans (x: 1720–1920, y: 838–1064); when any overlay is active it expands upward to (x: 1720–1920, y: 722–1064) to cover the legend panel (y:722–822) and label strip (y:822–838). `Minimap::getWidgetFootprint()` returns the correct current footprint (computed from `m_overlayActive`); UIManager must call `getWidgetFootprint()` each frame to keep arbitration bounds in sync with overlay state. The `kMinimapWidgetTop` (y:838, no overlay) and `kMinimapWidgetTopOverlayActive` (y:722, overlay active) constants in `ui_constants.h` encode these two Y values.**
   - Active button state: filled icon with accent color border. Inactive: outline icon, no border. States defined in UI sprite sheet.
-  - When an overlay is active: a **label strip** (16 px tall) appears **immediately above the toggle row** at virtual y: 832–848 px (overlay name, left-aligned to x:1720), and a **legend panel** (200×100 px) is anchored **above the label strip** at virtual x: 1720–1920, y: **732–832 px** (100 px tall, positioned immediately above the label strip at y:832). The legend panel spans the full minimap width (x: 1720–1920) and is positioned immediately below the minimap render area's chrome stack (above the label strip). This placement keeps the legend clear of the minimap (y:880–1080), toggle row (y:848–880), and label strip (y:832–848). **Do NOT anchor the legend inside the minimap bounds** (y:880–1080) — this causes visual overlap with the city map tiles. The legend panel dynamically updates to show data for whichever overlay is currently active (Service Coverage or Traffic Congestion), displaying category colors with text labels (8×8 px color swatch and text label per category).
+  - When an overlay is active: a **label strip** (16 px tall) appears **immediately above the toggle row** at virtual y: 822–838 px (overlay name, left-aligned to x:1720), and a **legend panel** (200×100 px) is anchored **above the label strip** at virtual x: 1720–1920, y: **722–822 px** (100 px tall, positioned immediately above the label strip at y:822). The legend panel spans the full minimap width (x: 1720–1920) and is positioned immediately below the minimap render area's chrome stack (above the label strip). This placement keeps the legend clear of the minimap (y:864–1064), toggle row (y:838–860), and label strip (y:822–838). **Do NOT anchor the legend inside the minimap bounds** (y:864–1064) — this causes visual overlap with the city map tiles. The legend panel dynamically updates to show data for whichever overlay is currently active (Service Coverage or Traffic Congestion), displaying category colors with text labels (8×8 px color swatch and text label per category).
   - **Service Coverage overlay**: Covered tiles receive a colour tint according to the active
     service layer. Authoritative hex values (used for both the minimap tile tint and the legend
     swatches):
@@ -126,15 +126,15 @@
 
     Overlay data is rendered into the minimap texture at budget-tick cadence (not per-frame).
     Unroaded tiles are not coloured.
-- **`getBounds()` return value semantics**: The `Minimap::getBounds()` method returns `UIRect` (the struct defined in `IUIBackend.h` — `struct UIRect { int x{0}, y{0}, w{0}, h{0}; }`) representing the bounding rectangle of the minimap **render area only** — the 200×200 px tile (virtual bounds x: 1720–1920 px, y: 880–1080 px). Returning `UIRect` rather than `irr::core::rect<irr::s32>` keeps Irrlicht headers out of `src/ui/` translation units. It explicitly excludes the toggle row (y: 848–880 px), the label strip (y: 832–848 px when an overlay is active), and the legend overlay panel (y: 732–832 px when an overlay is active). Tests that call `getBounds()` and check its dimensions MUST compare against the 200×200 px render area, not the full minimap widget footprint including chrome. Using the full widget bounds in tests will produce incorrect hit-test and overlap results because the chrome elements can be toggled independently of the render area.
+- **`getBounds()` return value semantics**: The `Minimap::getBounds()` method returns `UIRect` (the struct defined in `IUIBackend.h` — `struct UIRect { int x{0}, y{0}, w{0}, h{0}; }`) representing the bounding rectangle of the minimap **render area only** — the 200×200 px tile (virtual bounds x: 1720–1920 px, y: 864–1064 px). Returning `UIRect` rather than `irr::core::rect<irr::s32>` keeps Irrlicht headers out of `src/ui/` translation units. It explicitly excludes the toggle row (y: 838–860 px), the label strip (y: 822–838 px when an overlay is active), and the legend overlay panel (y: 722–822 px when an overlay is active). Tests that call `getBounds()` and check its dimensions MUST compare against the 200×200 px render area, not the full minimap widget footprint including chrome. Using the full widget bounds in tests will produce incorrect hit-test and overlap results because the chrome elements can be toggled independently of the render area.
 
 - **Scrim input behavior during blocking modals**: When a blocking modal (`ModalDialog`) is active, the full-screen scrim `IGUIElement` (50% opacity fill rect) **must consume left-mouse click events and right-click context events** that would otherwise reach HUD elements behind it (minimap, toolbar, undo button, resource bar). The scrim is not merely a visual overlay — it must be an event-consuming element at Priority 1 of the input arbitration chain. Without this, left-clicks and right-clicks on the minimap (and other HUD elements) pass through the scrim while the modal is visible, allowing accidental tool activations (zone placement, road placement) during a blocking modal. **Camera pass-through (mandatory)**: The following input events must NOT be consumed by the scrim — they pass through directly to `CameraController` per input-arbitration.md Priority 1: scroll-wheel zoom, middle-mouse-button drag (pan), and right-mouse-button drag (rotate/pan). These camera interactions are non-destructive and provide useful spatial context while the player reads the modal. Only left-click and right-click context events (which could trigger tool activations or HUD interactions) are consumed.
 
-## Visual Design — Glass City
+## Visual Design — Glacier Glass
 
 ### Minimap Background
 
-The minimap area uses the Glass City deep-navy panel background:
+The minimap area uses the Glacier Glass deep-navy panel background:
 
 - **Map background panel** (`m_mapBg`): `rgba(13, 27, 42, 0.85)` — 8 px corner radius on
   the inward edges (top-left, top-right, bottom-left); the right and bottom edges are flush
@@ -142,7 +142,7 @@ The minimap area uses the Glass City deep-navy panel background:
 
   > **Implementation note**: The Phase 9b background was set via
   > `setElementBackground(handle, 20, 20, 20, 230)` (near-black RGBA). This is superseded
-  > by the Glass City navy `rgba(13, 27, 42, ...)` which corresponds to
+  > by the Glacier Glass navy `rgba(13, 27, 42, ...)` which corresponds to
   > `setElementBackground(handle, 13, 27, 42, 217)` (alpha 217 ≈ 0.85 × 255).
   > Update this call when implementing Phase 11 minimap rendering.
 
@@ -151,18 +151,18 @@ The minimap area uses the Glass City deep-navy panel background:
 
 ### Overlay Toggle Button States
 
-The overlay toggle icon buttons on the minimap border follow the Glass City icon state spec:
+The overlay toggle icon buttons on the minimap border follow the Glacier Glass icon state spec:
 
 | State | Style |
 |---|---|
 | Inactive | Outlined 2 px stroke icon at 65% opacity, no border |
-| Active | Filled solid icon at 100% opacity, 2 px teal `rgba(0, 201, 200, 0.75)` border + baked glow |
+| Active | Filled solid icon at 100% opacity, 2 px `kMinimapToggleActiveBorder` = `rgba(0, 200, 240, 0.65)` (`0xA500C8F0`) border + baked glow |
 
 This extends and replaces the earlier description "Active button state: filled icon with
 accent color border. Inactive: outline icon, no border."
 
-**Phase boundary**: Full Glass City icon visual states (filled vs. outlined icons,
-2 px teal `rgba(0, 201, 200, 0.75)` border, baked glow) are implemented in **Phase 12**
+**Phase boundary**: Full Glacier Glass icon visual states (filled vs. outlined icons,
+2 px `kMinimapToggleActiveBorder` = `rgba(0, 200, 240, 0.65)` (`0xA500C8F0`) border, baked glow) are implemented in **Phase 12**
 when `setElementImage` wiring and `kSpriteOverlayXxx` constants are added (see
 `architecture/asset-standards/2d-texture-standards.md` §Phase 10 Sign-Off — UI Sprite
 Sheet). Phase 11p delivers opacity-based button states using text-label placeholders
@@ -178,7 +178,7 @@ icon rendering.
 - **Colour swatches** (8×8 px): use the authoritative hex values defined in the overlay
   entries above (Service Coverage: `#C0392B`, `#2E4482`, `#F1C40F`, `#1ABC9C`;
   Traffic Congestion: `#27AE60`, `#E67E22`, `#E74C3C`). These are data-encoding
-  colours, not UI chrome, and are unchanged by Glass City.
+  colours, not UI chrome, and are unchanged by Glacier Glass.
 
 ### Zone Colors and Road Network
 
@@ -231,7 +231,7 @@ exists and is non-transparent so the player can see it as a distinct HUD element
   64) to indicate the approximate camera view area within the minimap panel.
 - **Legend panel** — `m_legendPanel` has a dark fill (20, 20, 20, 210) so legend text is
   legible when the service coverage overlay is active.
-- **Toggle button** — the "Svc" button at virtual x:1720, y:848–880 is rendered by Irrlicht's
+- **Toggle button** — the "Svc" button at virtual x:1720, y:838–860 is rendered by Irrlicht's
   default button skin.
 
 ### IUIBackend method 18: setElementBackground

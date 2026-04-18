@@ -23,11 +23,12 @@
 
     - Source PNG stores full XYZ for reference; DDS export must swizzle X→alpha, Y→green before BC3 compression.
     - BC5/ATI2 migration (post-V1): BC5/ATI2 is not confirmed to have a load path in Irrlicht's standard DDS loader and must not be used in production until explicitly verified.
+
 - **`IVideoDriver::getTexture()` cannot load DDS files** — Irrlicht 1.8.5 ships with its DDS
   image loader disabled by default (`_IRR_COMPILE_WITH_DDS_LOADER_` is commented out in
   `IrrCompileConfig.h`). Any call to `IVideoDriver::getTexture()` on a `.dds` path returns null.
   There is a secondary structural bug: `ddsBuffer` in `CImageLoaderDDS.h` contains a `void*
-  surface` field (8 bytes on x86\_64), shifting `pixelFormat.fourCC` to file offset 88 instead
+surface` field (8 bytes on x86_64), shifting `pixelFormat.fourCC` to file offset 88 instead
   of the DDS-spec offset 84. This would cause Irrlicht to misidentify DXT1 files as ARGB8888 on
   64-bit systems even if the loader were re-enabled. **Consequence**: textures loaded via
   `IVideoDriver::getTexture()` (the `TextureCache` linear pool, `BuildingAssetLoader`, and any
@@ -49,12 +50,14 @@
     ```
 
     If `GL_EXT_texture_sRGB` is unavailable (rare on modern desktop GPUs but must be handled), **fall back to shader gamma correction**: load diffuse textures as standard linear DXT1/DXT5, and add a `pow(color.rgb, vec3(2.2))` gamma decode at the start of the terrain and building fragment shaders. This fallback is less accurate (no per-channel hardware decode) but avoids undefined behavior from using unsupported extension formats.
+
   - **Primary path (GL_EXT_texture_sRGB present)**: Load diffuse/albedo textures with sRGB-aware internal formats:
     - Opaque diffuse (DXT1/BC1): `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`
     - Alpha diffuse (DXT5/BC3): `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`
   - `TextureCache` must upload diffuse textures via a **fully raw OpenGL path** — **do not use `IVideoDriver::addTexture()` + `ITexture::lock()` + `glCompressedTexImage2D`**. `addTexture()` creates an `ECF_A8R8G8B8` texture object already committed to a linear GL internal format; calling `glCompressedTexImage2D` on that already-allocated object produces `GL_INVALID_OPERATION`. Additionally, `ITexture::lock()` returns **null** for DXT compressed-format textures (Irrlicht does not maintain a lockable CPU buffer for block-compressed textures); dereferencing the null pointer will crash. The `addTexture` + `COpenGLTexture::getOpenGLTextureName()` approach is equally invalid for the same root cause. See [`texture-cache.md`](../graphics-architecture/texture-cache.md) for the authoritative upload sequence (`glGenTextures` → `glBindTexture` → `glCompressedTexImage2D` with `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` or `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`). **Also**: never call `ITexture::lock()` on a DXT-format texture anywhere in the codebase — always check the return value for null before dereference: `void* data = tex->lock(); if (!data) { logError(...); return; }`.
   - Non-diffuse textures (normal maps, roughness) remain linear and use standard `GL_COMPRESSED_RGB_S3TC_DXT1_EXT` / `GL_COMPRESSED_RGBA_S3TC_DXT5_EXT`. Splat maps are a separate upload category (RGBA8 UNORM via `glTexImage2D`, third raw-GL pool in `TextureCache`) — they are NOT uploaded with any DXT format; see the Terrain Texturing & Splat Maps section below.
   - This decision is **final and binding** before any texture production begins. `graphics-dev-irrlicht` implements the `TextureCache` upload path; `graphics-artist-2d-texture` authors diffuse textures in sRGB space (standard Photoshop/Substance workflow).
+
 - **`GL_MAX_TEXTURE_SIZE` query timing**: `glGetIntegerv(GL_MAX_TEXTURE_SIZE, &size)` can only be called after an OpenGL context is current. `RenderSystem` must perform this query **immediately after `createDevice()` returns**, store the result as `u32 m_maxTextureSize`, and expose it via `getMaxTextureSize()`. No other class may call `glGetIntegerv` directly. Atlas dimensions must not be resolved at static initialization time.
 - **EDT_NULL guard for raw OpenGL calls**: `RenderSystem::init()` must check `device->getVideoDriver()->getDriverType() == video::EDT_NULL` before any raw OpenGL call. Under `EDT_NULL` (used in integration tests), there is no OpenGL context; `glGenTextures`, `glCompressedTexImage2D`, and `glGetIntegerv` all invoke undefined behavior. Required guards:
   - `m_maxTextureSize`: initialize to 2048 as a safe default when `driverType == EDT_NULL`; skip the `glGetIntegerv` query.
@@ -85,21 +88,21 @@ Both tools produce standards-compliant DDS files and are CI-verified. Do not use
 
 **Command-line invocation patterns by texture category:**
 
-| Category | Tool | Command |
-|---|---|---|
-| Diffuse sRGB opaque (DXT1 BC1, 4-mip) | nvcompress | `nvcompress -color -bc1 input.png output.dds` |
-| Diffuse sRGB opaque (DXT1 BC1, 4-mip) | Compressonator | `compressonatorcli -fd BC1 -miplevels 4 input.png output.dds` |
-| Building atlas 4096×4096 (DXT1 BC1, 5-mip) | Compressonator | `compressonatorcli -fd BC1 -miplevels 5 buildings_atlas_d.png buildings_atlas_d.dds` |
-| Building atlas fallback 2048×2048 (DXT1 BC1, 4-mip) | Compressonator | `compressonatorcli -fd BC1 -miplevels 4 buildings_atlas_d_2k.png buildings_atlas_d_2k.dds` |
-| Diffuse sRGB with alpha (DXT5 BC3, 4-mip) | nvcompress | `nvcompress -color -bc3 input.png output.dds` |
-| Diffuse sRGB with alpha (DXT5 BC3, 4-mip) | Compressonator | `compressonatorcli -fd BC3 -miplevels 4 input.png output.dds` |
-| Normal map DXT5nm (BC3, 4-mip) | nvcompress | `nvcompress -normal -bc3 input_swizzled.png output.dds` |
-| Normal map DXT5nm (BC3, 4-mip) | Compressonator | `compressonatorcli -fd BC3 -miplevels 4 input_swizzled.png output.dds` |
-| Specular packed (BC3, linear, 4-mip) | nvcompress | `nvcompress -bc3 input.png output_sp.dds` |
-| Specular packed (BC3, linear, 4-mip) | Compressonator | `compressonatorcli -fd BC3 -miplevels 4 input.png output_sp.dds` |
-| UI sprite sheet (RGBA8 uncompressed, no mip) | nvcompress | `nvcompress -rgb -nomips input.png output.dds` |
-| UI sprite sheet (RGBA8 uncompressed, no mip) | Compressonator | `compressonatorcli -fd ARGB_8888 -nomipmap input.png output.dds` |
-| Vehicle sprite atlas (DXT5 BC3, linear, 1 mip — base level only, `dwMipMapCount=1`) | Compressonator | `compressonatorcli -fd BC3 -miplevels 1 input.png output.dds` |
+| Category                                                                            | Tool                         | Command                                                                                                                        |
+| ----------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Diffuse sRGB opaque (DXT1 BC1, 4-mip)                                               | nvcompress                   | `nvcompress -color -bc1 input.png output.dds`                                                                                  |
+| Diffuse sRGB opaque (DXT1 BC1, 4-mip)                                               | Compressonator               | `compressonatorcli -fd BC1 -miplevels 4 input.png output.dds`                                                                  |
+| Building atlas 4096×4096 (DXT1 BC1, 5-mip)                                          | Compressonator               | `compressonatorcli -fd BC1 -miplevels 5 buildings_atlas_d.png buildings_atlas_d.dds`                                           |
+| Building atlas fallback 2048×2048 (DXT1 BC1, 4-mip)                                 | Compressonator               | `compressonatorcli -fd BC1 -miplevels 4 buildings_atlas_d_2k.png buildings_atlas_d_2k.dds`                                     |
+| Diffuse sRGB with alpha (DXT5 BC3, 4-mip)                                           | nvcompress                   | `nvcompress -color -bc3 input.png output.dds`                                                                                  |
+| Diffuse sRGB with alpha (DXT5 BC3, 4-mip)                                           | Compressonator               | `compressonatorcli -fd BC3 -miplevels 4 input.png output.dds`                                                                  |
+| Normal map DXT5nm (BC3, 4-mip)                                                      | nvcompress                   | `nvcompress -normal -bc3 input_swizzled.png output.dds`                                                                        |
+| Normal map DXT5nm (BC3, 4-mip)                                                      | Compressonator               | `compressonatorcli -fd BC3 -miplevels 4 input_swizzled.png output.dds`                                                         |
+| Specular packed (BC3, linear, 4-mip)                                                | nvcompress                   | `nvcompress -bc3 input.png output_sp.dds`                                                                                      |
+| Specular packed (BC3, linear, 4-mip)                                                | Compressonator               | `compressonatorcli -fd BC3 -miplevels 4 input.png output_sp.dds`                                                               |
+| UI sprite sheet (RGBA8 uncompressed, no mip)                                        | nvcompress                   | `nvcompress -rgb -nomips input.png output.dds`                                                                                 |
+| UI sprite sheet (RGBA8 uncompressed, no mip)                                        | Compressonator               | `compressonatorcli -fd ARGB_8888 -nomipmap input.png output.dds`                                                               |
+| Vehicle sprite atlas (DXT5 BC3, linear, 1 mip — base level only, `dwMipMapCount=1`) | Compressonator               | `compressonatorcli -fd BC3 -miplevels 1 input.png output.dds`                                                                  |
 | Vehicle sprite atlas (DXT5 BC3, linear, 1 mip — base level only, `dwMipMapCount=1`) | **nvcompress not supported** | nvcompress always generates a full mip chain and cannot be limited to 1 level; use Compressonator exclusively for this format. |
 
 **IMPORTANT — nvcompress mip chain behaviour**: `nvcompress` does NOT support a `-miplevels N` (or `-mips N`) CLI parameter — no such flag exists in NVTT 2.x or NVTT 3.x. `nvcompress` always generates a **full mip chain** down to 1×1 (or 1×N for non-square textures) by default. For building diffuse, normal maps, and specular packed textures this is acceptable — the GPU sampler uses all levels and performance is optimal. For the **billboard atlas** (1024×128, 8-frame strip), a full chain produces 11 mip levels; the runtime sets `GL_TEXTURE_MAX_LEVEL = 3` to cap GPU reads at 4 levels, so in-game rendering is correct, but the DDS file on disk will contain extra levels. **If the Phase 5 validator enforces `mip_count == 4` exactly** (e.g. via `struct.unpack('<I', d[28:32])[0] == 4`), billboard atlases authored with `nvcompress` will fail that check. For billboard atlases requiring exactly 4 mip levels **in the DDS file**, use **Compressonator** with `-miplevels 4`.
@@ -134,7 +137,7 @@ Both tools produce standards-compliant DDS files and are CI-verified. Do not use
    For DXT5 (BC3) billboard atlases: the standard DDS FourCC field contains `0x35545844` (`DXT5` in ASCII little-endian), which does NOT encode the sRGB flag. The traditional FourCC inspection step alone cannot reliably detect sRGB intent for DXT5 files. Use one of the following approaches to validate sRGB intent on DXT5 billboard atlases:
    - **DX10 extended header (recommended)**: Check the DX10 DXGI format field (`DXGI_FORMAT_BC3_UNORM_SRGB`, value 78). Files authored via `nvcompress -color` produce a DX10 extended header with this format value.
    - **Source PNG sRGB ICC profile + authoring flag**: Verify the source PNG carries an sRGB ICC profile and was compressed with `nvcompress -color` (the `-color` flag signals sRGB intent to the compressor and sets the DX10 DXGI sRGB format).
-   Note: `glCompressedTexImage2D` with `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT` requires the uploaded data to be authored in sRGB — verifying the DX10 header or source provenance before upload prevents silent gamma errors in the billboard atlas rendering.
+     Note: `glCompressedTexImage2D` with `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT` requires the uploaded data to be authored in sRGB — verifying the DX10 header or source provenance before upload prevents silent gamma errors in the billboard atlas rendering.
 
 3. **Automation note.** `tools/export_textures.py` (Phase 9 deliverable) handles sRGB tagging automatically for all diffuse atlas DDS outputs. Until that script exists, manual validation per steps 1–2 above is required for every diffuse atlas DDS before committing to the asset directory.
 
@@ -165,13 +168,13 @@ at asset-authoring time, not at runtime.
 **Reference byte sizes** — for validation, the total file size of a correctly generated DDS
 stub (header + all mip data) is:
 
-| Format | Resolution | Mip levels | Total file size |
-|---|---|---|---|
-| DXT5/BC3 | 1024×1024 | 4 | **1,392,768 bytes** (128 header + `(262144 + 65536 + 16384 + 4096)` × 1 byte-per-raw) |
-| DXT1/BC1 | 2048×2048 | 4 | **2,785,408 bytes** (128 header + `(2097152 + 524288 + 131072 + 32768)` × 1 byte-per-raw) |
-| DXT5/BC3 | 2048×2048 | 4 | **2,796,544 bytes** (128 header + `(1048576 + 262144 + 65536 + 16384)` × 1 byte-per-raw) |
-| DXT1/BC1 | 4096×4096 | 5 | **11,174,016 bytes** (128 header + `(8388608 + 2097152 + 524288 + 131072 + 32768)` × 1 byte-per-raw) |
-| DXT5/BC3 | 1024×128 | 4 | **192,640 bytes** (128 header + `(131072 + 32768 + 8192 + 2048)` × 1 byte-per-raw) |
+| Format   | Resolution | Mip levels | Total file size                                                                                      |
+| -------- | ---------- | ---------- | ---------------------------------------------------------------------------------------------------- |
+| DXT5/BC3 | 1024×1024  | 4          | **1,392,768 bytes** (128 header + `(262144 + 65536 + 16384 + 4096)` × 1 byte-per-raw)                |
+| DXT1/BC1 | 2048×2048  | 4          | **2,785,408 bytes** (128 header + `(2097152 + 524288 + 131072 + 32768)` × 1 byte-per-raw)            |
+| DXT5/BC3 | 2048×2048  | 4          | **2,796,544 bytes** (128 header + `(1048576 + 262144 + 65536 + 16384)` × 1 byte-per-raw)             |
+| DXT1/BC1 | 4096×4096  | 5          | **11,174,016 bytes** (128 header + `(8388608 + 2097152 + 524288 + 131072 + 32768)` × 1 byte-per-raw) |
+| DXT5/BC3 | 1024×128   | 4          | **192,640 bytes** (128 header + `(131072 + 32768 + 8192 + 2048)` × 1 byte-per-raw)                   |
 
 DXT1 block size: 8 bytes per 4×4 pixel block. DXT5 block size: 16 bytes per 4×4 pixel block.
 Mip N dimensions: `max(1, floor(W / 2^N)) × max(1, floor(H / 2^N))`, rounded up to the
@@ -216,20 +219,21 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
   - **Linear pool path** (normal maps, roughness loaded via `IVideoDriver::getTexture()`): after loading, use Irrlicht's material anisotropy setting. Irrlicht exposes per-material anisotropy via `SMaterial::AnisotropicFilter = requestedAnisotropy`. The scene node's material must set this field after texture assignment (e.g., `node->getMaterial(m).AnisotropicFilter = 8u;` for 8× anisotropy). **Do NOT call `IVideoDriver::makeColorKeyTexture()` for anisotropy setup** — that API makes a specific color channel transparent for alpha-keying and is completely unrelated to anisotropic filtering. Calling it on normal maps, roughness maps, or any non-keyed texture will destructively corrupt the texture data.
   - Query `GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT` immediately after context creation (same timing as `GL_MAX_TEXTURE_SIZE`); store as `m_maxAnisotropy` in `RenderSystem`. Check `GL_EXT_texture_filter_anisotropic` extension presence; if absent, log warning and skip (graceful degradation to trilinear).
   - Player-configurable in Settings > Graphics tab as an optional quality setting.
+
 - **All textures must be power-of-two dimensions** (e.g. 256, 512, 1024, 2048)
 - **Mipmap generation**: Mandatory for all in-world textures **except lightmaps**. Lightmap textures (`_lm` suffix) are explicitly exempt: they are sampled at a consistent scale close to camera (no perspective mip benefit) and the VRAM budget calculation assumes unmipmapped lightmaps (`ceil(1024/4)^2 × 16 = 1.0 MB/texture` at DXT5, no ×1.33 mip overhead). Adding mip chains to lightmaps would increase VRAM by ~33% and violate the budget assumption. Lightmap uploads must explicitly set `GL_TEXTURE_MAX_LEVEL = 0` (single mip level only) to prevent driver-side mip generation.
 - **Naming convention**:
 
-  | Suffix | Usage |
-  |---|---|
-  | `_d` | Diffuse/albedo. Upload path: **sRGB raw-GL path** (`GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` / `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`) for all photographic/perceptual diffuse textures. **Exception: vehicle sprite atlas (`vehicles_sprite_atlas_d.dds`) uses `_d` suffix but LINEAR upload path** — palette swatches are not photographic diffuse data and must not be sRGB-decoded. The sprite atlas is uploaded via `IVideoDriver::getTexture()` (linear pool), NOT the sRGB raw-GL path. See `architecture/asset-standards/building-atlas-layout.md` sprite atlas section. |
-  | `_n` | Normal map (DXT5nm) |
-  | `_s` | Specular (grayscale) |
-  | `_sp` | Specular packed (multi-channel roughness/metallic/AO). Upload path: **linear pool** (standard `IVideoDriver::getTexture()`) — packed roughness/metallic/AO data is linear; sRGB decode would corrupt channel values. |
-  | `_lm` | Lightmap bake (UV channel 1) |
-  | `_billboard` | Billboard imposter atlas (1024×128 DXT5 sRGB, 1×8 horizontal strip) |
-  | `_splat` | **PNG only** (not DDS) — Terrain splat map: blending weights for terrain texture layers |
-  | `_tileable` | DDS DXT1 sRGB — Road surface tileable texture (e.g. `road_asphalt_tileable.dds`) |
+  | Suffix       | Usage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+  | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `_d`         | Diffuse/albedo. Upload path: **sRGB raw-GL path** (`GL_COMPRESSED_SRGB_S3TC_DXT1_EXT` / `GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT`) for all photographic/perceptual diffuse textures. **Exception: vehicle sprite atlas (`vehicles_sprite_atlas_d.dds`) uses `_d` suffix but LINEAR upload path** — palette swatches are not photographic diffuse data and must not be sRGB-decoded. The sprite atlas is uploaded via `IVideoDriver::getTexture()` (linear pool), NOT the sRGB raw-GL path. See `architecture/asset-standards/building-atlas-layout.md` sprite atlas section. |
+  | `_n`         | Normal map (DXT5nm)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+  | `_s`         | Specular (grayscale)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+  | `_sp`        | Specular packed (multi-channel roughness/metallic/AO). Upload path: **linear pool** (standard `IVideoDriver::getTexture()`) — packed roughness/metallic/AO data is linear; sRGB decode would corrupt channel values.                                                                                                                                                                                                                                                                                                                                                        |
+  | `_lm`        | Lightmap bake (UV channel 1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+  | `_billboard` | Billboard imposter atlas (1024×128 DXT5 sRGB, 1×8 horizontal strip)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+  | `_splat`     | **PNG only** (not DDS) — Terrain splat map: blending weights for terrain texture layers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+  | `_tileable`  | DDS DXT1 sRGB — Road surface tileable texture (e.g. `road_asphalt_tileable.dds`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
   All suffixes are lowercase. No other suffix patterns are valid. `validate_assets.py` must reject any DDS file whose name does not end with one of these eight suffixes. The `_billboard` suffix applies exclusively to LOD2 imposter atlases — a committed `_lod2.b3d` or `_lod2.ply` geometry shell and a committed `_billboard.dds` must not coexist for the same asset (check #2 and check #11 in `validate_assets.py`).
 
@@ -241,23 +245,23 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
 
 ### Resolution Matrix
 
-| Asset category | Resolution |
-|---|---|
-| Terrain base textures | 2048×2048 |
-| Building facade atlas cell | 512×512 per module face (wall tile); up to 4 module faces packed per 1024×1024 city building atlas cell |
-| Roads (tileable) | 1024×1024 |
-| Props / street furniture | 256×256 or 512×512 |
-| UI sprite sheet | 2048×2048 (atlas) |
-| Lightmap bake (_lm) — small/medium buildings | 512×512 |
-| Lightmap bake (_lm) — large buildings | 1024×1024 |
-| Lightmap bake (_lm) — LOD2 shell | 256×256 |
-| Specular/roughness (_s,_sp) — building facades | 512×512 (matches facade atlas cell resolution) |
-| Specular/roughness (_s,_sp) — terrain | 1024×1024 (half of diffuse, sufficient for smooth terrain materials) |
-| Specular/roughness (_s,_sp) — props | 256×256 (half of prop diffuse maximum) |
-| Normal maps (_n) — all categories | Same resolution as specular/roughness for that category |
-| Vehicle diffuse atlas | 512×512 per vehicle type, packed into 2048×2048 DDS DXT1 atlas (16 vehicle types per sheet) |
-| Vehicle normal map | 256×256 per vehicle type, packed into a separate 2048×2048 DDS DXT5nm atlas (8×8 grid of 256×256 cells, 64 slots; same vehicle registry assignments as diffuse atlas rows/columns; named `vehicles_normal_atlas_n.dds`) |
-| Sky cloud texture (`clouds.png`) | 1024×1024 RGBA PNG (Phase 10b). No `_d`/`_n`/`_s` suffix — this is a transparency-mask cloud texture, not a diffuse surface texture. Upload path: linear pool via `IVideoDriver::getTexture()` (PNG, not DDS — Irrlicht DDS loader disabled). Located at `assets/textures/sky/clouds.png`. No mip chain (tiled at UV scale; mips would blur the density mask edges). |
+| Asset category                                   | Resolution                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Terrain base textures                            | 2048×2048                                                                                                                                                                                                                                                                                                                                                            |
+| Building facade atlas cell                       | 512×512 per module face (wall tile); up to 4 module faces packed per 1024×1024 city building atlas cell                                                                                                                                                                                                                                                              |
+| Roads (tileable)                                 | 1024×1024                                                                                                                                                                                                                                                                                                                                                            |
+| Props / street furniture                         | 256×256 or 512×512                                                                                                                                                                                                                                                                                                                                                   |
+| UI sprite sheet                                  | 2048×2048 (atlas)                                                                                                                                                                                                                                                                                                                                                    |
+| Lightmap bake (\_lm) — small/medium buildings    | 512×512                                                                                                                                                                                                                                                                                                                                                              |
+| Lightmap bake (\_lm) — large buildings           | 1024×1024                                                                                                                                                                                                                                                                                                                                                            |
+| Lightmap bake (\_lm) — LOD2 shell                | 256×256                                                                                                                                                                                                                                                                                                                                                              |
+| Specular/roughness (\_s,\_sp) — building facades | 512×512 (matches facade atlas cell resolution)                                                                                                                                                                                                                                                                                                                       |
+| Specular/roughness (\_s,\_sp) — terrain          | 1024×1024 (half of diffuse, sufficient for smooth terrain materials)                                                                                                                                                                                                                                                                                                 |
+| Specular/roughness (\_s,\_sp) — props            | 256×256 (half of prop diffuse maximum)                                                                                                                                                                                                                                                                                                                               |
+| Normal maps (\_n) — all categories               | Same resolution as specular/roughness for that category                                                                                                                                                                                                                                                                                                              |
+| Vehicle diffuse atlas                            | 512×512 per vehicle type, packed into 2048×2048 DDS DXT1 atlas (16 vehicle types per sheet)                                                                                                                                                                                                                                                                          |
+| Vehicle normal map                               | 256×256 per vehicle type, packed into a separate 2048×2048 DDS DXT5nm atlas (8×8 grid of 256×256 cells, 64 slots; same vehicle registry assignments as diffuse atlas rows/columns; named `vehicles_normal_atlas_n.dds`)                                                                                                                                              |
+| Sky cloud texture (`clouds.png`)                 | 1024×1024 RGBA PNG (Phase 10b). No `_d`/`_n`/`_s` suffix — this is a transparency-mask cloud texture, not a diffuse surface texture. Upload path: linear pool via `IVideoDriver::getTexture()` (PNG, not DDS — Irrlicht DDS loader disabled). Located at `assets/textures/sky/clouds.png`. No mip chain (tiled at UV scale; mips would blur the density mask edges). |
 
 **Facade texture policy**: All building facade diffuse textures must use atlas cells — no standalone per-building non-atlas textures for facade diffuse. Each unique wall module variant occupies one 512×512 cell in the city building atlas (64 unique wall module textures per 4096×4096 primary atlas sheet; 16 per 2048×2048 fallback sheet). Effective density at 512×512 for a 4×3 m module face: ~128 px/m at LOD0 near-camera distance.
 
@@ -292,18 +296,18 @@ The final DDS contains: alpha = X, green = Y, red = 0, blue = 0. The shader reco
 
 All terrain and building shaders must use the following fixed texture unit assignments. These assignments are the authoritative binding contract between `TextureCache` (which binds textures) and GLSL shaders (which declare `uniform sampler2D` slots). Defined in `src/rendering/shader_constants.h`:
 
-| Texture unit | Constant name | Usage |
-|---|---|---|
-| 0 | `kTexUnitDiffuse` | Diffuse/albedo (sRGB DXT1/DXT5 raw-GL path) |
-| 1 | `kTexUnitNormal` | Normal map (DXT5nm, linear-pool `ITexture*`) |
-| 2 | `kTexUnitSpecular` | Specular/roughness (BC1 or BC3 packed, linear-pool) |
-| 3 | `kTexUnitLightmap` | Lightmap bake (DXT5/BC3, linear-pool) |
-| 4 | `kTexUnitSplatMap` | Terrain splat/blend map (RGBA8 uncompressed, splat-map pool — raw `glTexImage2D`, NOT linear-pool) |
-| 5 | `kTexUnitTerrainLayer0` | Terrain detail layer 0 (DXT1 sRGB, raw-GL) |
-| 6 | `kTexUnitTerrainLayer1` | Terrain detail layer 1 (DXT1 sRGB, raw-GL) |
-| 7 | `kTexUnitTerrainLayer2` | Terrain detail layer 2 (DXT1 sRGB, raw-GL) |
-| 8 | `kTexUnitTerrainLayer3` | Terrain detail layer 3 (DXT1 sRGB, raw-GL) |
-| 9 | `kTexUnitBillboard` | Billboard imposter atlas (DXT5 sRGB, raw-GL) |
+| Texture unit | Constant name           | Usage                                                                                              |
+| ------------ | ----------------------- | -------------------------------------------------------------------------------------------------- |
+| 0            | `kTexUnitDiffuse`       | Diffuse/albedo (sRGB DXT1/DXT5 raw-GL path)                                                        |
+| 1            | `kTexUnitNormal`        | Normal map (DXT5nm, linear-pool `ITexture*`)                                                       |
+| 2            | `kTexUnitSpecular`      | Specular/roughness (BC1 or BC3 packed, linear-pool)                                                |
+| 3            | `kTexUnitLightmap`      | Lightmap bake (DXT5/BC3, linear-pool)                                                              |
+| 4            | `kTexUnitSplatMap`      | Terrain splat/blend map (RGBA8 uncompressed, splat-map pool — raw `glTexImage2D`, NOT linear-pool) |
+| 5            | `kTexUnitTerrainLayer0` | Terrain detail layer 0 (DXT1 sRGB, raw-GL)                                                         |
+| 6            | `kTexUnitTerrainLayer1` | Terrain detail layer 1 (DXT1 sRGB, raw-GL)                                                         |
+| 7            | `kTexUnitTerrainLayer2` | Terrain detail layer 2 (DXT1 sRGB, raw-GL)                                                         |
+| 8            | `kTexUnitTerrainLayer3` | Terrain detail layer 3 (DXT1 sRGB, raw-GL)                                                         |
+| 9            | `kTexUnitBillboard`     | Billboard imposter atlas (DXT5 sRGB, raw-GL)                                                       |
 
 `shader_constants.h` must include the following compile-time range guard. The bound is 15 (not 31) because the per-stage (fragment shader) minimum of `GL_MAX_TEXTURE_IMAGE_UNITS` is 16 in OpenGL 3.3 core — texture units 0–15 are guaranteed available per stage. The combined minimum (`GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS`) is 80 for OpenGL 3.x and is the wrong limit to check here; shaders bind textures per stage, so the per-stage minimum governs the safe upper bound:
 
@@ -336,7 +340,7 @@ Small buildings and props use a pre-baked imposter atlas at LOD2 (beyond 100 m).
   - Mip 1: 512×64 — 8 × 64×64, usable **56×56 px** per frame
   - Mip 2: 256×32 — 8 × 32×32, usable **28×28 px** per frame
   - Mip 3: 128×16 — 8 × 16×16, usable **14×14 px** per frame (border shrinks to 1 px/side at this mip level; effective content is 14×14 px)
-  At mip level 3 (used beyond ~400 m view distance), each building imposter is represented by 14×14 usable pixels. **Authoring requirement**: The primary silhouette of the building must be recognisable at 14×14 px — verified by downscaling a single frame to 14×14 in the DCC tool before finalising LOD2 billboard art. Fine details (windows, ledges) are not required to be legible at mip 3; gross building form (tower vs low-rise, vertical vs horizontal dominant shape) must remain distinguishable.
+    At mip level 3 (used beyond ~400 m view distance), each building imposter is represented by 14×14 usable pixels. **Authoring requirement**: The primary silhouette of the building must be recognisable at 14×14 px — verified by downscaling a single frame to 14×14 in the DCC tool before finalising LOD2 billboard art. Fine details (windows, ledges) are not required to be legible at mip 3; gross building form (tower vs low-rise, vertical vs horizontal dominant shape) must remain distinguishable.
 - **Naming**: `<asset_name>_billboard.dds`. A committed `_lod2.b3d` or `_lod2.ply` geometry shell and a committed `_lod2_billboard.png` billboard texture must not coexist for the same asset. The floor-count conditional (check #2 and check #11 in `validate_assets.py`) enforces this: if `height_floors <= 3`, no `_lod2.b3d` or `_lod2.ply` geometry shell may exist alongside `_lod2_billboard.png`. Small building / prop assets must NOT ship a `_lod2.b3d` or `_lod2.ply` file — the billboard DDS is the LOD2 asset for these categories.
 
 **Phase 1 dated sign-off record** (required before Phase 1 exit):
@@ -421,15 +425,16 @@ Road surfaces use a dedicated tileable texture separate from terrain and buildin
   ```
 
   Using `glCompressedTexImage2D` for splat maps is a critical error — it corrupts the smooth 0–255 blend weight gradients that require full 8-bit per-channel precision. The sRGB raw-GL path (`m_srgbTextures`, DXT-format) must not be used for splat maps. The `IVideoDriver::getTexture()` path must also not be used. `TextureCache` must handle splat maps as a distinct upload category separate from both the sRGB pool and the linear DXT pool.
+
 - Second splat map required if >4 terrain material layers needed (multi-pass blend strategy)
 - **Splat map channel-to-material assignment (fixed, must not be changed after texture production begins):**
 
-  | Splat map channel | Terrain material | Texture unit | Constant name | Initial value |
-  |---|---|---|---|---|
-  | R (red) | Grass | 5 | `kTexUnitTerrainLayer0` | 255 across entire map |
-  | G (green) | Asphalt | 6 | `kTexUnitTerrainLayer1` | 0 |
-  | B (blue) | Soil | 7 | `kTexUnitTerrainLayer2` | 0 |
-  | A (alpha) | Concrete | 8 | `kTexUnitTerrainLayer3` | 0 |
+  | Splat map channel | Terrain material | Texture unit | Constant name           | Initial value         |
+  | ----------------- | ---------------- | ------------ | ----------------------- | --------------------- |
+  | R (red)           | Grass            | 5            | `kTexUnitTerrainLayer0` | 255 across entire map |
+  | G (green)         | Asphalt          | 6            | `kTexUnitTerrainLayer1` | 0                     |
+  | B (blue)          | Soil             | 7            | `kTexUnitTerrainLayer2` | 0                     |
+  | A (alpha)         | Concrete         | 8            | `kTexUnitTerrainLayer3` | 0                     |
 
   This assignment is **fixed before texture production begins** and must match the texture unit binding order in the terrain shader (`kTexUnitTerrainLayer0` through `kTexUnitTerrainLayer3`). Any mismatch between the splat map channel order and the texture unit binding order causes incorrect material blending across the entire terrain surface with no compile-time or runtime error. **The R channel (grass) is initialized to 255 across the entire map** so that unpainted tiles default to grass and the blend-weight normalization divisor is always non-zero.
 
@@ -472,18 +477,18 @@ zone-type readability. Shift grass toward olive-gold and soil toward rust-ochre.
 All four diffuse textures are 2048 × 2048 px, DXT1/BC1, sRGB, 4 mip levels (2048→1024→512→256),
 uploaded via `TextureCache::loadSRGB()` with `GL_COMPRESSED_SRGB_S3TC_DXT1_EXT`.
 
-###### terrain\_grass\_d.dds
+###### terrain_grass_d.dds
 
 **Semantic**: Natural grass ground cover. Fills splat channel R. The dominant biome surface
 for undeveloped and park tiles.
 
-| Role | Hex | R | G | B | Notes |
-|---|---|---|---|---|---|
-| Primary (mid-tone blade) | `#7A8C3E` | 122 | 140 | 62 | Muted olive-green; principal blade color |
-| Secondary (shadow pocket) | `#4E5C28` | 78 | 92 | 40 | Dark gap between blade clusters |
-| Tertiary (dry tip highlight) | `#A09848` | 160 | 152 | 72 | Slightly yellow-gold blade tip; sunlit |
-| Soil show-through | `#7A6448` | 122 | 100 | 72 | Warm brown visible between sparse patches |
-| Specular highlight catch | `#B4B068` | 180 | 176 | 104 | Hot highlight on near-vertical blade faces |
+| Role                         | Hex       | R   | G   | B   | Notes                                      |
+| ---------------------------- | --------- | --- | --- | --- | ------------------------------------------ |
+| Primary (mid-tone blade)     | `#7A8C3E` | 122 | 140 | 62  | Muted olive-green; principal blade color   |
+| Secondary (shadow pocket)    | `#4E5C28` | 78  | 92  | 40  | Dark gap between blade clusters            |
+| Tertiary (dry tip highlight) | `#A09848` | 160 | 152 | 72  | Slightly yellow-gold blade tip; sunlit     |
+| Soil show-through            | `#7A6448` | 122 | 100 | 72  | Warm brown visible between sparse patches  |
+| Specular highlight catch     | `#B4B068` | 180 | 176 | 104 | Hot highlight on near-vertical blade faces |
 
 Luminance range: min 62 (shadow pocket) — max 180 (highlight catch). Do not compress the
 range — the variance maintains read at DXT1 compression and at LOD3 (256 px mip).
@@ -499,17 +504,17 @@ Key constraints:
 - DXT1 mitigation: keep blade colors within a 60-unit luminance spread within any 4×4 block;
   use 0.5 px Gaussian blur on source PNG before compression to soften hard blade edges
 
-###### terrain\_asphalt\_d.dds
+###### terrain_asphalt_d.dds
 
 **Semantic**: Road and paved driveway surface. Fills splat channel G.
 
-| Role | Hex | R | G | B | Notes |
-|---|---|---|---|---|---|
-| Primary (mid-tone aggregate) | `#3C3C3C` | 60 | 60 | 60 | Dark grey aggregate body |
-| Worn highlight (oxidized surface) | `#585858` | 88 | 88 | 88 | Lighter grey on worn areas |
-| Deep crack / joint gap | `#1C1C1C` | 28 | 28 | 28 | Near-black in crack recesses |
-| Aggregate specks (light) | `#6A6A6A` | 106 | 106 | 106 | Quartz aggregate pebbles |
-| Aged tar stain | `#2A2820` | 42 | 40 | 32 | Slight warm-dark for tar pools |
+| Role                              | Hex       | R   | G   | B   | Notes                          |
+| --------------------------------- | --------- | --- | --- | --- | ------------------------------ |
+| Primary (mid-tone aggregate)      | `#3C3C3C` | 60  | 60  | 60  | Dark grey aggregate body       |
+| Worn highlight (oxidized surface) | `#585858` | 88  | 88  | 88  | Lighter grey on worn areas     |
+| Deep crack / joint gap            | `#1C1C1C` | 28  | 28  | 28  | Near-black in crack recesses   |
+| Aggregate specks (light)          | `#6A6A6A` | 106 | 106 | 106 | Quartz aggregate pebbles       |
+| Aged tar stain                    | `#2A2820` | 42  | 40  | 32  | Slight warm-dark for tar pools |
 
 Luminance range: min 28 — max 106 (spread 78 units). Author primary aggregate with faint
 blue bias: R ≤ G = B by approximately 2–4 units (e.g. `#3A3C3C`) to distinguish from the
@@ -522,17 +527,17 @@ authored into this texture — they are handled by the road marking atlas.
 DXT1 mitigation: ensure no 4×4 block contains both a 106-luminance speck and a 28-luminance
 crack shadow without at least one intermediate-luminance texel between them.
 
-###### terrain\_soil\_d.dds
+###### terrain_soil_d.dds
 
 **Semantic**: Bare earth, earthworks, and unpaved areas. Fills splat channel B.
 
-| Role | Hex | R | G | B | Notes |
-|---|---|---|---|---|---|
-| Primary (damp mid-tone) | `#7A5C3C` | 122 | 92 | 60 | Warm rust-brown; main soil body |
-| Dry surface highlight | `#A07850` | 160 | 120 | 80 | Lighter, slightly desaturated dry crust |
-| Wet shadow (compact) | `#4E3820` | 78 | 56 | 32 | Dark compact soil in shadow zones |
-| Aggregate grit (coarse) | `#8A7060` | 138 | 112 | 96 | Small pebbles / coarse sand grains |
-| Clay layer show-through | `#6A4830` | 106 | 72 | 48 | Darker orange-clay layer in deep ruts |
+| Role                    | Hex       | R   | G   | B   | Notes                                   |
+| ----------------------- | --------- | --- | --- | --- | --------------------------------------- |
+| Primary (damp mid-tone) | `#7A5C3C` | 122 | 92  | 60  | Warm rust-brown; main soil body         |
+| Dry surface highlight   | `#A07850` | 160 | 120 | 80  | Lighter, slightly desaturated dry crust |
+| Wet shadow (compact)    | `#4E3820` | 78  | 56  | 32  | Dark compact soil in shadow zones       |
+| Aggregate grit (coarse) | `#8A7060` | 138 | 112 | 96  | Small pebbles / coarse sand grains      |
+| Clay layer show-through | `#6A4830` | 106 | 72  | 48  | Darker orange-clay layer in deep ruts   |
 
 Luminance range: min 56 — max 160 (spread 104 units — most visual texture of the four types).
 Hue must read as **rust-ochre-brown** (R/G ratio ≈ 1.3–1.4). No green tones: G must always
@@ -542,17 +547,17 @@ Surface: **isotropic granular** with desiccation crack network (cell size 120–
 width 2–4 px, ≈6–10% surface area) and 3–5 wheel rut impressions per 512 px area (8–16 px
 wide, 50–80 px long, random angles — do not align parallel to texture edges).
 
-###### terrain\_concrete\_d.dds
+###### terrain_concrete_d.dds
 
 **Semantic**: Paved plazas, sidewalks, parking lots, and industrial pads. Fills splat channel A.
 
-| Role | Hex | R | G | B | Notes |
-|---|---|---|---|---|---|
-| Primary (mid-tone slab) | `#C0B8A8` | 192 | 184 | 168 | Warm light grey; main slab color |
-| Fresh pour highlight | `#D8D4CC` | 216 | 212 | 204 | Lighter, slightly blue-grey new pour |
-| Shadow / expansion joint | `#7A7870` | 122 | 120 | 112 | Dark joint line between slabs |
+| Role                       | Hex       | R   | G   | B   | Notes                                  |
+| -------------------------- | --------- | --- | --- | --- | -------------------------------------- |
+| Primary (mid-tone slab)    | `#C0B8A8` | 192 | 184 | 168 | Warm light grey; main slab color       |
+| Fresh pour highlight       | `#D8D4CC` | 216 | 212 | 204 | Lighter, slightly blue-grey new pour   |
+| Shadow / expansion joint   | `#7A7870` | 122 | 120 | 112 | Dark joint line between slabs          |
 | Aggregate exposed (coarse) | `#A09888` | 160 | 152 | 136 | Aggregate show-through on worn surface |
-| Staining (oil / water) | `#A4A090` | 164 | 160 | 144 | Slightly darker slab with stain |
+| Staining (oil / water)     | `#A4A090` | 164 | 160 | 144 | Slightly darker slab with stain        |
 
 Luminance range: min 116 — max 216 (brightest of the four types). **Warm grey bias**: R ≥ G > B
 by approximately 8–16 units. No strong hue variation — monochromatic warm grey only.
@@ -574,7 +579,7 @@ preserve tangent-space normal vector normalization).
 Mip pre-bake procedure: bicubic downsample at each level → renormalize vector field →
 DXT5nm encode per mip level → composite into one DDS.
 
-###### terrain\_grass\_n.dds
+###### terrain_grass_n.dds
 
 **Normal intensity**: moderate (|nx| or |ny| in range 0.15–0.40). Do not use high-intensity
 normals for grass — the matte surface means strong normals produce unrealistic specular
@@ -589,7 +594,7 @@ representing ground microtopography beneath the grass.
 **Mip behavior**: at mip 2 (512 px), individual blade normals merge into a broad directional
 field; at mip 3 (256 px), only large-scale undulations remain. This is correct behavior.
 
-###### terrain\_asphalt\_n.dds
+###### terrain_asphalt_n.dds
 
 **Normal intensity**: subtle (max tangential component ±0.25). The surface is macroscopically
 flat — heavy normals would produce harsh specular highlights on a predominantly diffuse material.
@@ -599,7 +604,7 @@ crack groove normals 2–4 px wide (slightly wider than the 1–2 px diffuse cra
 gradient). South hemisphere of each pebble dome points slightly toward camera (negative Y in
 OpenGL tangent space) to produce aggregate sparkle under overhead directional light.
 
-###### terrain\_soil\_n.dds
+###### terrain_soil_n.dds
 
 **Normal intensity**: strong (max tangential component ±0.50). Soil has the largest physical
 height variation (granules 5–20 mm above base; deep desiccation crack troughs).
@@ -616,7 +621,7 @@ height variation (granules 5–20 mm above base; deep desiccation crack troughs)
 **Low-frequency base**: large-scale undulation (period 256–512 px, amplitude ±0.08) to prevent
 the normal map from reading as a perfectly flat plane.
 
-###### terrain\_concrete\_n.dds
+###### terrain_concrete_n.dds
 
 **Normal intensity**: subtle (max tangential component ±0.18). Concrete is the flattest surface.
 Slab face has effectively flat normals (|nx|, |ny| < 0.05).
@@ -640,7 +645,7 @@ Before committing any terrain DDS file, verify each item:
 
 - [ ] Source PNG has embedded sRGB ICC profile (`exiftool | grep -i 'color space'`)
 - [ ] DDS FourCC at byte offset 84 is `0x30315844` (DX10 extended header present)
-- [ ] DX10 DXGI\_FORMAT field = 72 (`BC1_UNORM_SRGB`) for DXT1 diffuse
+- [ ] DX10 DXGI_FORMAT field = 72 (`BC1_UNORM_SRGB`) for DXT1 diffuse
 - [ ] DDS file contains exactly 4 mip levels (2048, 1024, 512, 256)
 - [ ] Texture tiles seamlessly: composite 2×2 grid at 4096×4096 — no visible seam in any direction
 - [ ] No pure-green pixels in grass texture (max G channel value 195 in sRGB)
@@ -654,10 +659,10 @@ Before committing any terrain DDS file, verify each item:
 
 - [ ] Source swizzled PNG: alpha = X, green = Y, blue = 127, red = 0
 - [ ] Flat-surface reference pixel: alpha = 128, green = 128 (decodes to nx=0, ny=0, nz=1)
-- [ ] DDS FourCC: `0x35545844` (DXT5) or DX10 header with BC3\_UNORM (DXGI 77)
+- [ ] DDS FourCC: `0x35545844` (DXT5) or DX10 header with BC3_UNORM (DXGI 77)
 
-  **DXGI 77 = BC3\_UNORM (linear) — this is correct for normal maps.** Do NOT use DXGI 78
-  (BC3\_UNORM\_SRGB) for normal maps — the sRGB decode applied at sample time will corrupt the
+  **DXGI 77 = BC3_UNORM (linear) — this is correct for normal maps.** Do NOT use DXGI 78
+  (BC3_UNORM_SRGB) for normal maps — the sRGB decode applied at sample time will corrupt the
   encoded XY direction vectors and produce incorrect lighting.
 
 - [ ] DDS file contains exactly 4 mip levels pre-baked via bicubic downsample
@@ -703,16 +708,16 @@ Output files go to `assets/textures/terrain/`.
 
 ##### Terrain Texture VRAM Budget (per-file)
 
-| File | Format | Approx. disk/VRAM |
-|---|---|---|
-| `terrain_grass_d.dds` | DXT1/BC1, 4 mip | ~2.8 MB |
-| `terrain_asphalt_d.dds` | DXT1/BC1, 4 mip | ~2.8 MB |
-| `terrain_soil_d.dds` | DXT1/BC1, 4 mip | ~2.8 MB |
-| `terrain_concrete_d.dds` | DXT1/BC1, 4 mip | ~2.8 MB |
-| `terrain_grass_n.dds` | DXT5/BC3, 4 mip | ~5.6 MB |
-| `terrain_asphalt_n.dds` | DXT5/BC3, 4 mip | ~5.6 MB |
-| `terrain_soil_n.dds` | DXT5/BC3, 4 mip | ~5.6 MB |
-| `terrain_concrete_n.dds` | DXT5/BC3, 4 mip | ~5.6 MB |
+| File                     | Format          | Approx. disk/VRAM |
+| ------------------------ | --------------- | ----------------- |
+| `terrain_grass_d.dds`    | DXT1/BC1, 4 mip | ~2.8 MB           |
+| `terrain_asphalt_d.dds`  | DXT1/BC1, 4 mip | ~2.8 MB           |
+| `terrain_soil_d.dds`     | DXT1/BC1, 4 mip | ~2.8 MB           |
+| `terrain_concrete_d.dds` | DXT1/BC1, 4 mip | ~2.8 MB           |
+| `terrain_grass_n.dds`    | DXT5/BC3, 4 mip | ~5.6 MB           |
+| `terrain_asphalt_n.dds`  | DXT5/BC3, 4 mip | ~5.6 MB           |
+| `terrain_soil_n.dds`     | DXT5/BC3, 4 mip | ~5.6 MB           |
+| `terrain_concrete_n.dds` | DXT5/BC3, 4 mip | ~5.6 MB           |
 
 DXT1 per texture: `ceil(2048/4)² × 8 × 1.33 ≈ 2.8 MB`.
 DXT5 per texture: `ceil(2048/4)² × 16 × 1.33 ≈ 5.6 MB`.
@@ -722,37 +727,37 @@ Total terrain detail texture VRAM: 4 × 2.8 + 4 × 5.6 = **33.6 MB** (within VRA
 
 Total texture VRAM for all simultaneously-resident assets must not exceed **1.0 GB** (leaving ~1 GB+ headroom for OS/driver/geometry/framebuffers on 4 GB hardware):
 
-| Category | Budget |
-|---|---|
-| Terrain base textures (up to **4 layers**, 2048x2048 DXT1 with 4-level mip) | ≤11 MB (`ceil(2048/4)^2 × 8 × 1.33 ≈ 2.66 MB/layer × 4 layers`). **4 layers matches the shader texture unit table** — texture units 5–8 (`kTexUnitTerrainLayer0` through `kTexUnitTerrainLayer3`) provide exactly 4 terrain detail layer slots. Claiming 6 layers here is inconsistent with the 4-slot architecture. A second splat map (described in Terrain Texturing & Splat Maps) adds 4 more layers post-V1 only. V1 VRAM budget assumes 4 layers. |
-| Splat maps (up to 2 x 1024x1024 RGBA8 UNORM, GL_TEXTURE_MAX_LEVEL=0, no mip chain) | ≤8 MB (2 × 1024 × 1024 × 4 bytes = 8 MB exact; no ×1.33 mip overhead) |
-| City building atlas — primary (4096×4096 DXT1, 5-level mip) | ≤12 MB (`ceil(4096/4)^2 × 8 × 1.33 ≈ 10.6 MB`; loaded only when `GL_MAX_TEXTURE_SIZE ≥ 4096`) |
-| City building atlas — fallback (2048×2048 DXT1, 4-level mip) | ≤6 MB (loaded when `GL_MAX_TEXTURE_SIZE < 4096`; mutually exclusive with primary — only one is resident at runtime) |
-| Per-asset lightmaps (50 active buildings x 1024x1024 DXT5/BC3, no mip chain) | ≤50 MB (corrected: ceil(1024/4)^2 *16 = 1.0 MB/texture* 50; DXT5 used for lightmaps because the alpha channel can encode ambient occlusion or shadow density independently of RGB luminance; lightmap textures do not require mip chains — sampled at consistent scale close to camera) |
-| LOD2 shell lightmaps (50 active buildings × 256×256 DXT5/BC3, no mip chain) | ≤4 MB (ceil(256/4)^2 × 16 = 0.0625 MB/texture × 50; no mip chain per lightmap exemption rule) |
-| Road atlas (1024x1024 DXT5, 4-level mip) | ≤1.5 MB (~1.33 MB exact; see Road Tileable Texture VRAM budget note) |
-| UI sprite sheet (2048x2048 RGBA8, no mips) | ≤16 MB |
-| Vehicle diffuse atlas (2048×2048 DXT1, 4-level mip) | ≤6 MB |
-| Vehicle sprite atlas (256×256 DXT5, no mip) | ≤1 MB (DXT5 required — see 3D Model Standards; alpha channel needed for non-rectangular vehicle roof silhouettes; actual size ≈ 64 KB) |
-| Billboard imposter atlases (≤50 unique small building/prop types × 1024×128 DXT5, 4-level mip) | ≤9 MB (≤170 KB per atlas × 50 types) |
-| Miscellaneous (normal maps, roughness, props, per-type vehicle textures) | ≤48 MB |
-| **Total** | **≤180 MB** (well within 1 GB ceiling; updated for Phase 11e 4096 atlas — primary path 166.5 MB actual vs 160.5 MB with 2048 fallback) |
+| Category                                                                                       | Budget                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Terrain base textures (up to **4 layers**, 2048x2048 DXT1 with 4-level mip)                    | ≤11 MB (`ceil(2048/4)^2 × 8 × 1.33 ≈ 2.66 MB/layer × 4 layers`). **4 layers matches the shader texture unit table** — texture units 5–8 (`kTexUnitTerrainLayer0` through `kTexUnitTerrainLayer3`) provide exactly 4 terrain detail layer slots. Claiming 6 layers here is inconsistent with the 4-slot architecture. A second splat map (described in Terrain Texturing & Splat Maps) adds 4 more layers post-V1 only. V1 VRAM budget assumes 4 layers. |
+| Splat maps (up to 2 x 1024x1024 RGBA8 UNORM, GL_TEXTURE_MAX_LEVEL=0, no mip chain)             | ≤8 MB (2 × 1024 × 1024 × 4 bytes = 8 MB exact; no ×1.33 mip overhead)                                                                                                                                                                                                                                                                                                                                                                                   |
+| City building atlas — primary (4096×4096 DXT1, 5-level mip)                                    | ≤12 MB (`ceil(4096/4)^2 × 8 × 1.33 ≈ 10.6 MB`; loaded only when `GL_MAX_TEXTURE_SIZE ≥ 4096`)                                                                                                                                                                                                                                                                                                                                                           |
+| City building atlas — fallback (2048×2048 DXT1, 4-level mip)                                   | ≤6 MB (loaded when `GL_MAX_TEXTURE_SIZE < 4096`; mutually exclusive with primary — only one is resident at runtime)                                                                                                                                                                                                                                                                                                                                     |
+| Per-asset lightmaps (50 active buildings x 1024x1024 DXT5/BC3, no mip chain)                   | ≤50 MB (corrected: ceil(1024/4)^2 _16 = 1.0 MB/texture_ 50; DXT5 used for lightmaps because the alpha channel can encode ambient occlusion or shadow density independently of RGB luminance; lightmap textures do not require mip chains — sampled at consistent scale close to camera)                                                                                                                                                                 |
+| LOD2 shell lightmaps (50 active buildings × 256×256 DXT5/BC3, no mip chain)                    | ≤4 MB (ceil(256/4)^2 × 16 = 0.0625 MB/texture × 50; no mip chain per lightmap exemption rule)                                                                                                                                                                                                                                                                                                                                                           |
+| Road atlas (1024x1024 DXT5, 4-level mip)                                                       | ≤1.5 MB (~1.33 MB exact; see Road Tileable Texture VRAM budget note)                                                                                                                                                                                                                                                                                                                                                                                    |
+| UI sprite sheet (2048x2048 RGBA8, no mips)                                                     | ≤16 MB                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Vehicle diffuse atlas (2048×2048 DXT1, 4-level mip)                                            | ≤6 MB                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Vehicle sprite atlas (256×256 DXT5, no mip)                                                    | ≤1 MB (DXT5 required — see 3D Model Standards; alpha channel needed for non-rectangular vehicle roof silhouettes; actual size ≈ 64 KB)                                                                                                                                                                                                                                                                                                                  |
+| Billboard imposter atlases (≤50 unique small building/prop types × 1024×128 DXT5, 4-level mip) | ≤9 MB (≤170 KB per atlas × 50 types)                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Miscellaneous (normal maps, roughness, props, per-type vehicle textures)                       | ≤48 MB                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **Total**                                                                                      | **≤180 MB** (well within 1 GB ceiling; updated for Phase 11e 4096 atlas — primary path 166.5 MB actual vs 160.5 MB with 2048 fallback)                                                                                                                                                                                                                                                                                                                  |
 
 **Draw call ceiling**: ≤2,000 draw calls per frame (all LODs combined). Buildings sharing the same atlas texture and material can be batched or instanced into a single draw call. This drives the atlas-first design requirement.
 **Unique mesh variant cap**: ≤50 unique LOD0/LOD1/LOD2 building mesh variants simultaneously loaded. Building types exceeding 50 unique meshes must share atlas space and be explicitly approved.
 
 ### UI Sprite Sheet Art Style — Frosted Glass
 
-The sprite sheet uses a two-layer glass design.  A **milky/satinato glass
-background panel** covers the used area (rows 0-10) to provide a soft,
-diffused, semi-opaque warm white surface.  **Nearly transparent frosted-glass
+The sprite sheet uses a two-layer glass design. A **milky/satinato glass
+background panel** covers the used area (rows 0-11) to provide a soft,
+diffused, semi-opaque warm white surface. **Nearly transparent frosted-glass
 icon cells** float on top, their rounded edges revealing the milky glass
-beneath.  Icon symbols use vivid, bright colors with 3D gradient fills and
-drop shadows.  Each 64x64 cell is rendered at 4x internal resolution
-(256x256) and Lanczos-downsampled for clean anti-aliased edges.  The
+beneath. Icon symbols use vivid, bright colors with 3D gradient fills and
+drop shadows. Each 64x64 cell is rendered at 4x internal resolution
+(256x256) and Lanczos-downsampled for clean anti-aliased edges. The
 generator script is `tools/generate_hud_sprites.py`.
 
-**Milky glass background panel (behind rows 0-10):**
+**Milky glass background panel (behind rows 0-11):**
 
 - Rounded rectangle covering all occupied icon rows + 8 px padding, corner
   radius ~16 px
@@ -762,7 +767,7 @@ generator script is `tools/generate_hud_sprites.py`.
 - Radial vignette: center slightly brighter `rgba(248, 250, 252)`, edges
   slightly more grey `rgba(220, 223, 228)` -- gives depth
 - 1 px glass-edge rim: `rgba(255, 255, 255, 180)`
-- Rows 11-31 remain fully transparent (no background panel)
+- Rows 12-31 remain fully transparent (no background panel)
 
 **Cell background treatment (per icon cell):**
 
@@ -821,7 +826,7 @@ generator script is `tools/generate_hud_sprites.py`.
   crystal-clear blue drop, bright-red shield, gold star on sky-blue shield,
   etc.) with white/cream highlights
 
-### UI Sprite Sheet Art Style — Glass City (supersedes Frosted Glass for new authoring)
+### UI Sprite Sheet Art Style — Glacier Glass + Silver Chrome
 
 The "Frosted Glass" art style described above documents the Phase 10 signed-off sprite sheet
 (`hud_sprites_ui.png`) and is retained as a historical record. **All new icon authoring and
@@ -830,11 +835,11 @@ spec governs the canonical active/inactive icon states.
 
 #### Icon State Authoring Rules
 
-| State | Icon style | Opacity | Border / Glow |
-|---|---|---|---|
-| **Inactive** | **Outlined — 2 px stroke, no fill** | 65% (baked into sprite — stroke at `alpha = 165` against transparent cell; see note below) | None |
-| **Hover** | **Outlined — 2 px stroke** | 85% | 1 px `rgba(255,255,255,0.35)` |
-| **Active** | **Filled solid icon** | 100% | 2 px teal border `rgba(0, 201, 200, 0.75)` + 4 px outer glow, baked in |
+| State        | Icon style                          | Opacity                                                                                    | Border / Glow                                                          |
+| ------------ | ----------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| **Inactive** | **Outlined — 2 px stroke, no fill** | 65% (baked into sprite — stroke at `alpha = 165` against transparent cell; see note below) | None                                                                   |
+| **Hover**    | **Outlined — 2 px stroke**          | 85%                                                                                        | 1 px `rgba(255,255,255,0.35)`                                          |
+| **Active**   | **Filled solid icon**               | 100%                                                                                       | 2 px teal border `rgba(0, 201, 200, 0.75)` + 4 px outer glow, baked in |
 
 "Outlined" means the icon symbol is rendered as a 2 px anti-aliased stroke path with no
 interior fill — the panel background shows through the icon body. "Filled solid" means the
@@ -867,10 +872,10 @@ position that the corresponding `kSpriteXxxHover` constant resolves to via the
 
 #### Panel Colour Context
 
-Icons in `hud_sprites_ui.png` are designed against the Glass City panel background
-`rgba(13, 27, 42, 0.80–0.88)`. Authors must verify legibility of both inactive (stroke) and
-active (filled) variants against this dark navy background at both 1280×720 and 1920×1080
-virtual resolutions.
+Icons in `hud_sprites_ui.png` are designed against the Glacier Glass panel background
+`kGlacierPanelBg = SColor(66,4,12,28)` = `rgba(4,12,28,0.259)`. Authors must verify legibility
+of both inactive (stroke) and active (filled) variants against this translucent dark panel at
+both 1280×720 and 1920×1080 virtual resolutions.
 
 Icon symbol colours remain vivid and bright (per the Frosted Glass symbol treatment), now
 with the understanding that the panel is dark navy rather than milky glass. Near-white
@@ -880,19 +885,32 @@ colours for zone buttons, `#F04E37` red for demolish).
 
 #### Active Tint / Glow Colour by Button Role
 
-| Button role | Active glow / fill colour |
-|---|---|
-| Generic toolbar tool (Road, Utilities, Query) | Teal `#00C9C8` |
-| Zone Residential | Green `rgba(0, 255, 0, 0.75)` (matches zone overlay) |
-| Zone Commercial | Blue `rgba(0, 0, 255, 0.75)` |
-| Zone Industrial | Yellow `rgba(255, 255, 0, 0.75)` |
-| Demolish | Red `#F04E37` |
-| Minimap overlay toggle | Teal `#00C9C8` |
-| Notification bell (unread) | Teal `#00C9C8` with red badge overlay |
+| Button role                                   | Active glow / fill colour                            |
+| --------------------------------------------- | ---------------------------------------------------- |
+| Generic toolbar tool (Road, Utilities, Query) | Teal `#00C9C8`                                       |
+| Zone Residential                              | Green `rgba(0, 255, 0, 0.75)` (matches zone overlay) |
+| Zone Commercial                               | Blue `rgba(0, 0, 255, 0.75)`                         |
+| Zone Industrial                               | Yellow `rgba(255, 255, 0, 0.75)`                     |
+| Demolish                                      | Red `#F04E37`                                        |
+| Minimap overlay toggle                        | Teal `#00C9C8`                                       |
+| Notification bell (unread)                    | Teal `#00C9C8` with red badge overlay                |
 
 The colour values above govern the **baked glow** colour in the active sprite cell. The
 2 px border around all active cells is always teal `rgba(0, 201, 200, 0.75)` regardless of
 the glow colour — the border colour is uniform across all button roles.
+
+> **Phase 11q13 (Glacier Glass + Silver Chrome) supersedes the Glass City teal border rule**
+> for new icon authoring in Phase 11q13 and later. The active-state border values change as:
+>
+> | Button category | Border constant | ARGB value | rgba equivalent |
+> |---|---|---|---|
+> | Toolbar / speed buttons | `kActiveButtonBorderColor` | `0xC200C8FF` | `rgba(0,200,255,0.76)` |
+> | Minimap overlay toggles | `kMinimapToggleActiveBorder` | `0xA500C8F0` | `rgba(0,200,240,0.65)` |
+>
+> These runtime constants replace the Glass City uniform teal `rgba(0,201,200,0.75)` for
+> all Phase 11q13 cells. The runtime border is drawn by `UIManager::drawOverlays()` — it
+> is **not baked** into Row 11 sprite cells (see Phase 11q13 Icon Design Specifications
+> below). Existing Phase 10 cells (rows 0–10 cols 0–3) are unaffected.
 
 #### Panel Background Tiles
 
@@ -900,13 +918,13 @@ Five dedicated panel-background cells occupy unused rows (rows 16+ in the 32-row
 single-colour tiles are used by `IrrlichtUIBackend` to draw dark navy panel surfaces via
 `IGUIButton::setImage()` without any new `IUIBackend` API methods.
 
-| Cell purpose | `hud_sprite_ids.h` constant | Fill | Opacity | Alpha (SColor) | Corner radius |
-|---|---|---|---|---|---|
-| Grace period indicator background | `kSpritePanelGracePeriod` | `rgb(13,27,42)` | 78% | 199 | 8 px all edges |
-| Zone / Utilities sub-panel background | `kSpritePanelSubPanel` | `rgb(13,27,42)` | 80% | 204 | 8 px inner edges |
-| Left toolbar / minimap legend / normal toast | `kSpritePanelToolbar` | `rgb(13,27,42)` | 82% | 209 | 8 px inner edges |
-| Inspector / minimap map bg / tax rate / detail | `kSpritePanelDetail` | `rgb(13,27,42)` | 85% | 217 | 8 px inner edges |
-| Resource bar / modal / CRITICAL toast | `kSpritePanelResourceBar` | `rgb(13,27,42)` | 88% | 224 | 0 px (resource bar) / 8 px (modal, toast) |
+| Cell purpose                                   | `hud_sprite_ids.h` constant | Fill            | Opacity | Alpha (SColor) | Corner radius                             |
+| ---------------------------------------------- | --------------------------- | --------------- | ------- | -------------- | ----------------------------------------- |
+| Grace period indicator background              | `kSpritePanelGracePeriod`   | `rgb(13,27,42)` | 78%     | 199            | 8 px all edges                            |
+| Zone / Utilities sub-panel background          | `kSpritePanelSubPanel`      | `rgb(13,27,42)` | 80%     | 204            | 8 px inner edges                          |
+| Left toolbar / minimap legend / normal toast   | `kSpritePanelToolbar`       | `rgb(13,27,42)` | 82%     | 209            | 8 px inner edges                          |
+| Inspector / minimap map bg / tax rate / detail | `kSpritePanelDetail`        | `rgb(13,27,42)` | 85%     | 217            | 8 px inner edges                          |
+| Resource bar / modal / CRITICAL toast          | `kSpritePanelResourceBar`   | `rgb(13,27,42)` | 88%     | 224            | 0 px (resource bar) / 8 px (modal, toast) |
 
 Opacity values are authoritative per-panel specs — the range `0.78–0.88` in the Glass City
 canonical palette (`architecture/ui-ux/resolution-ui-scaling.md`) spans all five tiers:
@@ -926,11 +944,11 @@ canonical palette (`architecture/ui-ux/resolution-ui-scaling.md`) spans all five
 The following Frosted Glass active-state values from the section above are **superseded**
 by Glass City for new authoring:
 
-| Old Frosted Glass value | Superseded by |
-|---|---|
+| Old Frosted Glass value                                      | Superseded by                                     |
+| ------------------------------------------------------------ | ------------------------------------------------- |
 | Active tint overlay `rgba(0, 200, 220, 35)` (barely visible) | Teal wash `rgba(0, 201, 200, 0.22)` + 2 px border |
-| Cell background `rgba(255, 255, 255, 55)` active fill | `rgba(0, 201, 200, 0.22)` active wash |
-| Milky glass panel `rgba(235, 238, 242, 140)` | `rgba(13, 27, 42, 0.80–0.88)` deep navy |
+| Cell background `rgba(255, 255, 255, 55)` active fill        | `rgba(0, 201, 200, 0.22)` active wash             |
+| Milky glass panel `rgba(235, 238, 242, 140)`                 | `rgba(13, 27, 42, 0.80–0.88)` deep navy           |
 
 The `tools/generate_hud_sprites.py` generator script must be updated to produce Glass City
 cells when next regenerating the sprite sheet. Until the sheet is regenerated, the Phase 10
@@ -963,34 +981,113 @@ signed-off PNG remains in use.
 >   `kSpriteOverlayTfcHover`) are **Phase 12 deliverables** — Phase 11p uses text-based
 >   button labels ("Svc"/"Tfc") as placeholders. The pixel cells are already painted in
 >   the sprite sheet; only the constant definitions and setElementImage wiring are deferred.
-> - Row 10 painted: Notification bell, clock, unsaved dot, undo arrow
-> - Rows 11-31: fully transparent (unused; reserved for future icon expansion)
-> - 42 unique sprites total across rows 0-10 (no duplicated shapes between cells)
+> - Row 10 cols 0–3 painted: Notification bell (col 0), clock (col 1), unsaved dot (col 2),
+>   undo arrow (col 3). Cols 4–6 (IDs 324–326) are reserved for Phase 11q13.
+> - Rows 11–31: fully transparent (unused; reserved for future icon expansion)
+> - 42 unique sprites total across rows 0–10 cols 0–3 (no duplicated shapes between cells)
 > - No mip chain; no DXT compression on PNG source; atlas padding not required
 >   (mipmapping disabled removes the padding constraint per UV & Atlas Strategy section)
 >
 > Signed off by: `graphics-artist-2d-texture`
+
+### Phase 11q13 Sign-Off — UI Sprite Sheet (graphics-artist-2d-texture)
+
+> Phase 11q13 sign-off — TODO (pending phase implementation)
+>
+> `assets/textures/ui/hud_sprites_ui.png` additions for Phase 11q13:
+>
+> - Row 10 cols 4–6 (IDs 324–326):
+>   - col 4 (`kSpriteNotifCritical`): notification CRITICAL icon — red circle with "!" glyph
+>   - col 5 (`kSpriteNotifWarning`): WARNING icon — amber triangle (reserved, post-V1)
+>   - col 6 (`kSpriteNotifInfo`): INFO icon — teal circle with "i" glyph
+> - Row 11 cols 0–8 (IDs 352–360): minimap overlay toggle sprites
+>   (Map/Traffic/Service × Active/Inactive/Hover):
+>   - col 0 (`kSpriteMinimapMapActive`), col 1 (`kSpriteMinimapMapInactive`),
+>     col 2 (`kSpriteMinimapMapHover`)
+>   - col 3 (`kSpriteMinimapTrafficActive`), col 4 (`kSpriteMinimapTrafficInactive`),
+>     col 5 (`kSpriteMinimapTrafficHover`)
+>   - col 6 (`kSpriteMinimapServiceActive`), col 7 (`kSpriteMinimapServiceInactive`),
+>     col 8 (`kSpriteMinimapServiceHover`)
+> - 12 new sprites (3 notification + 9 minimap toggle); cumulative total becomes 54 sprites
+> - All other Phase 10 constraints (RGBA8, linear, 2048×2048, **Glacier Glass + Silver Chrome art style** (flat icons: solid-filled shapes, no glass chip effects, no 3D gradient fills, no drop shadows — see Phase 11q13 Icon Design Specifications below)) apply
+>
+> Signed off by: `graphics-artist-2d-texture` — **NOT YET SIGNED OFF**
 
 ### Sprite ID Encoding and Row-Conflict Pitfall
 
 Sprite IDs in `hud_sprite_ids.h` are encoded as `id = col + row * 32`. The pixel position of
 cell (col, row) in the 2048×2048 sheet is `(col * 64, row * 64)` — **every row is 64 px tall
 and every column is 64 px wide, with no exceptions.** `spriteRectForIndex()` in
-`IrrlichtUIBackend.cpp` resolves all IDs via this single formula.  No per-ID special cases
+`IrrlichtUIBackend.cpp` resolves all IDs via this single formula. No per-ID special cases
 exist or should ever be added — the generator (`tools/generate_hud_sprites.py`) places every
 icon at exactly `(col * 64, row * 64)`.
 
 **Row 1 (y = 64) is exclusively the toolbar-inactive row** (IDs 32–36, 5 icons, 64×64 px
 each at x = 0, 64, 128, 192, 256). No other sprites may be placed at y = 64 in the PNG.
 
-**Row 10 (y = 640)** holds the four notification/HUD-misc icons (IDs 320–323):
+**Row 10 (y = 640)** holds seven assigned notification/HUD-misc icon cells (IDs 320–326).
+The base four cells (IDs 320–323) introduced in Phase 10 are:
 
-| ID | Constant | Col | x | y |
-|----|----------|-----|---|---|
-| 320 | `kSpriteNotificationBell` | 0 | 0 | 640 |
-| 321 | `kSpriteClockIcon` | 1 | 64 | 640 |
-| 322 | `kSpriteUnsavedDot` | 2 | 128 | 640 |
-| 323 | `kSpriteUndoIcon` | 3 | 192 | 640 |
+| ID  | Constant                  | Col | x   | y   |
+| --- | ------------------------- | --- | --- | --- |
+| 320 | `kSpriteNotificationBell` | 0   | 0   | 640 |
+| 321 | `kSpriteClockIcon`        | 1   | 64  | 640 |
+| 322 | `kSpriteUnsavedDot`       | 2   | 128 | 640 |
+| 323 | `kSpriteUndoIcon`         | 3   | 192 | 640 |
+
+#### Cell Assignment Table — UI Sprite Sheet (32×32 grid, 64 px cells (64×64 px per cell))
+
+| Row   | Cols | ID range | Assignment                                                       | Added       |
+| ----- | ---- | -------- | ---------------------------------------------------------------- | ----------- |
+| 10    | 0–3  | 320–323  | HUD notification/misc icons (bell, clock, unsaved dot, undo arrow) — see Phase 10 | Phase 10    |
+| 10    | 4    | 324      | `kSpriteNotifCritical` — notification CRITICAL icon (red circle) | Phase 11q13 |
+| 10    | 5    | 325      | `kSpriteNotifWarning` — WARNING icon (reserved, post-V1)         | Phase 11q13 |
+| 10    | 6    | 326      | `kSpriteNotifInfo` — INFO icon (teal info glyph)                 | Phase 11q13 |
+| 10    | 7–31 | 327–351  | Reserved                                                         |             |
+| 11    | 0    | 352      | `kSpriteMinimapMapActive`                                        | Phase 11q13 |
+| 11    | 1    | 353      | `kSpriteMinimapMapInactive`                                      | Phase 11q13 |
+| 11    | 2    | 354      | `kSpriteMinimapMapHover`                                         | Phase 11q13 |
+| 11    | 3    | 355      | `kSpriteMinimapTrafficActive`                                    | Phase 11q13 |
+| 11    | 4    | 356      | `kSpriteMinimapTrafficInactive`                                  | Phase 11q13 |
+| 11    | 5    | 357      | `kSpriteMinimapTrafficHover`                                     | Phase 11q13 |
+| 11    | 6    | 358      | `kSpriteMinimapServiceActive`                                    | Phase 11q13 |
+| 11    | 7    | 359      | `kSpriteMinimapServiceInactive`                                  | Phase 11q13 |
+| 11    | 8    | 360      | `kSpriteMinimapServiceHover`                                     | Phase 11q13 |
+| 11    | 9–31 | 361–383  | Reserved                                                         |             |
+| 12–31 | 0–31 | 384–1023 | Reserved                                                         |             |
+
+All cells in rows 0–9 except row 10 cols 0–3 are reserved (assignment predates this table).
+
+#### Phase 11q13 Icon Design Specifications
+
+**Row 10, cols 4–6 — Notification severity icons (20×20 px artwork)**
+
+- Col 4 (`kSpriteNotifCritical`): Solid red circle (#CC2828) with white `!` glyph centred.
+  Rendered at 20×20 within the 64×64 px cell.
+- Col 5 (`kSpriteNotifWarning`): Reserved — amber triangle with `!` (post-V1; leave
+  transparent in V1 PNG source). This cell is allocated but the artwork is not a V1 deliverable.
+- Col 6 (`kSpriteNotifInfo`): Teal circle (#28789C) with white `i` glyph centred. 20×20
+  within cell.
+
+**Row 11, cols 0–8 — Minimap overlay toggle icons (64×64 px, full cell)**
+
+State convention: Active = fully opaque; Inactive = desaturated 40% opacity overlay on same
+glyph; Hover = active glyph with 1px white border.
+
+**Active-state border — do NOT bake into these cells**: The 2 px active border for minimap
+toggle buttons is rendered entirely at runtime by `UIManager::drawOverlays()` via
+`kMinimapToggleActiveBorder` (`0xA500C8F0`, `rgba(0,200,240,0.65)`). Do NOT bake a border
+into the Active or Hover sprite cells — an artist-baked border would visually stack with
+the runtime border, producing a double-border artifact. Row 11 Active cells carry solid
+glyph fill only (no border, no outer glow). Row 11 Hover cells carry active glyph + 1px
+white border only (no additional runtime border is drawn for the hover state).
+
+- Map active (col 0) / inactive (col 1) / hover (col 2): Map/compass icon in `#A8C8F0`
+  (active), `rgba(168,200,240,0.40)` (inactive)
+- Traffic active (col 3) / inactive (col 4) / hover (col 5): Road/traffic icon in `#FF7050`
+  (active), desaturated (inactive)
+- Service active (col 6) / inactive (col 7) / hover (col 8): Cross/service icon in `#50D890`
+  (active), desaturated (inactive)
 
 **Known past bugs — do not reintroduce:**
 
@@ -998,12 +1095,12 @@ each at x = 0, 64, 128, 192, 256). No other sprites may be placed at y = 64 in t
    `icon_undo` at `(0, 64)`, placing both inside the toolbar-inactive row (y = 64).
    The resulting special cases in `spriteRectForIndex()` caused the notification bell button
    to render the road-inactive icon shifted 8 px left (bell rect `x:56–104` overlapped road
-   inactive `x:64–128`).  Fixed by removing the special cases; the default grid resolves
+   inactive `x:64–128`). Fixed by removing the special cases; the default grid resolves
    all four correctly to row 10 (y = 640).
 
 2. **Utilities sub-panel icons (IDs 128–163, rows 4–5)** — an old JSON listed water, fire,
-   and police with 72 px column spacing (`x = 72, 144, 216`) instead of 64 px.  A special
+   and police with 72 px column spacing (`x = 72, 144, 216`) instead of 64 px. A special
    case in `spriteRectForIndex()` used `xOffsets = {0, 72, 144, 216}`, reading Fire 16 px
    and Police 24 px past their real start positions, clipping their left edges and making
-   them appear shifted left on the button.  Fixed by removing the special case; the
+   them appear shifted left on the button. Fixed by removing the special case; the
    generator always places all four icons on the standard 64 px grid (x = 0, 64, 128, 192).
